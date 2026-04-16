@@ -1,0 +1,43 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "seo-os"
+version = "0.1.0"
+description = "SEO operating system: Temporal + LangGraph (wave 1 schema)"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "sqlalchemy[asyncio]>=2.0.30",
+  "alembic>=1.13.0",
+  "psycopg[binary]>=3.1.0",
+  "temporalio>=1.7.0",
+  "langgraph>=0.2.0",
+  "langchain-core>=0.3.0",
+  "httpx>=0.27.0",
+  "python-dotenv>=1.0.0",
+  "fastapi>=0.115.0",
+  "uvicorn[standard]>=0.32.0",
+  "openai>=1.59.0",
+  "python-telegram-bot>=21.0",
+]
+
+[project.optional-dependencies]
+dev = ["ruff>=0.4.0"]
+
+[project.scripts]
+seo-os-worker = "seo_os.temporal.worker:main"
+seo-os-demo = "seo_os.cli.demo:main"
+seo-os-trello-auth = "seo_os.cli.trello_auth:main"
+seo-os-trello-lists = "seo_os.cli.trello_lists:main"
+seo-os-api = "seo_os.cli.api_server:main"
+seo-os-telegram-bot = "seo_os.cli.telegram_bot:main"
+seo-os-db-audit = "seo_os.cli.db_audit:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/seo_os"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
