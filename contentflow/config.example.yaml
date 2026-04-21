@@ -1,0 +1,32 @@
+llm:
+  apiKey: "sk-ant-..."
+  model: "claude-haiku-4-5-20251001" # haiku - дешевле для разработки, claude-sonnet-4-6 для прода
+
+database:
+  url: "postgres://user:password@localhost:5432/contentflow"
+
+sheets:
+  credentialsFile: "./credentials.json"
+  spreadsheetId: "your-sheet-id-from-url"
+  sheet: "Sheet1"
+  keywordColumn: "A"
+
+wordpress:
+  url: "https://your-site.com"
+  user: "your-username"
+  appPassword: "xxxx xxxx xxxx xxxx"
+
+telegram:
+  botToken: "your-bot-token-from-botfather"
+  allowedUsers:
+    - "123456789"
+
+worker:
+  pollInterval: 60s
+
+article:
+  language: "ru"   # язык статей: ru, en, uk
+  minWords: 1500   # минимальная длина статьи
+  maxWords: 3000   # максимальная длина статьи
+  siteTopic: ""    # тематика сайта, например "финансы и инвестиции" — добавляется в промпт агентам
+  extraRules: ""   # дополнительные правила, например "не упоминать конкурентов"
