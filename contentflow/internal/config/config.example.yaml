@@ -1,0 +1,21 @@
+# Copy to config.yaml and fill in. Never commit config.yaml.
+
+llm:
+  apiKey: "sk-ant-..."
+
+database:
+  url: "postgres://user:password@localhost:5432/contentflow"
+
+sheets:
+  credentialsFile: "./credentials.json"
+  spreadsheetId: "your-sheet-id-from-url"
+
+wordpress:
+  url: "https://your-site.com"
+  user: "your-username"
+  appPassword: "xxxx xxxx xxxx xxxx"
+
+telegram:
+  botToken: "your-bot-token-from-botfather"
+  allowedUsers:
+    - "123456789"

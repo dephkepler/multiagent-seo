@@ -1,3 +1,32 @@
-.env
+# secrets
+internal/config/config.yaml
 credentials.json
+.env
+
+# local notes / workspaces
+seo.txt
+contenthttp/
+
+# go build output
 contentflow
+*.exe
+*.test
+*.out
+bin/
+tmp/
+
+# go tooling
+coverage.out
+coverage.html
+*.prof
+*.pprof
+
+# macOS
+.DS_Store
+
+# IDE (if not already ignored globally)
+.idea/
+.vscode/
+
+# claude code local state
+.claude/

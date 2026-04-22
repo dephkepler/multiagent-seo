@@ -1,7 +1,4 @@
-# Локальный PostgreSQL для SEO OS (Alembic, worker, demo).
-# Запуск: docker compose up -d postgres
-# Остановка: docker compose down  (данные в volume сохраняются)
-# Сброс данных: docker compose down -v
+
 
 services:
   postgres:

@@ -8,7 +8,6 @@ import (
 	"syscall"
 
 	"contentflow/internal/application"
-	"contentflow/internal/config"
 )
 
 func main() {
@@ -16,22 +15,16 @@ func main() {
 		Level: slog.LevelInfo,
 	}))
 
-	cfg, err := config.NewConfig()
-	if err != nil {
-		log.Error("failed to load config", "err", err)
-		os.Exit(1)
-	}
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 
-	app, err := application.New(cfg, log)
-	if err != nil {
-		log.Error("failed to init application", "err", err)
-		os.Exit(1)
-	}
-
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
+	app := application.New(log)
 
 	if err := app.Start(ctx); err != nil {
+		log.Error("failed to start", "err", err)
+		os.Exit(1)
+	}
+
+	if err := app.Wait(ctx, cancel); err != nil {
 		log.Error("application error", "err", err)
 		os.Exit(1)
 	}

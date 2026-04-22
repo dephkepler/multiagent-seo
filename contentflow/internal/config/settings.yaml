@@ -1,0 +1,16 @@
+llm:
+  model: "llama-3.3-70b-versatile" # groq free tier; prod: claude-sonnet-4-6
+
+sheets:
+  sheet: "Sheet1"
+  keywordColumn: "A"
+
+worker:
+  pollInterval: 60s
+
+article:
+  language: "ru"   # ru, en, uk
+  minWords: 1500
+  maxWords: 3000
+  siteTopic: ""    # site niche, e.g. "personal finance"
+  extraRules: ""   # extra rules for agents, e.g. "never mention competitors"
