@@ -2,17 +2,23 @@ package repo
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 const (
 	StatusGenerating = "generating"
 	StatusDraft      = "draft"
+	StatusPublished  = "published"
 	StatusFailed     = "failed"
 )
+
+// ErrNotFound is returned by GetArticle when no row matches the given id.
+var ErrNotFound = errors.New("article not found")
 
 type Article struct {
 	ID        int64
@@ -85,6 +91,15 @@ func (r *Repo) MarkFailed(ctx context.Context, id int64) error {
 	return err
 }
 
+// MarkPublished flips the article to the published state and records the
+// public WordPress URL.
+func (r *Repo) MarkPublished(ctx context.Context, id int64, postURL string) error {
+	_, err := r.db.Exec(ctx, `
+		UPDATE articles SET status=$1, wp_post_url=$2, updated_at=NOW() WHERE id=$3
+	`, StatusPublished, postURL, id)
+	return err
+}
+
 func (r *Repo) GetArticle(ctx context.Context, id int64) (*Article, error) {
 	var a Article
 	row := r.db.QueryRow(ctx, `
@@ -96,6 +111,9 @@ func (r *Repo) GetArticle(ctx context.Context, id int64) (*Article, error) {
 		FROM articles WHERE id=$1
 	`, id)
 	if err := scanArticle(row, &a); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
 		return nil, err
 	}
 	return &a, nil

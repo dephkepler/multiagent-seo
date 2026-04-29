@@ -7,9 +7,14 @@ servers:
   - url: http://localhost:8080
     description: Local dev
 
+tags:
+  - name: Articles
+    description: Generate, list, and publish SEO articles.
+
 paths:
   /generate:
     post:
+      tags: [Articles]
       summary: Generate an article (synchronous)
       description: |
         Runs the full pipeline (brief → writer → editor → WordPress draft) and
@@ -43,6 +48,11 @@ paths:
                   extra_rules: "never mention specific brokers"
                   provider: "groq"
                   model: "llama-3.3-70b-versatile"
+              auto_publish:
+                summary: Generate and publish to the site in one call
+                value:
+                  keyword: "high flyer casino"
+                  auto_publish: true
       responses:
         '200':
           description: Article generated and pushed as WP draft
@@ -55,13 +65,25 @@ paths:
             Validation error — one of:
             - `keyword is required` (missing/empty)
             - `keyword is too long` (>200 chars)
-            - `min_words and max_words must be non-negative`
+            - `min_words, max_words and max_tokens must be non-negative`
             - `min_words must be <= max_words`
           content:
             text/plain:
               schema: { type: string }
+        '404':
+          description: |
+            No keyword cluster found in Sheets for this topic. Generation is
+            aborted before any LLM call so tokens aren't wasted on typos.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: "no_cluster"
+                message: "no keyword cluster found for this topic in Sheets — add rows first"
+                keyword: "несуществующая тема"
         '500':
-          description: Pipeline failed (LLM / WP / DB error). Client sees generic "internal error"; details go to server logs.
+          description: Pipeline failed (LLM / WP / DB / Sheets error). Client sees generic "internal error"; details go to server logs.
           content:
             text/plain:
               schema: { type: string }
@@ -69,6 +91,7 @@ paths:
 
   /articles:
     get:
+      tags: [Articles]
       summary: List all articles
       description: Returns articles in reverse chronological order.
       operationId: listArticles
@@ -83,6 +106,61 @@ paths:
                   $ref: '#/components/schemas/Article'
         '500':
           description: Internal error
+
+  /articles/{id}/publish:
+    post:
+      tags: [Articles]
+      summary: Publish a draft article to WordPress
+      description: |
+        Flips a `draft` article to `published`: calls the WordPress REST API to
+        change its status, stores the resulting public URL, and returns the
+        updated row.
+      operationId: publishArticle
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Internal article id from `POST /generate` or `GET /articles`.
+          schema: { type: integer, format: int64 }
+          example: 10
+      responses:
+        '200':
+          description: Published
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublishResult'
+        '400':
+          description: |
+            Either `id` is not a positive integer, or the article has no
+            WordPress draft yet (generation never reached CreateDraft).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: "no_draft"
+                message: "article has no WordPress draft yet (generation likely failed)"
+        '404':
+          description: No article with this id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: "not_found"
+                message: "article with this id does not exist"
+        '409':
+          description: Already published.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: "already_published"
+                message: "article is already published"
+        '500':
+          description: WordPress or DB failure. See server logs.
 
 components:
   schemas:
@@ -143,34 +221,99 @@ components:
             Override model name for the selected provider. `""` / omitted →
             config default.
           example: "claude-haiku-4-5-20251001"
+        auto_publish:
+          type: boolean
+          default: false
+          description: |
+            When `true`, publishes the WP draft to the site immediately after
+            generation. The response then has `status: "published"` and a
+            non-empty `wp_post_url`. If publishing fails, the article stays
+            as a draft and the failure is reported in `auto_publish_error`.
+          example: false
+
+    ErrorResponse:
+      type: object
+      required: [error, message]
+      properties:
+        error:
+          type: string
+          description: "Stable machine-readable code (e.g. `no_cluster`)."
+          example: "no_cluster"
+        message:
+          type: string
+          description: "Human-readable detail."
+        keyword:
+          type: string
+          description: "Echoed back when the error relates to a specific topic."
 
     GenerateResult:
       type: object
       properties:
         id:          { type: integer, format: int64, example: 1 }
-        keyword:     { type: string, example: "как выбрать ноутбук" }
+        keyword:     { type: string, example: "high flyer casino" }
         status:
           type: string
-          enum: [draft]
+          enum: [draft, published]
+          description: |
+            `draft` after a normal run. `published` only when the request set
+            `auto_publish: true` and publishing succeeded.
           example: draft
         wp_post_id:  { type: integer, format: int64, example: 42 }
         wp_edit_url: { type: string, example: "https://site.com/wp-admin/post.php?post=42&action=edit" }
-        wp_post_url: { type: string, example: "" }
+        wp_post_url:
+          type: string
+          description: |
+            Public article URL. Empty unless the article is `published`
+            (either via `auto_publish` or a later `POST /articles/{id}/publish`).
+          example: ""
         content:     { type: string, description: "Final edited article body (markdown/HTML)." }
         created_at:  { type: string, format: date-time }
         updated_at:  { type: string, format: date-time }
+        auto_publish_error:
+          type: string
+          description: |
+            Set only when `auto_publish: true` was requested and publishing
+            failed after the draft was created. The article remains a draft;
+            retry with `POST /articles/{id}/publish`.
+          example: ""
+        target_keywords:
+          type: array
+          items: { type: string }
+          description: |
+            Debug: keywords pulled from Sheets for this topic. Empty array means
+            the topic had no cluster (or the Sheets lookup failed; check logs).
+          example: ["high flyer casino", "high flyer casino ontario"]
+        suggested_title:
+          type: string
+          description: |
+            Debug: suggested article title from the Sheets `title` column (if any).
+            The LLM is told to adjust only if clearly better.
+          example: "High Flyer Casino Review: Bonuses, Login & Ontario Guide"
 
     Article:
       type: object
       properties:
         ID:        { type: integer, format: int64, example: 1 }
-        Keyword:   { type: string, example: "как выбрать ноутбук" }
+        Keyword:   { type: string, example: "high flyer casino" }
         Status:
           type: string
-          enum: [generating, draft, failed]
+          enum: [generating, draft, published, failed]
           example: draft
         WPPostID:  { type: integer, format: int64, example: 42 }
         WPEditURL: { type: string, example: "https://site.com/wp-admin/post.php?post=42&action=edit" }
         WPPostURL: { type: string, example: "" }
         CreatedAt: { type: string, format: date-time }
         UpdatedAt: { type: string, format: date-time }
+
+    PublishResult:
+      type: object
+      properties:
+        id:          { type: integer, format: int64, example: 10 }
+        status:
+          type: string
+          enum: [published]
+          example: published
+        wp_post_id:  { type: integer, format: int64, example: 6018 }
+        wp_edit_url: { type: string, example: "https://site.com/wp-admin/post.php?post=6018&action=edit" }
+        wp_post_url: { type: string, example: "https://site.com/online-casino-australia/" }
+        updated_at:  { type: string, format: date-time }

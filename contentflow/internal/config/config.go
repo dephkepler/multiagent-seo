@@ -62,8 +62,11 @@ type DatabaseConfig struct {
 type SheetsConfig struct {
 	CredentialsFile string `mapstructure:"credentialsFile"`
 	SpreadsheetID   string `mapstructure:"spreadsheetId"`
-	Sheet           string `mapstructure:"sheet"`
-	KeywordColumn   string `mapstructure:"keywordColumn"`
+	Sheet           string `mapstructure:"sheet"`         // worksheet name, e.g. "Keywords"
+	TopicColumn     string `mapstructure:"topicColumn"`   // column letter holding the topic, e.g. "A"
+	KeywordColumn   string `mapstructure:"keywordColumn"` // column letter holding the keyword, e.g. "B"
+	TitleColumn     string `mapstructure:"titleColumn"`   // optional column with a suggested article title, e.g. "C"; empty = disabled
+	HeaderRow       bool   `mapstructure:"headerRow"`     // true if row 1 is a header and should be skipped
 }
 
 type WordPressConfig struct {
@@ -94,8 +97,11 @@ func NewConfig() (*Config, error) {
 
 	v.SetDefault("llm.provider", "groq")
 	v.SetDefault("llm.model", "claude-haiku-4-5-20251001")
-	v.SetDefault("sheets.sheet", "Sheet1")
-	v.SetDefault("sheets.keywordColumn", "A")
+	v.SetDefault("sheets.sheet", "Keywords")
+	v.SetDefault("sheets.topicColumn", "A")
+	v.SetDefault("sheets.keywordColumn", "B")
+	v.SetDefault("sheets.titleColumn", "C")
+	v.SetDefault("sheets.headerRow", true)
 	v.SetDefault("worker.pollInterval", 60*time.Second)
 	v.SetDefault("article.language", "ru")
 	v.SetDefault("article.minWords", 1500)
@@ -119,6 +125,11 @@ func NewConfig() (*Config, error) {
 		"telegram.botToken":      "CF_TELEGRAM_BOT_TOKEN",
 		"sheets.credentialsFile": "CF_SHEETS_CREDENTIALS_FILE",
 		"sheets.spreadsheetId":   "CF_SHEETS_SPREADSHEET_ID",
+		"sheets.sheet":           "CF_SHEETS_SHEET",
+		"sheets.topicColumn":     "CF_SHEETS_TOPIC_COLUMN",
+		"sheets.keywordColumn":   "CF_SHEETS_KEYWORD_COLUMN",
+		"sheets.titleColumn":     "CF_SHEETS_TITLE_COLUMN",
+		"sheets.headerRow":       "CF_SHEETS_HEADER_ROW",
 	}
 	for key, env := range bindings {
 		_ = v.BindEnv(key, env)

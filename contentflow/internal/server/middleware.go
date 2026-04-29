@@ -6,9 +6,6 @@ import (
 	"runtime/debug"
 )
 
-// recoverMiddleware catches panics from downstream handlers, logs them
-// with a stack trace, and returns a 500 to the client instead of
-// letting the server connection be torn down.
 func recoverMiddleware(next http.Handler, log *slog.Logger) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {

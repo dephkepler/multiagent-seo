@@ -84,10 +84,11 @@ type resolvedJob struct {
 	language   string
 	siteTopic  string
 	extraRules string
+	cluster    prompt.Cluster
 	client     llm.Client
 }
 
-func (a *Application) resolveJob(req server.GenerateRequest) (resolvedJob, error) {
+func (a *Application) resolveJob(ctx context.Context, req server.GenerateRequest) (resolvedJob, error) {
 	art := a.cfg.Article
 
 	job := resolvedJob{
@@ -98,6 +99,24 @@ func (a *Application) resolveJob(req server.GenerateRequest) (resolvedJob, error
 		siteTopic:  pickStr(req.SiteTopic, art.SiteTopic),
 		extraRules: pickStr(req.ExtraRules, art.ExtraRules),
 	}
+
+	// Look up target-keyword cluster from Sheets using the article topic.
+	// Require a non-empty cluster: generating without targets wastes tokens
+	// on what is almost certainly a typo or a topic missing from the sheet.
+	res, err := a.sh.Lookup(ctx, req.Keyword)
+	if err != nil {
+		return resolvedJob{}, fmt.Errorf("sheets lookup: %w", err)
+	}
+	if len(res.Keywords) == 0 {
+		a.log.Warn("no keyword cluster for topic", "keyword", req.Keyword)
+		return resolvedJob{}, server.ErrNoCluster
+	}
+	a.log.Info("keyword cluster loaded",
+		"keyword", req.Keyword,
+		"count", len(res.Keywords),
+		"has_title", res.Title != "",
+	)
+	job.cluster = prompt.Cluster{Keywords: res.Keywords, Title: res.Title}
 
 	// Derive a max-tokens cap: explicit wins, otherwise a buffered guess
 	// from max_words (≈3 tokens per word + 200 overhead). 0 means "no cap" for Groq
@@ -129,7 +148,7 @@ func (a *Application) resolveJob(req server.GenerateRequest) (resolvedJob, error
 }
 
 func (a *Application) processKeyword(ctx context.Context, req server.GenerateRequest) (*server.GenerateResult, error) {
-	job, err := a.resolveJob(req)
+	job, err := a.resolveJob(ctx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -149,21 +168,35 @@ func (a *Application) processKeyword(ctx context.Context, req server.GenerateReq
 		return nil, err
 	}
 
+	// Optional auto-publish: flip the draft to published before returning.
+	// We tolerate publish failures — the draft already exists and the
+	// caller can retry via POST /articles/{id}/publish.
+	var autoPublishErr string
+	if req.AutoPublish {
+		if _, pubErr := a.publishArticle(ctx, articleID); pubErr != nil {
+			a.log.Error("auto-publish failed", "article_id", articleID, "err", pubErr)
+			autoPublishErr = pubErr.Error()
+		}
+	}
+
 	article, err := a.repo.GetArticle(ctx, articleID)
 	if err != nil {
 		return nil, fmt.Errorf("fetch article: %w", err)
 	}
 
 	return &server.GenerateResult{
-		ID:        article.ID,
-		Keyword:   article.Keyword,
-		Status:    article.Status,
-		WPPostID:  article.WPPostID,
-		WPEditURL: article.WPEditURL,
-		WPPostURL: article.WPPostURL,
-		Content:   content,
-		CreatedAt: article.CreatedAt,
-		UpdatedAt: article.UpdatedAt,
+		ID:               article.ID,
+		Keyword:          article.Keyword,
+		Status:           article.Status,
+		WPPostID:         article.WPPostID,
+		WPEditURL:        article.WPEditURL,
+		WPPostURL:        article.WPPostURL,
+		Content:          content,
+		CreatedAt:        article.CreatedAt,
+		UpdatedAt:        article.UpdatedAt,
+		TargetKeywords:   job.cluster.Keywords,
+		SuggestedTitle:   job.cluster.Title,
+		AutoPublishError: autoPublishErr,
 	}, nil
 }
 
@@ -175,13 +208,13 @@ func (a *Application) generate(ctx context.Context, articleID int64, job resolve
 	}
 
 	a.log.Info("step 2/3: writing", "keyword", job.keyword)
-	article, err := job.client.Complete(ctx, prompt.Writer(brief, job.keyword, job.language, job.minWords, job.maxWords), job.maxTokens)
+	article, err := job.client.Complete(ctx, prompt.Writer(brief, job.keyword, job.language, job.minWords, job.maxWords, job.cluster), job.maxTokens)
 	if err != nil {
 		return "", fmt.Errorf("writer: %w", err)
 	}
 
 	a.log.Info("step 3/3: editing", "keyword", job.keyword)
-	edited, err := job.client.Complete(ctx, prompt.Editor(article, job.keyword, job.minWords, job.maxWords), job.maxTokens)
+	edited, err := job.client.Complete(ctx, prompt.Editor(article, job.keyword, job.minWords, job.maxWords, job.cluster), job.maxTokens)
 	if err != nil {
 		return "", fmt.Errorf("editor: %w", err)
 	}
@@ -200,6 +233,57 @@ func (a *Application) generate(ctx context.Context, articleID int64, job resolve
 
 	a.log.Info("done", "keyword", job.keyword, "post_id", postID, "edit_url", editURL)
 	return edited, nil
+}
+
+// publishArticle flips a draft article to published state by calling the
+// WordPress REST API and persisting the returned public URL.
+func (a *Application) publishArticle(ctx context.Context, id int64) (*server.PublishResult, error) {
+	article, err := a.repo.GetArticle(ctx, id)
+	if err != nil {
+		if errors.Is(err, repo.ErrNotFound) {
+			return nil, server.ErrArticleNotFound
+		}
+		return nil, fmt.Errorf("fetch article: %w", err)
+	}
+
+	switch article.Status {
+	case repo.StatusPublished:
+		return nil, server.ErrAlreadyPublished
+	case repo.StatusGenerating, repo.StatusFailed:
+		return nil, server.ErrNoDraftToPublish
+	}
+	if article.WPPostID == 0 {
+		return nil, server.ErrNoDraftToPublish
+	}
+
+	postURL, err := a.wp.Publish(ctx, article.WPPostID)
+	if err != nil {
+		return nil, fmt.Errorf("wordpress publish: %w", err)
+	}
+
+	if err := a.repo.MarkPublished(ctx, id, postURL); err != nil {
+		return nil, fmt.Errorf("mark published: %w", err)
+	}
+
+	updated, err := a.repo.GetArticle(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("fetch article after publish: %w", err)
+	}
+
+	a.log.Info("article published",
+		"article_id", id,
+		"wp_post_id", updated.WPPostID,
+		"wp_post_url", updated.WPPostURL,
+	)
+
+	return &server.PublishResult{
+		ID:        updated.ID,
+		Status:    updated.Status,
+		WPPostID:  updated.WPPostID,
+		WPEditURL: updated.WPEditURL,
+		WPPostURL: updated.WPPostURL,
+		UpdatedAt: updated.UpdatedAt,
+	}, nil
 }
 
 func pickStr(req, def string) string {
@@ -234,8 +318,18 @@ func (a *Application) initRepo(ctx context.Context) error {
 	return nil
 }
 
-func (a *Application) initSheets(_ context.Context) error {
-	a.sh = sheets.NewMock()
+func (a *Application) initSheets(ctx context.Context) error {
+	if a.cfg.Sheets.CredentialsFile == "" || a.cfg.Sheets.SpreadsheetID == "" {
+		a.log.Warn("sheets not configured — using in-memory mock (no cluster lookup)")
+		a.sh = sheets.NewMock()
+		return nil
+	}
+	c, err := sheets.New(ctx, a.cfg.Sheets, a.log)
+	if err != nil {
+		return err
+	}
+	a.sh = c
+	a.log.Info("sheets configured", "spreadsheet_id", a.cfg.Sheets.SpreadsheetID, "sheet", a.cfg.Sheets.Sheet)
 	return nil
 }
 
@@ -254,7 +348,7 @@ func (a *Application) initWordPress() error {
 }
 
 func (a *Application) initServer() error {
-	a.srv = server.New(a.repo, a.processKeyword, a.log, server.Config{
+	a.srv = server.New(a.repo, a.processKeyword, a.publishArticle, a.log, server.Config{
 		Addr:         a.cfg.Server.Addr,
 		ReadTimeout:  a.cfg.Server.ReadTimeout,
 		WriteTimeout: a.cfg.Server.WriteTimeout,

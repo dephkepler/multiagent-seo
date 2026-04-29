@@ -9,11 +9,6 @@ import (
 	"contentflow/internal/llm/groq"
 )
 
-// New builds an LLM Client for the given provider name.
-// Supported providers: "groq", "claude". Case-insensitive.
-// Unknown provider returns an error.
-//
-// If log is nil, the default slog logger is used.
 func New(provider, apiKey, model string, log *slog.Logger) (Client, error) {
 	if log == nil {
 		log = slog.Default()
