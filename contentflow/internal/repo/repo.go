@@ -2,6 +2,7 @@ package repo
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -21,14 +22,16 @@ const (
 var ErrNotFound = errors.New("article not found")
 
 type Article struct {
-	ID        int64
-	Keyword   string
-	Status    string
-	WPPostID  int64
-	WPEditURL string
-	WPPostURL string
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ID             int64
+	Keyword        string
+	Status         string
+	WPPostID       int64
+	WPEditURL      string
+	WPPostURL      string
+	CompetitorData json.RawMessage
+	CheckResult    json.RawMessage
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
 }
 
 type Repo struct {
@@ -55,7 +58,7 @@ type scannable interface {
 	Scan(dest ...any) error
 }
 
-// scanArticle reads one article row from a pgx.Row or pgx.Rows.
+// scanArticle reads a list row (without heavy JSONB columns).
 func scanArticle(s scannable, a *Article) error {
 	return s.Scan(
 		&a.ID,
@@ -64,6 +67,22 @@ func scanArticle(s scannable, a *Article) error {
 		&a.WPPostID,
 		&a.WPEditURL,
 		&a.WPPostURL,
+		&a.CreatedAt,
+		&a.UpdatedAt,
+	)
+}
+
+// scanArticleFull reads a single article row including JSONB columns.
+func scanArticleFull(s scannable, a *Article) error {
+	return s.Scan(
+		&a.ID,
+		&a.Keyword,
+		&a.Status,
+		&a.WPPostID,
+		&a.WPEditURL,
+		&a.WPPostURL,
+		&a.CompetitorData,
+		&a.CheckResult,
 		&a.CreatedAt,
 		&a.UpdatedAt,
 	)
@@ -107,16 +126,40 @@ func (r *Repo) GetArticle(ctx context.Context, id int64) (*Article, error) {
 		       COALESCE(wp_post_id, 0),
 		       COALESCE(wp_edit_url, ''),
 		       COALESCE(wp_post_url, ''),
+		       competitor_data,
+		       check_result,
 		       created_at, updated_at
 		FROM articles WHERE id=$1
 	`, id)
-	if err := scanArticle(row, &a); err != nil {
+	if err := scanArticleFull(row, &a); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
 		}
 		return nil, err
 	}
 	return &a, nil
+}
+
+func (r *Repo) SaveCompetitorData(ctx context.Context, id int64, data any) error {
+	b, err := json.Marshal(data)
+	if err != nil {
+		return fmt.Errorf("marshal competitor data: %w", err)
+	}
+	_, err = r.db.Exec(ctx, `
+		UPDATE articles SET competitor_data=$1, updated_at=NOW() WHERE id=$2
+	`, b, id)
+	return err
+}
+
+func (r *Repo) SaveCheckResult(ctx context.Context, id int64, result any) error {
+	b, err := json.Marshal(result)
+	if err != nil {
+		return fmt.Errorf("marshal check result: %w", err)
+	}
+	_, err = r.db.Exec(ctx, `
+		UPDATE articles SET check_result=$1, updated_at=NOW() WHERE id=$2
+	`, b, id)
+	return err
 }
 
 func (r *Repo) ListArticles(ctx context.Context) ([]Article, error) {

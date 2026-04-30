@@ -9,7 +9,9 @@ import (
 	"sync"
 	"time"
 
+	"contentflow/internal/checker"
 	"contentflow/internal/config"
+	"contentflow/internal/dataforseo"
 	"contentflow/internal/llm"
 	"contentflow/internal/prompt"
 	"contentflow/internal/repo"
@@ -19,14 +21,16 @@ import (
 )
 
 type Application struct {
-	cfg  *config.Config
-	log  *slog.Logger
-	repo *repo.Repo
-	llm  llm.Client
-	wp   wordpress.Client
-	sh   sheets.Client
-	srv  *server.Server
-	wg   sync.WaitGroup
+	cfg     *config.Config
+	log     *slog.Logger
+	repo    *repo.Repo
+	llm     llm.Client
+	wp      wordpress.Client
+	sh      sheets.Client
+	serp    dataforseo.Client
+	checker checker.Client
+	srv     *server.Server
+	wg      sync.WaitGroup
 }
 
 func New(log *slog.Logger) *Application {
@@ -49,6 +53,8 @@ func (a *Application) Start(ctx context.Context) error {
 	if err := a.initWordPress(); err != nil {
 		return fmt.Errorf("init wordpress: %w", err)
 	}
+	a.initDataForSEO()
+	a.initChecker()
 	if err := a.initServer(); err != nil {
 		return fmt.Errorf("init server: %w", err)
 	}
@@ -86,6 +92,13 @@ type resolvedJob struct {
 	extraRules string
 	cluster    prompt.Cluster
 	client     llm.Client
+}
+
+// generateOutput carries the article content plus pipeline metadata back to the caller.
+type generateOutput struct {
+	content        string
+	competitorData any
+	checkResult    any
 }
 
 func (a *Application) resolveJob(ctx context.Context, req server.GenerateRequest) (resolvedJob, error) {
@@ -159,7 +172,7 @@ func (a *Application) processKeyword(ctx context.Context, req server.GenerateReq
 		return nil, fmt.Errorf("create article: %w", err)
 	}
 
-	content, err := a.generate(ctx, articleID, job)
+	out, err := a.generate(ctx, articleID, job)
 	if err != nil {
 		a.log.Error("generation failed", "keyword", job.keyword, "err", err)
 		if markErr := a.repo.MarkFailed(ctx, articleID); markErr != nil {
@@ -191,48 +204,122 @@ func (a *Application) processKeyword(ctx context.Context, req server.GenerateReq
 		WPPostID:         article.WPPostID,
 		WPEditURL:        article.WPEditURL,
 		WPPostURL:        article.WPPostURL,
-		Content:          content,
+		Content:          out.content,
 		CreatedAt:        article.CreatedAt,
 		UpdatedAt:        article.UpdatedAt,
 		TargetKeywords:   job.cluster.Keywords,
 		SuggestedTitle:   job.cluster.Title,
+		CompetitorData:   out.competitorData,
+		CheckResult:      out.checkResult,
 		AutoPublishError: autoPublishErr,
 	}, nil
 }
 
-func (a *Application) generate(ctx context.Context, articleID int64, job resolvedJob) (string, error) {
-	a.log.Info("step 1/3: brief", "keyword", job.keyword)
-	brief, err := job.client.Complete(ctx, prompt.Brief(job.keyword, job.language, job.siteTopic, job.extraRules), job.maxTokens)
+func (a *Application) generate(ctx context.Context, articleID int64, job resolvedJob) (generateOutput, error) {
+	// Step 1: fetch top competitors from SERP.
+	a.log.Info("step 1/5: serp competitors", "keyword", job.keyword)
+	serpData, err := a.serp.GetSERP(ctx, job.keyword, job.language, a.cfg.DataForSEO.SERPLimit)
 	if err != nil {
-		return "", fmt.Errorf("brief: %w", err)
+		a.log.Warn("serp lookup failed, continuing without competitor data", "err", err)
+		serpData, _ = dataforseo.NewMock().GetSERP(ctx, job.keyword, job.language, 0)
+	} else {
+		if saveErr := a.repo.SaveCompetitorData(ctx, articleID, serpData); saveErr != nil {
+			a.log.Warn("save competitor data", "err", saveErr)
+		}
 	}
 
-	a.log.Info("step 2/3: writing", "keyword", job.keyword)
+	competitors := prompt.Competitors{}
+	for _, r := range serpData.Results {
+		competitors.Items = append(competitors.Items, prompt.CompetitorItem{
+			Rank:        r.Rank,
+			Title:       r.Title,
+			Description: r.Description,
+		})
+	}
+
+	// Step 2: brief — includes competitor context + SEO rules.
+	a.log.Info("step 2/5: brief", "keyword", job.keyword)
+	brief, err := job.client.Complete(ctx, prompt.Brief(job.keyword, job.language, job.siteTopic, job.extraRules, competitors), job.maxTokens)
+	if err != nil {
+		return generateOutput{}, fmt.Errorf("brief: %w", err)
+	}
+
+	// Step 3: write full article.
+	a.log.Info("step 3/5: writing", "keyword", job.keyword)
 	article, err := job.client.Complete(ctx, prompt.Writer(brief, job.keyword, job.language, job.minWords, job.maxWords, job.cluster), job.maxTokens)
 	if err != nil {
-		return "", fmt.Errorf("writer: %w", err)
+		return generateOutput{}, fmt.Errorf("writer: %w", err)
 	}
 
-	a.log.Info("step 3/3: editing", "keyword", job.keyword)
+	// Step 4: editor pass.
+	a.log.Info("step 4/5: editing", "keyword", job.keyword)
 	edited, err := job.client.Complete(ctx, prompt.Editor(article, job.keyword, job.minWords, job.maxWords, job.cluster), job.maxTokens)
 	if err != nil {
-		return "", fmt.Errorf("editor: %w", err)
+		return generateOutput{}, fmt.Errorf("editor: %w", err)
 	}
+
+	// Step 5: originality check; if flagged — one humanize pass then re-check.
+	a.log.Info("step 5/5: originality check", "keyword", job.keyword)
+	edited, checkRes := a.checkAndHumanize(ctx, articleID, job, edited)
 
 	postID, editURL, err := a.wp.CreateDraft(ctx, wordpress.Post{
 		Title:   job.keyword,
 		Content: edited,
 	})
 	if err != nil {
-		return "", fmt.Errorf("wordpress draft: %w", err)
+		return generateOutput{}, fmt.Errorf("wordpress draft: %w", err)
 	}
 
 	if err := a.repo.UpdateDraft(ctx, articleID, postID, editURL); err != nil {
-		return "", fmt.Errorf("update db: %w", err)
+		return generateOutput{}, fmt.Errorf("update db: %w", err)
 	}
 
-	a.log.Info("done", "keyword", job.keyword, "post_id", postID, "edit_url", editURL)
-	return edited, nil
+	a.log.Info("generation done", "keyword", job.keyword, "post_id", postID, "edit_url", editURL)
+	return generateOutput{
+		content:        edited,
+		competitorData: serpData,
+		checkResult:    checkRes,
+	}, nil
+}
+
+// checkAndHumanize runs an originality check and, if the article fails,
+// attempts one humanize rewrite followed by a second check.
+// It always returns a usable article — errors are logged and the original content is preserved.
+func (a *Application) checkAndHumanize(ctx context.Context, articleID int64, job resolvedJob, content string) (string, *checker.Result) {
+	checkRes, err := a.checker.Check(ctx, content)
+	if err != nil {
+		a.log.Warn("originality check failed, skipping", "err", err)
+		return content, nil
+	}
+
+	a.log.Info("check result", "ai_score", checkRes.AIScore, "original", checkRes.Original, "provider", checkRes.Provider)
+	if saveErr := a.repo.SaveCheckResult(ctx, articleID, checkRes); saveErr != nil {
+		a.log.Warn("save check result", "err", saveErr)
+	}
+
+	if checkRes.Original {
+		return content, checkRes
+	}
+
+	a.log.Info("content flagged, running humanize pass", "ai_score", checkRes.AIScore)
+	humanized, err := job.client.Complete(ctx, prompt.Humanize(content, job.keyword, checkRes.Issues), job.maxTokens)
+	if err != nil {
+		a.log.Warn("humanize step failed, using original", "err", err)
+		return content, checkRes
+	}
+
+	reCheck, err := a.checker.Check(ctx, humanized)
+	if err != nil {
+		a.log.Warn("re-check failed", "err", err)
+		return humanized, checkRes
+	}
+
+	a.log.Info("re-check result", "ai_score", reCheck.AIScore, "original", reCheck.Original)
+	if saveErr := a.repo.SaveCheckResult(ctx, articleID, reCheck); saveErr != nil {
+		a.log.Warn("save re-check result", "err", saveErr)
+	}
+
+	return humanized, reCheck
 }
 
 // publishArticle flips a draft article to published state by calling the
@@ -345,6 +432,29 @@ func (a *Application) initLLM() error {
 func (a *Application) initWordPress() error {
 	a.wp = wordpress.New(a.cfg.WordPress)
 	return nil
+}
+
+func (a *Application) initDataForSEO() {
+	cfg := a.cfg.DataForSEO
+	if cfg.Login == "" || cfg.Password == "" {
+		a.log.Warn("dataforseo not configured — using mock SERP data")
+		a.serp = dataforseo.NewMock()
+		return
+	}
+	a.serp = dataforseo.New(cfg.Login, cfg.Password)
+	a.log.Info("dataforseo configured", "login", cfg.Login, "serp_limit", cfg.SERPLimit)
+}
+
+func (a *Application) initChecker() {
+	cfg := a.cfg.Checker
+	switch cfg.Provider {
+	case "mock", "":
+		a.log.Warn("checker not configured — using mock (always passes)")
+		a.checker = checker.NewMock(cfg.AIThreshold)
+	default:
+		a.log.Warn("unknown checker provider, falling back to mock", "provider", cfg.Provider)
+		a.checker = checker.NewMock(cfg.AIThreshold)
+	}
 }
 
 func (a *Application) initServer() error {

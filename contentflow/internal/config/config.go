@@ -10,14 +10,16 @@ import (
 )
 
 type Config struct {
-	LLM       LLMConfig       `mapstructure:"llm"`
-	Database  DatabaseConfig  `mapstructure:"database"`
-	Sheets    SheetsConfig    `mapstructure:"sheets"`
-	WordPress WordPressConfig `mapstructure:"wordpress"`
-	Telegram  TelegramConfig  `mapstructure:"telegram"`
-	Worker    WorkerConfig    `mapstructure:"worker"`
-	Article   ArticleConfig   `mapstructure:"article"`
-	Server    ServerConfig    `mapstructure:"server"`
+	LLM        LLMConfig        `mapstructure:"llm"`
+	Database   DatabaseConfig   `mapstructure:"database"`
+	Sheets     SheetsConfig     `mapstructure:"sheets"`
+	WordPress  WordPressConfig  `mapstructure:"wordpress"`
+	Telegram   TelegramConfig   `mapstructure:"telegram"`
+	Worker     WorkerConfig     `mapstructure:"worker"`
+	Article    ArticleConfig    `mapstructure:"article"`
+	Server     ServerConfig     `mapstructure:"server"`
+	DataForSEO DataForSEOConfig `mapstructure:"dataforseo"`
+	Checker    CheckerConfig    `mapstructure:"checker"`
 }
 
 type LLMConfig struct {
@@ -92,6 +94,20 @@ type ArticleConfig struct {
 	ExtraRules string `mapstructure:"extraRules"`
 }
 
+type DataForSEOConfig struct {
+	Login    string `mapstructure:"login"`
+	Password string `mapstructure:"password"`
+	// SERPLimit is how many competitor results to fetch (default 5).
+	SERPLimit int `mapstructure:"serpLimit"`
+}
+
+type CheckerConfig struct {
+	// Provider selects the checker implementation: "mock" or "originality".
+	Provider    string  `mapstructure:"provider"`
+	APIKey      string  `mapstructure:"apiKey"`
+	AIThreshold float64 `mapstructure:"aiThreshold"`
+}
+
 func NewConfig() (*Config, error) {
 	v := viper.New()
 
@@ -109,6 +125,9 @@ func NewConfig() (*Config, error) {
 	v.SetDefault("server.addr", ":8080")
 	v.SetDefault("server.readTimeout", 10*time.Second)
 	v.SetDefault("server.writeTimeout", 5*time.Minute)
+	v.SetDefault("dataforseo.serpLimit", 5)
+	v.SetDefault("checker.provider", "mock")
+	v.SetDefault("checker.aiThreshold", 0.8)
 
 	v.SetEnvPrefix("CF")
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
@@ -123,13 +142,19 @@ func NewConfig() (*Config, error) {
 		"wordpress.user":         "CF_WORDPRESS_USER",
 		"wordpress.appPassword":  "CF_WORDPRESS_APP_PASSWORD",
 		"telegram.botToken":      "CF_TELEGRAM_BOT_TOKEN",
-		"sheets.credentialsFile": "CF_SHEETS_CREDENTIALS_FILE",
-		"sheets.spreadsheetId":   "CF_SHEETS_SPREADSHEET_ID",
-		"sheets.sheet":           "CF_SHEETS_SHEET",
-		"sheets.topicColumn":     "CF_SHEETS_TOPIC_COLUMN",
-		"sheets.keywordColumn":   "CF_SHEETS_KEYWORD_COLUMN",
-		"sheets.titleColumn":     "CF_SHEETS_TITLE_COLUMN",
-		"sheets.headerRow":       "CF_SHEETS_HEADER_ROW",
+		"sheets.credentialsFile":  "CF_SHEETS_CREDENTIALS_FILE",
+		"sheets.spreadsheetId":    "CF_SHEETS_SPREADSHEET_ID",
+		"sheets.sheet":            "CF_SHEETS_SHEET",
+		"sheets.topicColumn":      "CF_SHEETS_TOPIC_COLUMN",
+		"sheets.keywordColumn":    "CF_SHEETS_KEYWORD_COLUMN",
+		"sheets.titleColumn":      "CF_SHEETS_TITLE_COLUMN",
+		"sheets.headerRow":        "CF_SHEETS_HEADER_ROW",
+		"dataforseo.login":        "CF_DATAFORSEO_LOGIN",
+		"dataforseo.password":     "CF_DATAFORSEO_PASSWORD",
+		"dataforseo.serpLimit":    "CF_DATAFORSEO_SERP_LIMIT",
+		"checker.provider":        "CF_CHECKER_PROVIDER",
+		"checker.apiKey":          "CF_CHECKER_API_KEY",
+		"checker.aiThreshold":     "CF_CHECKER_AI_THRESHOLD",
 	}
 	for key, env := range bindings {
 		_ = v.BindEnv(key, env)

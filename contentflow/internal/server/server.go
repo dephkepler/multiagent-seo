@@ -72,14 +72,17 @@ type GenerateResult struct {
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 
-	// Debug info — lets callers inspect what the Sheets lookup produced
-	// for this topic without re-querying.
+	// Sheets lookup result.
 	TargetKeywords []string `json:"target_keywords"`
 	SuggestedTitle string   `json:"suggested_title"`
 
-	// AutoPublishError is set when the request asked for auto_publish=true
-	// but publishing failed after the draft was created. The article stays
-	// as a draft in WP; the user can retry via POST /articles/{id}/publish.
+	// SERP competitor data fetched before generation.
+	CompetitorData any `json:"competitor_data,omitempty"`
+
+	// Originality check result after generation.
+	CheckResult any `json:"check_result,omitempty"`
+
+	// AutoPublishError is set when auto_publish=true but publishing failed.
 	AutoPublishError string `json:"auto_publish_error,omitempty"`
 }
 

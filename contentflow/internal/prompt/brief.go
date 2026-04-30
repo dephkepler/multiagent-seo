@@ -6,12 +6,13 @@ import (
 	"contentflow/internal/prompt/rules"
 )
 
-func Brief(keyword, language, siteTopic, extraRules string) string {
+func Brief(keyword, language, siteTopic, extraRules string, competitors Competitors) string {
 	return fmt.Sprintf(`You are an SEO content strategist. Create a detailed article brief for the keyword: "%s".
 Language: %s.
 %s
 %s
 
+%s
 Return a structured brief with these sections:
 
 1. TITLE (H1)
@@ -32,6 +33,7 @@ Follow these rules:
 		language,
 		siteTopicLine(siteTopic),
 		extraRulesLine(extraRules),
+		competitors.Render(),
 		rules.DefaultSEO().Render(),
 	)
 }
