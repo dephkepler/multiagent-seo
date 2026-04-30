@@ -106,6 +106,8 @@ type CheckerConfig struct {
 	Provider    string  `mapstructure:"provider"`
 	APIKey      string  `mapstructure:"apiKey"`
 	AIThreshold float64 `mapstructure:"aiThreshold"`
+	// MaxCycles is the maximum number of humanize rewrites before giving up and publishing anyway.
+	MaxCycles int `mapstructure:"maxCycles"`
 }
 
 func NewConfig() (*Config, error) {
@@ -128,6 +130,7 @@ func NewConfig() (*Config, error) {
 	v.SetDefault("dataforseo.serpLimit", 5)
 	v.SetDefault("checker.provider", "mock")
 	v.SetDefault("checker.aiThreshold", 0.8)
+	v.SetDefault("checker.maxCycles", 3)
 
 	v.SetEnvPrefix("CF")
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
@@ -155,6 +158,7 @@ func NewConfig() (*Config, error) {
 		"checker.provider":        "CF_CHECKER_PROVIDER",
 		"checker.apiKey":          "CF_CHECKER_API_KEY",
 		"checker.aiThreshold":     "CF_CHECKER_AI_THRESHOLD",
+		"checker.maxCycles":       "CF_CHECKER_MAX_CYCLES",
 	}
 	for key, env := range bindings {
 		_ = v.BindEnv(key, env)

@@ -57,7 +57,9 @@ type GenerateRequest struct {
 	ExtraRules  string // "" = config default
 	Provider    string // "" = config default (groq / claude / anthropic)
 	Model       string // "" = config default
-	AutoPublish bool   // when true, publish the WP draft right after generation
+	AutoPublish  bool    // when true, publish the WP draft right after generation
+	MaxCycles    int     // max humanize rewrite cycles; 0 = config default
+	AIThreshold  float64 // AI detection threshold 0.0–1.0; 0 = config default
 }
 
 // GenerateResult is the synchronous response shape for POST /generate.
@@ -72,6 +74,10 @@ type GenerateResult struct {
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 
+	// LLM provider and model used for generation.
+	Provider string `json:"provider"`
+	Model    string `json:"model"`
+
 	// Sheets lookup result.
 	TargetKeywords []string `json:"target_keywords"`
 	SuggestedTitle string   `json:"suggested_title"`
@@ -79,11 +85,24 @@ type GenerateResult struct {
 	// SERP competitor data fetched before generation.
 	CompetitorData any `json:"competitor_data,omitempty"`
 
-	// Originality check result after generation.
+	// Humanized is true when the article was rewritten at least once after failing the originality check.
+	Humanized bool `json:"humanized"`
+
+	// CheckCycles contains every check+rewrite iteration in order.
+	// cycle 1 = first check, cycle 2 = after first humanize, etc.
+	CheckCycles any `json:"check_cycles,omitempty"`
+
+	// CheckResult is the final originality check result.
 	CheckResult any `json:"check_result,omitempty"`
 
 	// AutoPublishError is set when auto_publish=true but publishing failed.
 	AutoPublishError string `json:"auto_publish_error,omitempty"`
+
+	// DurationMS is the total wall-clock time of the generation pipeline in milliseconds.
+	DurationMS int64 `json:"duration_ms"`
+
+	// TokenUsage breaks down LLM token consumption per step and in total.
+	TokenUsage any `json:"token_usage,omitempty"`
 }
 
 type GenerateFunc func(ctx context.Context, req GenerateRequest) (*GenerateResult, error)
@@ -165,6 +184,8 @@ func (s *Server) handleGenerate(w http.ResponseWriter, r *http.Request) {
 		Provider    string `json:"provider"`
 		Model       string `json:"model"`
 		AutoPublish bool   `json:"auto_publish"`
+		MaxCycles   int     `json:"max_cycles"`
+		AIThreshold float64 `json:"ai_threshold"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Keyword == "" {
 		http.Error(w, "keyword is required", http.StatusBadRequest)
@@ -194,6 +215,8 @@ func (s *Server) handleGenerate(w http.ResponseWriter, r *http.Request) {
 		Provider:    body.Provider,
 		Model:       body.Model,
 		AutoPublish: body.AutoPublish,
+		MaxCycles:   body.MaxCycles,
+		AIThreshold: body.AIThreshold,
 	})
 	if err != nil {
 		if errors.Is(err, ErrNoCluster) {

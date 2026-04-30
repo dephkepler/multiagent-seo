@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"contentflow/internal/llm/retry"
+	"contentflow/internal/llm/usage"
 )
 
 const (
@@ -67,7 +68,7 @@ func (e *httpError) HTTPStatus() int { return e.status }
 
 // Complete sends a single Messages API request, retrying on 429/5xx and
 // transport errors per the configured retry policy. maxTokens caps output; 0 uses 4096 (Anthropic requires the field).
-func (c *Client) Complete(ctx context.Context, prompt string, maxTokens int) (string, error) {
+func (c *Client) Complete(ctx context.Context, prompt string, maxTokens int) (string, usage.Usage, error) {
 	if maxTokens <= 0 {
 		maxTokens = 4096
 	}
@@ -86,13 +87,13 @@ func (c *Client) Complete(ctx context.Context, prompt string, maxTokens int) (st
 		},
 	})
 	if err != nil {
-		return "", err
+		return "", usage.Usage{}, err
 	}
 
 	var (
-		content     string
-		lastStatus  int
-		totalTokens int
+		content    string
+		lastStatus int
+		u          usage.Usage
 	)
 
 	start := time.Now()
@@ -107,7 +108,6 @@ func (c *Client) Complete(ctx context.Context, prompt string, maxTokens int) (st
 
 		resp, doErr := c.httpClient.Do(req)
 		if doErr != nil {
-			// transport-level failure — mark as retryable (status 0)
 			return &httpError{status: 0, body: doErr.Error()}
 		}
 		defer resp.Body.Close()
@@ -134,8 +134,10 @@ func (c *Client) Complete(ctx context.Context, prompt string, maxTokens int) (st
 			return fmt.Errorf("claude returned empty response")
 		}
 		content = result.Content[0].Text
-		// Anthropic reports usage as input + output tokens (no total field).
-		totalTokens = result.Usage.InputTokens + result.Usage.OutputTokens
+		u = usage.Usage{
+			InputTokens:  result.Usage.InputTokens,
+			OutputTokens: result.Usage.OutputTokens,
+		}
 		return nil
 	})
 
@@ -147,10 +149,11 @@ func (c *Client) Complete(ctx context.Context, prompt string, maxTokens int) (st
 			"model", c.model,
 			"status", lastStatus,
 			"latency_ms", latency.Milliseconds(),
-			"total_tokens", totalTokens,
+			"input_tokens", u.InputTokens,
+			"output_tokens", u.OutputTokens,
 			"error", err,
 		)
-		return "", fmt.Errorf("claude request failed: %w", err)
+		return "", usage.Usage{}, fmt.Errorf("claude request failed: %w", err)
 	}
 
 	c.log.Info("llm call done",
@@ -158,7 +161,8 @@ func (c *Client) Complete(ctx context.Context, prompt string, maxTokens int) (st
 		"model", c.model,
 		"status", lastStatus,
 		"latency_ms", latency.Milliseconds(),
-		"total_tokens", totalTokens,
+		"input_tokens", u.InputTokens,
+		"output_tokens", u.OutputTokens,
 	)
-	return content, nil
+	return content, u, nil
 }

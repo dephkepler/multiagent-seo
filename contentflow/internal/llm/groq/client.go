@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"contentflow/internal/llm/retry"
+	"contentflow/internal/llm/usage"
 )
 
 const (
@@ -67,7 +68,7 @@ func (e *httpError) HTTPStatus() int { return e.status }
 
 // Complete sends a single chat-completion request, retrying on 429/5xx and
 // transport errors per the configured retry policy. maxTokens caps output; 0 = provider default.
-func (c *Client) Complete(ctx context.Context, prompt string, maxTokens int) (string, error) {
+func (c *Client) Complete(ctx context.Context, prompt string, maxTokens int) (string, usage.Usage, error) {
 	c.log.Debug("llm call start",
 		"provider", providerName,
 		"model", c.model,
@@ -86,13 +87,13 @@ func (c *Client) Complete(ctx context.Context, prompt string, maxTokens int) (st
 	}
 	body, err := json.Marshal(reqBody)
 	if err != nil {
-		return "", err
+		return "", usage.Usage{}, err
 	}
 
 	var (
-		content     string
-		lastStatus  int
-		totalTokens int
+		content    string
+		lastStatus int
+		u          usage.Usage
 	)
 
 	start := time.Now()
@@ -106,7 +107,6 @@ func (c *Client) Complete(ctx context.Context, prompt string, maxTokens int) (st
 
 		resp, doErr := c.httpClient.Do(req)
 		if doErr != nil {
-			// transport-level failure — mark as retryable (status 0)
 			return &httpError{status: 0, body: doErr.Error()}
 		}
 		defer resp.Body.Close()
@@ -126,7 +126,6 @@ func (c *Client) Complete(ctx context.Context, prompt string, maxTokens int) (st
 			Usage struct {
 				PromptTokens     int `json:"prompt_tokens"`
 				CompletionTokens int `json:"completion_tokens"`
-				TotalTokens      int `json:"total_tokens"`
 			} `json:"usage"`
 		}
 		if decErr := json.NewDecoder(resp.Body).Decode(&result); decErr != nil {
@@ -136,7 +135,10 @@ func (c *Client) Complete(ctx context.Context, prompt string, maxTokens int) (st
 			return fmt.Errorf("groq returned empty response")
 		}
 		content = result.Choices[0].Message.Content
-		totalTokens = result.Usage.TotalTokens
+		u = usage.Usage{
+			InputTokens:  result.Usage.PromptTokens,
+			OutputTokens: result.Usage.CompletionTokens,
+		}
 		return nil
 	})
 
@@ -148,10 +150,11 @@ func (c *Client) Complete(ctx context.Context, prompt string, maxTokens int) (st
 			"model", c.model,
 			"status", lastStatus,
 			"latency_ms", latency.Milliseconds(),
-			"total_tokens", totalTokens,
+			"input_tokens", u.InputTokens,
+			"output_tokens", u.OutputTokens,
 			"error", err,
 		)
-		return "", fmt.Errorf("groq request failed: %w", err)
+		return "", usage.Usage{}, fmt.Errorf("groq request failed: %w", err)
 	}
 
 	c.log.Info("llm call done",
@@ -159,7 +162,8 @@ func (c *Client) Complete(ctx context.Context, prompt string, maxTokens int) (st
 		"model", c.model,
 		"status", lastStatus,
 		"latency_ms", latency.Milliseconds(),
-		"total_tokens", totalTokens,
+		"input_tokens", u.InputTokens,
+		"output_tokens", u.OutputTokens,
 	)
-	return content, nil
+	return content, u, nil
 }
