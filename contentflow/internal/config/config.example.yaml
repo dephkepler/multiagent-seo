@@ -1,21 +1,32 @@
-# Copy to config.yaml and fill in. Never commit config.yaml.
-
 llm:
-  apiKey: "sk-ant-..."
+  apiKey: "gsk_xxxx"
+  groqApiKey: "gsk_xxxx"
+  claudeApiKey: "sk-ant-xxxx"
 
 database:
-  url: "postgres://user:password@localhost:5432/contentflow"
+  url: "postgres://contentflow:password@localhost:5432/contentflow?sslmode=disable"
 
 sheets:
   credentialsFile: "./credentials.json"
-  spreadsheetId: "your-sheet-id-from-url"
+  spreadsheetId: ""
 
 wordpress:
   url: "https://your-site.com"
-  user: "your-username"
+  user: "admin"
   appPassword: "xxxx xxxx xxxx xxxx"
 
 telegram:
-  botToken: "your-bot-token-from-botfather"
+  botToken: "123456789:xxxx"
   allowedUsers:
     - "123456789"
+
+dataforseo:
+  login: "your@email.com"
+  password: "xxxx"
+
+checker:
+  provider: "huggingface"
+  apiKey: "hf_xxxx"
+  model: "Hello-SimpleAI/chatgpt-detector-roberta"
+  aiThreshold: 0.8
+  maxCycles: 3

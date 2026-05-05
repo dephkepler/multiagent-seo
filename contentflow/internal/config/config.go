@@ -102,10 +102,12 @@ type DataForSEOConfig struct {
 }
 
 type CheckerConfig struct {
-	// Provider selects the checker implementation: "mock" or "originality".
+	// Provider selects the checker implementation: "mock", "originality", or "huggingface".
 	Provider    string  `mapstructure:"provider"`
 	APIKey      string  `mapstructure:"apiKey"`
 	AIThreshold float64 `mapstructure:"aiThreshold"`
+	// Model is the detector model identifier — only used by providers that support model selection (e.g. huggingface).
+	Model string `mapstructure:"model"`
 	// MaxCycles is the maximum number of humanize rewrites before giving up and publishing anyway.
 	MaxCycles int `mapstructure:"maxCycles"`
 }
@@ -158,6 +160,7 @@ func NewConfig() (*Config, error) {
 		"checker.provider":        "CF_CHECKER_PROVIDER",
 		"checker.apiKey":          "CF_CHECKER_API_KEY",
 		"checker.aiThreshold":     "CF_CHECKER_AI_THRESHOLD",
+		"checker.model":           "CF_CHECKER_MODEL",
 		"checker.maxCycles":       "CF_CHECKER_MAX_CYCLES",
 	}
 	for key, env := range bindings {

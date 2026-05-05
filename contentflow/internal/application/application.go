@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"contentflow/internal/checker"
+	"contentflow/internal/checker/huggingface"
 	"contentflow/internal/config"
 	"contentflow/internal/dataforseo"
 	"contentflow/internal/llm"
@@ -144,6 +145,14 @@ func (a *Application) initChecker() {
 	case "mock", "":
 		a.log.Warn("checker not configured — using mock (always passes)")
 		a.checker = checker.NewMock(cfg.AIThreshold)
+	case "huggingface":
+		if cfg.APIKey == "" {
+			a.log.Warn("huggingface checker missing api key — falling back to mock")
+			a.checker = checker.NewMock(cfg.AIThreshold)
+			return
+		}
+		a.checker = huggingface.New(cfg.APIKey, cfg.Model, cfg.AIThreshold, a.log)
+		a.log.Info("checker configured", "provider", "huggingface", "model", cfg.Model, "ai_threshold", cfg.AIThreshold)
 	default:
 		a.log.Warn("unknown checker provider, falling back to mock", "provider", cfg.Provider)
 		a.checker = checker.NewMock(cfg.AIThreshold)

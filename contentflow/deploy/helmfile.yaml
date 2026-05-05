@@ -1,0 +1,5 @@
+releases:
+  - name: contentflow
+    chart: ./helm
+    values:
+      - values.yaml.gotmpl

@@ -19,5 +19,8 @@ COPY --from=build /out/migrate /app/migrate
 COPY internal/config/settings.yaml /app/internal/config/settings.yaml
 COPY migrations /app/migrations
 
+# mount point for Google Sheets service-account credentials (K8s Secret)
+RUN mkdir /app/secrets
+
 EXPOSE 8080
 CMD ["/app/contentflow"]
