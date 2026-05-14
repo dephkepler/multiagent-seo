@@ -140,12 +140,22 @@ func (c *client) Lookup(ctx context.Context, topic string) (Result, error) {
 		}
 	}
 
-	c.log.Debug("sheets lookup",
-		"topic", topic,
-		"keywords", len(out.Keywords),
-		"has_h1", out.Title != "",
-		"rows_scanned", len(resp.Values),
-	)
+	if len(out.Keywords) == 0 {
+		c.log.Warn("sheets lookup: no match",
+			"sheet", c.cfg.Sheet,
+			"topic_normalized", topic,
+			"rows_scanned", len(resp.Values),
+			"range", rangeStr,
+		)
+	} else {
+		c.log.Info("sheets lookup",
+			"sheet", c.cfg.Sheet,
+			"topic", topic,
+			"keywords", len(out.Keywords),
+			"has_h1", out.Title != "",
+			"rows_scanned", len(resp.Values),
+		)
+	}
 	return out, nil
 }
 
