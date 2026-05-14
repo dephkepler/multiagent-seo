@@ -155,6 +155,7 @@ func New(repo *repo.Repo, generate GenerateFunc, publish PublishFunc, log *slog.
 	mux.HandleFunc("GET /openapi.yaml", s.handleOpenAPISpec)
 	mux.HandleFunc("GET /docs", s.handleSwaggerUI)
 	mux.HandleFunc("GET /docs/", s.handleSwaggerUI)
+	mux.HandleFunc("GET /{$}", s.handleLandingPage)
 
 	s.http = &http.Server{
 		Addr:         cfg.Addr,
@@ -246,6 +247,9 @@ func (s *Server) handleArticles(w http.ResponseWriter, r *http.Request) {
 		s.log.Error("list articles", "err", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
+	}
+	if articles == nil {
+		articles = []repo.Article{}
 	}
 
 	w.Header().Set("Content-Type", "application/json")

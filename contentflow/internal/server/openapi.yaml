@@ -281,8 +281,18 @@ paths:
   /articles:
     get:
       tags: [Articles]
-      summary: List all articles
-      description: Returns articles in reverse chronological order.
+      summary: Список всех сгенерированных статей
+      description: |
+        Возвращает все записи из БД в обратном хронологическом порядке (свежие сверху).
+        Пустой список = `[]`, не ошибка.
+
+        ⚠️ **Если вы открыли `/articles` в браузере и видите «непонятный текст» —
+        это нормально.** Это просто сырой JSON, формат для программ.
+        Чтобы посмотреть статьи глазами:
+
+        1. Откройте `wp_edit_url` из ответа — попадёте сразу на черновик в админке WordPress.
+        2. Или нажмите **Try it out** → **Execute** ниже — Swagger покажет тот же JSON,
+           но с подсветкой и форматированием.
       operationId: listArticles
       responses:
         '200':
