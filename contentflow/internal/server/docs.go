@@ -102,27 +102,31 @@ const landingPageHTML = `<!DOCTYPE html>
       <ul class="endpoints">
         <li>
           <span class="method post">POST</span><code>/generate</code>
-          <div class="hint">Сгенерировать статью по ключевому слову. Долгий запрос (30–90 секунд). Главный эндпоинт для тестирования.</div>
+          <div class="hint">Поставить ключевое слово в очередь. Возвращает <code>id</code> за 1 секунду — генерация идёт в фоне (30 сек – 5 мин).</div>
+        </li>
+        <li>
+          <span class="method get">GET</span><code>/articles/{id}</code>
+          <div class="hint">Узнать статус статьи. Поллите этот эндпоинт после <code>/generate</code>, пока <code>status</code> не сменится с <code>generating</code> на <code>draft</code> (готово) или <code>failed</code>.</div>
         </li>
         <li>
           <span class="method get">GET</span><code>/articles</code>
-          <div class="hint">Список всех сгенерированных статей в виде JSON. В браузере выглядит как сырой текст — это нормально, эндпоинт для программ. Чтобы посмотреть глазами — пользуйся Swagger UI.</div>
+          <div class="hint">Список всех сгенерированных статей. В браузере JSON выглядит «как мусор» — это нормально, для людей пользуйся Swagger UI.</div>
         </li>
         <li>
           <span class="method post">POST</span><code>/articles/{id}/publish</code>
-          <div class="hint">Опубликовать ранее созданный черновик из WordPress на сайт.</div>
+          <div class="hint">Опубликовать готовый черновик на сайт WordPress.</div>
         </li>
       </ul>
     </div>
 
     <div class="card">
-      <h2>Как протестировать за 30 секунд</h2>
+      <h2>Как протестировать за 1 минуту</h2>
       <ol style="margin: 0; padding-left: 20px;">
         <li>Нажми <strong>«Открыть Swagger UI»</strong> выше.</li>
-        <li>Раскрой блок <code>POST /generate</code>.</li>
-        <li>Нажми <strong>Try it out</strong>, в Examples выбери <code>cheap_test</code> (самый дешёвый прогон).</li>
-        <li>Нажми <strong>Execute</strong>, подожди ~15 секунд.</li>
-        <li>В ответе будет ссылка <code>wp_edit_url</code> — это черновик в админке WordPress.</li>
+        <li>Раскрой <code>POST /generate</code>, нажми <strong>Try it out</strong>, выбери пример <code>real_prod_request</code>, нажми <strong>Execute</strong>.</li>
+        <li>За секунду получишь ответ <code>202</code> с <code>id</code> (например <code>42</code>) — генерация началась в фоне.</li>
+        <li>Раскрой <code>GET /articles/{id}</code>, вставь свой <code>id</code>, жми <strong>Execute</strong> раз в 5–10 секунд.</li>
+        <li>Когда <code>status</code> станет <code>draft</code>, открывай <code>wp_edit_url</code> — это черновик в админке WordPress.</li>
       </ol>
     </div>
   </div>

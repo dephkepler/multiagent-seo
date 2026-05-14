@@ -11,6 +11,23 @@ info:
     и сохраняет запись в базе. На выходе вы получаете либо готовый
     черновик в админке WP, либо опубликованную статью на сайте.
 
+    ## Как это работает (асинхронно)
+
+    Генерация занимает от 30 секунд до 5 минут и больше, поэтому
+    `POST /generate` **не ждёт** окончания. Он сразу (за 1–2 секунды) возвращает
+    `202 Accepted` с `id` статьи и `status: "generating"`. Пайплайн крутится в фоне.
+
+    Клиент дальше **поллит** `GET /articles/{id}` (например раз в 5 секунд),
+    пока `status` не сменится на:
+
+    - **`draft`** — статья сгенерирована, черновик создан в WordPress (`wp_edit_url` заполнен).
+    - **`published`** — статья сразу опубликована на сайт (если был передан `auto_publish: true`).
+    - **`failed`** — что-то пошло не так (LLM упал, WP недоступен и т.д.). Смотри логи сервера.
+
+    Если запросишь `GET /articles/{id}` до того как статья дописана —
+    увидишь `status: "generating"` и пустые поля `wp_post_id`/`wp_edit_url`.
+    Это нормально, просто продолжай поллить.
+
     ---
 
     ## С чего начать (для тестирования)
@@ -20,11 +37,15 @@ info:
     3. В выпадающем списке **Examples** выберите `real_prod_request` —
        это рабочий payload, который мы используем в проде. Можно ничего
        не менять, просто нажать **Execute**.
-    4. Подождите 30–90 секунд (генерация синхронная — запрос будет «висеть»).
-    5. В ответе придёт JSON со ссылкой `wp_edit_url` — это черновик в
-       админке WordPress, где можно посмотреть и довести статью до публикации.
-       Либо позвать **POST /articles/{id}/publish** с полученным `id`, чтобы
-       сразу опубликовать на сайт.
+    4. **Сразу** (за ~1 секунду) получите ответ `202` с `id`. Запомни этот id.
+       Заодно в ответе уже видно, какие ключи и H1 подтянулись из таблицы —
+       можно сверить, что взялись правильные.
+    5. Перейди в блок **GET /articles/{id}** ниже, вставь `id` в поле,
+       и жми **Execute** каждые 5–10 секунд, пока `status` не изменится
+       с `generating` на `draft` (или `failed`).
+    6. В ответе `draft` будет ссылка `wp_edit_url` — это черновик в админке
+       WordPress, можно открыть в новой вкладке и посмотреть результат.
+       Чтобы опубликовать — используй `POST /articles/{id}/publish`.
 
     ## Самый простой запрос
 
@@ -103,7 +124,7 @@ paths:
   /generate:
     post:
       tags: [Articles]
-      summary: Сгенерировать статью по ключевому слову (синхронно, 30–90 с)
+      summary: Поставить ключевое слово в очередь на генерацию (async, ответ за ~1 секунду)
       description: |
         ## Как пользоваться
 
@@ -112,28 +133,35 @@ paths:
            боевой payload. Можно ничего не менять.
         3. (Опционально) В теле запроса поменяйте `keyword` на свою тему.
            Тема должна быть в Google Sheets — иначе вернётся 404 `no_cluster`.
-        4. Нажмите **Execute**. Запрос будет «висеть» 30–90 секунд — это норма.
-        5. В ответе придёт JSON. Главное в нём:
-           - `wp_edit_url` — ссылка на черновик в админке WordPress (можно
-             открыть в новой вкладке и посмотреть результат);
-           - `id` — внутренний id статьи; передайте его в
-             `POST /articles/{id}/publish`, чтобы опубликовать на сайт;
-           - `token_usage.total_input` / `total_output` — сколько LLM-токенов
-             потратили;
-           - `check_result.ai_score` — насколько статья «пахнет AI» (0 = идеально живая, 1 = полностью AI).
+        4. Нажмите **Execute**. Ответ придёт **сразу**, со статусом `202`:
+           - `id` — id новой статьи в БД;
+           - `status` — `generating`;
+           - `target_keywords` — все ключи из ячейки B (через запятую) для этой темы;
+           - `suggested_title` — H1 из ячейки C;
+           - `provider` / `model` — кто будет писать;
+           - `status_url` — куда поллить (например `/articles/42`).
+        5. Дальше идёте в блок **GET /articles/{id}**, вставляете id и поллите
+           каждые 5–10 секунд, пока `status` не сменится на `draft` (готово)
+           или `failed` (ошибка).
 
         ## Что происходит под капотом
 
-        Пайплайн из 5 шагов:
+        Синхронно (то, что делается ДО возврата 202):
 
-        1. **SERP** — получаем топ-выдачу Google для ключа через DataForSEO.
-        2. **Brief** — LLM пишет SEO-бриф, опираясь на конкурентов и кластер ключей.
-        3. **Writer** — LLM пишет статью по брифу (`min_words`–`max_words`).
-        4. **Editor** — LLM полирует SEO и читаемость.
-        5. **Originality check** — прогон через AI-детектор. Если `ai_score ≥ ai_threshold`,
+        1. Lookup в Google Sheets — найти тему в колонке A, получить ключи и H1.
+        2. Создать строку в Postgres со статусом `generating`.
+
+        Асинхронно (фон, после возврата 202 — может занять 30 секунд — 5 минут):
+
+        3. **SERP** — получаем топ-выдачу Google для ключа через DataForSEO.
+        4. **Brief** — LLM пишет SEO-бриф, опираясь на конкурентов и кластер ключей.
+        5. **Writer** — LLM пишет статью по брифу (`min_words`–`max_words`).
+        6. **Editor** — LLM полирует SEO и читаемость.
+        7. **Originality check** — прогон через AI-детектор. Если `ai_score ≥ ai_threshold`,
            статья переписывается «живее» и проверяется снова — до `max_cycles` раз.
+        8. Черновик в WordPress, обновление строки в БД (`draft` или `failed`).
 
-        Затем создаётся черновик в WordPress и запись в Postgres.
+        Лимит на фоновую задачу — 15 минут.
 
         ## Сколько это стоит
 
@@ -204,51 +232,32 @@ paths:
                   max_words: 800
                   auto_publish: true
       responses:
-        '200':
-          description: Article generated and pushed as WP draft
+        '202':
+          description: |
+            Запрос принят, статья поставлена в очередь и генерируется в фоне.
+            Поллите `GET /articles/{id}` чтобы узнать когда закончится.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/GenerateResult'
+                $ref: '#/components/schemas/GenerateAccepted'
               examples:
-                draft_created:
-                  summary: Typical successful generation (draft created, not published)
+                queued:
+                  summary: Запрос принят, генерация началась
                   value:
                     id: 42
-                    keyword: "crown play casino"
-                    status: "draft"
-                    wp_post_id: 6018
-                    wp_edit_url: "https://multiagent-seo-site.com/wp-admin/post.php?post=6018&action=edit"
-                    wp_post_url: ""
-                    content: "<h1>Crown Play Casino Review</h1><p>Crown Play is an online casino...</p>"
+                    keyword: "Android Game Development Services"
+                    status: "generating"
                     created_at: "2026-05-14T08:59:00Z"
-                    updated_at: "2026-05-14T09:00:12Z"
+                    target_keywords:
+                      - "Android Game Development"
+                      - "Android Game Development Services"
+                      - "Android Game Development Company"
+                      - "Android Game App Development"
+                      - "Android Game Development Studio"
+                    suggested_title: "Android Game Development Services"
                     provider: "claude"
                     model: "claude-sonnet-4-6"
-                    target_keywords: ["crown play casino", "crown play login", "crown play ontario"]
-                    suggested_title: "Crown Play Casino Review: Bonuses, Login & Ontario Guide"
-                    humanized: false
-                    duration_ms: 42100
-                    check_result:
-                      ai_score: 0.31
-                      plagiarism_score: 0.04
-                      original: true
-                      provider: "huggingface model=Hello-SimpleAI/chatgpt-detector-roberta"
-                    check_cycles:
-                      - cycle: 1
-                        threshold: 0.5
-                        check_result:
-                          ai_score: 0.31
-                          plagiarism_score: 0.04
-                          original: true
-                          provider: "huggingface model=Hello-SimpleAI/chatgpt-detector-roberta"
-                    token_usage:
-                      steps:
-                        - { step: "brief",  input_tokens: 820,  output_tokens: 312 }
-                        - { step: "writer", input_tokens: 1140, output_tokens: 398 }
-                        - { step: "editor", input_tokens: 1502, output_tokens: 401 }
-                      total_input: 3462
-                      total_output: 1111
+                    status_url: "/articles/42"
         '400':
           description: |
             Validation error — one of:
@@ -325,6 +334,89 @@ paths:
                       UpdatedAt: "2026-05-13T17:24:48Z"
         '500':
           description: Internal error
+
+  /articles/{id}:
+    get:
+      tags: [Articles]
+      summary: Получить текущее состояние статьи (используется для поллинга)
+      description: |
+        Возвращает строку из БД для статьи с этим id. После `POST /generate`
+        вызывайте этот эндпоинт каждые 5–10 секунд, пока `status` не сменится
+        с `generating` на одно из терминальных значений:
+
+        - **`draft`** — генерация прошла успешно, есть `wp_post_id` и `wp_edit_url`.
+        - **`published`** — статья сразу же опубликована (при `auto_publish: true`).
+        - **`failed`** — генерация упала. Подробности — в логах сервера.
+
+        В JSON-ответе также есть `competitor_data` (топ-выдача из DataForSEO,
+        с которой строился бриф) и `check_result` (результат AI-детектора).
+      operationId: getArticle
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Внутренний id статьи из `POST /generate`.
+          schema: { type: integer, format: int64 }
+          example: 42
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArticleResult'
+              examples:
+                still_generating:
+                  summary: Статья ещё пишется — продолжай поллить
+                  value:
+                    id: 42
+                    keyword: "Android Game Development Services"
+                    status: "generating"
+                    wp_post_id: 0
+                    wp_edit_url: ""
+                    wp_post_url: ""
+                    created_at: "2026-05-14T08:59:00Z"
+                    updated_at: "2026-05-14T08:59:00Z"
+                draft_ready:
+                  summary: Готово, черновик создан в WordPress
+                  value:
+                    id: 42
+                    keyword: "Android Game Development Services"
+                    status: "draft"
+                    wp_post_id: 6060
+                    wp_edit_url: "https://multiagent-seo-site.com/wp-admin/post.php?post=6060&action=edit"
+                    wp_post_url: ""
+                    check_result:
+                      ai_score: 0.12
+                      plagiarism_score: 0.03
+                      original: true
+                      provider: "huggingface:Hello-SimpleAI/chatgpt-detector-roberta"
+                    created_at: "2026-05-14T08:59:00Z"
+                    updated_at: "2026-05-14T09:00:45Z"
+                failed:
+                  summary: Что-то упало — смотри логи сервера
+                  value:
+                    id: 42
+                    keyword: "Android Game Development Services"
+                    status: "failed"
+                    wp_post_id: 0
+                    wp_edit_url: ""
+                    wp_post_url: ""
+                    created_at: "2026-05-14T08:59:00Z"
+                    updated_at: "2026-05-14T08:59:24Z"
+        '400':
+          description: id is not a positive integer
+          content:
+            text/plain: { schema: { type: string } }
+        '404':
+          description: No article with this id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: "not_found"
+                message: "article with this id does not exist"
 
   /articles/{id}/publish:
     post:
@@ -494,87 +586,101 @@ components:
           type: string
           description: "Echoed back when the error relates to a specific topic."
 
-    GenerateResult:
+    GenerateAccepted:
       type: object
+      description: |
+        Ответ на `POST /generate`. Возвращается **сразу** (за 1–2 секунды),
+        ещё до начала генерации. Содержит результат Sheets-лукапа (чтобы
+        клиент видел, какой кластер и H1 ушли в LLM) и `status_url` для
+        поллинга.
       properties:
-        id:          { type: integer, format: int64, example: 1 }
-        keyword:     { type: string, example: "high flyer casino" }
+        id:
+          type: integer
+          format: int64
+          description: Внутренний id новой статьи в БД. Используется в `/articles/{id}` и `/articles/{id}/publish`.
+          example: 42
+        keyword:
+          type: string
+          example: "Android Game Development Services"
         status:
           type: string
-          enum: [draft, published]
-          description: |
-            `draft` after a normal run. `published` only when the request set
-            `auto_publish: true` and publishing succeeded.
-          example: draft
-        wp_post_id:  { type: integer, format: int64, example: 42 }
-        wp_edit_url: { type: string, example: "https://site.com/wp-admin/post.php?post=42&action=edit" }
-        wp_post_url:
+          enum: [generating]
+          description: Всегда `generating` в момент возврата 202.
+          example: "generating"
+        created_at:
           type: string
-          description: |
-            Public article URL. Empty unless the article is `published`
-            (either via `auto_publish` or a later `POST /articles/{id}/publish`).
-          example: ""
-        content:     { type: string, description: "Final edited article body (markdown/HTML)." }
-        created_at:  { type: string, format: date-time }
-        updated_at:  { type: string, format: date-time }
-        auto_publish_error:
-          type: string
-          description: |
-            Set only when `auto_publish: true` was requested and publishing
-            failed after the draft was created. The article remains a draft;
-            retry with `POST /articles/{id}/publish`.
-          example: ""
+          format: date-time
         target_keywords:
           type: array
           items: { type: string }
           description: |
-            Debug: keywords pulled from Sheets for this topic. Empty array means
-            the topic had no cluster (or the Sheets lookup failed; check logs).
-          example: ["high flyer casino", "high flyer casino ontario"]
+            Все ключевые слова, прочитанные из ячейки B (через запятую) на
+            вкладке `casino2` для строки с совпадающим title. Передаются в LLM
+            как target keywords.
+          example:
+            - "Android Game Development"
+            - "Android Game Development Services"
+            - "Android Game Development Company"
         suggested_title:
           type: string
           description: |
-            Article H1 — taken from the Sheets H1 column (column C). The LLM is
-            instructed to use this wording verbatim as the article heading.
-            Empty when the matching row has no H1.
-          example: "High Flyer Casino Review: Bonuses, Login & Ontario Guide"
+            Заголовок (H1) из колонки C. LLM получит инструкцию использовать
+            именно эту формулировку, без пересочинений.
+          example: "Android Game Development Services"
         provider:
           type: string
-          description: LLM provider actually used (echoes the request or config default).
+          description: LLM-провайдер для этой генерации (`claude` или `groq`).
           example: "claude"
         model:
           type: string
-          description: LLM model actually used.
+          description: Конкретная модель.
           example: "claude-sonnet-4-6"
-        humanized:
-          type: boolean
+        status_url:
+          type: string
+          description: Относительный путь, куда поллить статус.
+          example: "/articles/42"
+
+    ArticleResult:
+      type: object
+      description: |
+        Полное состояние статьи из БД. Возвращается на `GET /articles/{id}`.
+        Поллите этот эндпоинт после `POST /generate` пока `status` не
+        перестанет быть `generating`.
+      properties:
+        id:          { type: integer, format: int64, example: 42 }
+        keyword:     { type: string, example: "Android Game Development Services" }
+        status:
+          type: string
+          enum: [generating, draft, published, failed]
           description: |
-            `true` if the article was rewritten at least once after failing the
-            originality check. Always paired with `check_cycles.length > 1`.
-          example: false
-        duration_ms:
+            Жизненный цикл:
+            - `generating` — пайплайн ещё работает в фоне.
+            - `draft` — успешно сгенерирована и создан черновик в WordPress.
+            - `published` — статья опубликована на сайте.
+            - `failed` — что-то упало; смотри логи сервера.
+          example: "draft"
+        wp_post_id:
           type: integer
           format: int64
-          description: Total wall-clock time of the pipeline in milliseconds.
-          example: 42100
+          description: ID черновика в WordPress. `0` пока `status=generating` или `failed`.
+          example: 6060
+        wp_edit_url:
+          type: string
+          description: Прямая ссылка на черновик в админке WP. Пусто пока не готово.
+          example: "https://multiagent-seo-site.com/wp-admin/post.php?post=6060&action=edit"
+        wp_post_url:
+          type: string
+          description: Публичный URL статьи. Заполнен только при `status=published`.
+          example: ""
         competitor_data:
           type: object
           description: |
-            Raw SERP results from DataForSEO (top organic results for the keyword).
-            Shape mirrors the DataForSEO response — useful for debugging which
-            competitors the brief was built from.
+            SERP-выдача из DataForSEO, по которой строился бриф. Появляется
+            на шаге 1 пайплайна, ещё до завершения генерации.
         check_result:
           $ref: '#/components/schemas/CheckResult'
-        check_cycles:
-          type: array
-          description: |
-            Every check + rewrite iteration in order. `cycle: 1` is the first
-            check, `cycle: 2` is after the first humanize, etc. Length > 1 only
-            when the first check failed and a rewrite happened.
-          items:
-            $ref: '#/components/schemas/CheckCycle'
-        token_usage:
-          $ref: '#/components/schemas/TokenUsage'
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
 
     Article:
       type: object

@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"contentflow/internal/llm"
 	"contentflow/internal/prompt"
@@ -89,7 +90,16 @@ func (a *Application) resolveJob(ctx context.Context, req server.GenerateRequest
 	return job, nil
 }
 
-func (a *Application) processKeyword(ctx context.Context, req server.GenerateRequest) (*server.GenerateResult, error) {
+// backgroundJobTimeout is the upper bound for one generation pipeline.
+// Long enough for 5000-word articles with multiple humanize cycles on
+// the slowest provider; aborted with context cancellation past this.
+const backgroundJobTimeout = 15 * time.Minute
+
+// processKeyword does the synchronous prep — Sheets lookup, DB row,
+// LLM client setup — then kicks the long-running pipeline off in a
+// goroutine and returns 202 Accepted immediately. Clients poll
+// GET /articles/{id} to learn when generation finished.
+func (a *Application) processKeyword(ctx context.Context, req server.GenerateRequest) (*server.GenerateAccepted, error) {
 	job, err := a.resolveJob(ctx, req)
 	if err != nil {
 		return nil, err
@@ -101,55 +111,70 @@ func (a *Application) processKeyword(ctx context.Context, req server.GenerateReq
 		return nil, fmt.Errorf("create article: %w", err)
 	}
 
-	out, err := a.generate(ctx, articleID, job)
-	if err != nil {
-		a.log.Error("generation failed", "keyword", job.keyword, "err", err)
-		if markErr := a.repo.MarkFailed(ctx, articleID); markErr != nil {
-			a.log.Error("mark article failed", "article_id", articleID, "err", markErr)
-		}
-		return nil, err
-	}
-
-	// Optional auto-publish: flip the draft to published before returning.
-	// Blocked when the originality check failed — the draft stays in WP for manual review.
-	var autoPublishErr string
-	if req.AutoPublish {
-		if !out.checkPassed {
-			autoPublishErr = "originality check failed — draft saved but not published"
-			a.log.Warn("auto-publish blocked: originality check failed", "article_id", articleID)
-		} else if _, pubErr := a.publishArticle(ctx, articleID); pubErr != nil {
-			a.log.Error("auto-publish failed", "article_id", articleID, "err", pubErr)
-			autoPublishErr = pubErr.Error()
-		}
-	}
-
 	article, err := a.repo.GetArticle(ctx, articleID)
 	if err != nil {
 		return nil, fmt.Errorf("fetch article: %w", err)
 	}
 
-	return &server.GenerateResult{
-		ID:               article.ID,
-		Keyword:          article.Keyword,
-		Status:           article.Status,
-		WPPostID:         article.WPPostID,
-		WPEditURL:        article.WPEditURL,
-		WPPostURL:        article.WPPostURL,
-		Content:          out.content,
-		CreatedAt:        article.CreatedAt,
-		UpdatedAt:        article.UpdatedAt,
-		Provider:         out.provider,
-		Model:            out.model,
-		TargetKeywords:   job.cluster.Keywords,
-		SuggestedTitle:   job.cluster.Title,
-		CompetitorData:   out.competitorData,
-		Humanized:        out.humanized,
-		CheckCycles:      out.checkCycles,
-		CheckResult:      out.checkResult,
-		AutoPublishError: autoPublishErr,
-		DurationMS:       out.durationMS,
-		TokenUsage:       out.tokenSummary,
+	a.wg.Add(1)
+	go func() {
+		defer a.wg.Done()
+		bgCtx, cancel := context.WithTimeout(context.Background(), backgroundJobTimeout)
+		defer cancel()
+		a.runGeneration(bgCtx, articleID, job, req.AutoPublish)
+	}()
+
+	a.log.Info("generation accepted",
+		"article_id", articleID,
+		"keyword", job.keyword,
+		"provider", job.provider,
+		"model", job.model,
+		"target_keywords", len(job.cluster.Keywords),
+	)
+
+	return &server.GenerateAccepted{
+		ID:             article.ID,
+		Keyword:        article.Keyword,
+		Status:         article.Status,
+		CreatedAt:      article.CreatedAt,
+		TargetKeywords: job.cluster.Keywords,
+		SuggestedTitle: job.cluster.Title,
+		Provider:       job.provider,
+		Model:          job.model,
+		StatusURL:      fmt.Sprintf("/articles/%d", article.ID),
 	}, nil
+}
+
+// runGeneration is the body of the background goroutine. It runs the
+// full generation pipeline, persists every result (status, WP urls,
+// competitor data, check result) to the database, and handles
+// auto-publish. Nothing is returned to a caller; clients learn the
+// outcome via GET /articles/{id}.
+func (a *Application) runGeneration(ctx context.Context, articleID int64, job resolvedJob, autoPublish bool) {
+	out, err := a.generate(ctx, articleID, job)
+	if err != nil {
+		a.log.Error("generation failed", "keyword", job.keyword, "article_id", articleID, "err", err)
+		if markErr := a.repo.MarkFailed(ctx, articleID); markErr != nil {
+			a.log.Error("mark article failed", "article_id", articleID, "err", markErr)
+		}
+		return
+	}
+
+	if autoPublish {
+		if !out.checkPassed {
+			a.log.Warn("auto-publish blocked: originality check failed", "article_id", articleID)
+		} else if _, pubErr := a.publishArticle(ctx, articleID); pubErr != nil {
+			a.log.Error("auto-publish failed", "article_id", articleID, "err", pubErr)
+		}
+	}
+
+	a.log.Info("generation persisted",
+		"article_id", articleID,
+		"keyword", job.keyword,
+		"duration_ms", out.durationMS,
+		"total_input_tokens", out.tokenSummary.TotalInput,
+		"total_output_tokens", out.tokenSummary.TotalOutput,
+	)
 }
 
 func pickStr(req, def string) string {

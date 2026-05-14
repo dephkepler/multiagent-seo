@@ -62,50 +62,44 @@ type GenerateRequest struct {
 	AIThreshold  float64 // AI detection threshold 0.0–1.0; 0 = config default
 }
 
-// GenerateResult is the synchronous response shape for POST /generate.
-type GenerateResult struct {
+// GenerateAccepted is the 202 response shape for POST /generate. The
+// generation pipeline runs in a background goroutine; the client polls
+// GET /articles/{id} to learn when it finished.
+type GenerateAccepted struct {
 	ID        int64     `json:"id"`
 	Keyword   string    `json:"keyword"`
-	Status    string    `json:"status"`
-	WPPostID  int64     `json:"wp_post_id"`
-	WPEditURL string    `json:"wp_edit_url"`
-	WPPostURL string    `json:"wp_post_url"`
-	Content   string    `json:"content"`
+	Status    string    `json:"status"` // always "generating" at this point
 	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
 
-	// LLM provider and model used for generation.
-	Provider string `json:"provider"`
-	Model    string `json:"model"`
-
-	// Sheets lookup result.
+	// Sheets lookup result — already known at submit time. Returning it here
+	// lets the caller verify the cluster without waiting for generation.
 	TargetKeywords []string `json:"target_keywords"`
 	SuggestedTitle string   `json:"suggested_title"`
 
-	// SERP competitor data fetched before generation.
-	CompetitorData any `json:"competitor_data,omitempty"`
+	// Provider and model the pipeline is going to use.
+	Provider string `json:"provider"`
+	Model    string `json:"model"`
 
-	// Humanized is true when the article was rewritten at least once after failing the originality check.
-	Humanized bool `json:"humanized"`
-
-	// CheckCycles contains every check+rewrite iteration in order.
-	// cycle 1 = first check, cycle 2 = after first humanize, etc.
-	CheckCycles any `json:"check_cycles,omitempty"`
-
-	// CheckResult is the final originality check result.
-	CheckResult any `json:"check_result,omitempty"`
-
-	// AutoPublishError is set when auto_publish=true but publishing failed.
-	AutoPublishError string `json:"auto_publish_error,omitempty"`
-
-	// DurationMS is the total wall-clock time of the generation pipeline in milliseconds.
-	DurationMS int64 `json:"duration_ms"`
-
-	// TokenUsage breaks down LLM token consumption per step and in total.
-	TokenUsage any `json:"token_usage,omitempty"`
+	// Convenience URLs the client should poll.
+	StatusURL string `json:"status_url"` // e.g. /articles/42
 }
 
-type GenerateFunc func(ctx context.Context, req GenerateRequest) (*GenerateResult, error)
+type GenerateFunc func(ctx context.Context, req GenerateRequest) (*GenerateAccepted, error)
+
+// ArticleResult is the shape returned by GET /articles/{id}. It mirrors the
+// repo.Article columns the API exposes.
+type ArticleResult struct {
+	ID             int64           `json:"id"`
+	Keyword        string          `json:"keyword"`
+	Status         string          `json:"status"`
+	WPPostID       int64           `json:"wp_post_id"`
+	WPEditURL      string          `json:"wp_edit_url"`
+	WPPostURL      string          `json:"wp_post_url"`
+	CompetitorData json.RawMessage `json:"competitor_data,omitempty"`
+	CheckResult    json.RawMessage `json:"check_result,omitempty"`
+	CreatedAt      time.Time       `json:"created_at"`
+	UpdatedAt      time.Time       `json:"updated_at"`
+}
 
 // PublishResult is the shape returned by POST /articles/{id}/publish.
 type PublishResult struct {
@@ -151,6 +145,7 @@ func New(repo *repo.Repo, generate GenerateFunc, publish PublishFunc, log *slog.
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /generate", s.handleGenerate)
 	mux.HandleFunc("GET /articles", s.handleArticles)
+	mux.HandleFunc("GET /articles/{id}", s.handleGetArticle)
 	mux.HandleFunc("POST /articles/{id}/publish", s.handlePublish)
 	mux.HandleFunc("GET /openapi.yaml", s.handleOpenAPISpec)
 	mux.HandleFunc("GET /docs", s.handleSwaggerUI)
@@ -238,7 +233,44 @@ func (s *Server) handleGenerate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusAccepted)
 	json.NewEncoder(w).Encode(result)
+}
+
+func (s *Server) handleGetArticle(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil || id <= 0 {
+		http.Error(w, "id must be a positive integer", http.StatusBadRequest)
+		return
+	}
+
+	article, err := s.repo.GetArticle(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, repo.ErrNotFound) {
+			writeJSONError(w, http.StatusNotFound, errorResponse{
+				Error:   "not_found",
+				Message: "article with this id does not exist",
+			})
+			return
+		}
+		s.log.Error("get article", "id", id, "err", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(ArticleResult{
+		ID:             article.ID,
+		Keyword:        article.Keyword,
+		Status:         article.Status,
+		WPPostID:       article.WPPostID,
+		WPEditURL:      article.WPEditURL,
+		WPPostURL:      article.WPPostURL,
+		CompetitorData: article.CompetitorData,
+		CheckResult:    article.CheckResult,
+		CreatedAt:      article.CreatedAt,
+		UpdatedAt:      article.UpdatedAt,
+	})
 }
 
 func (s *Server) handleArticles(w http.ResponseWriter, r *http.Request) {
