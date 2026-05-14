@@ -152,6 +152,9 @@ func New(repo *repo.Repo, generate GenerateFunc, publish PublishFunc, log *slog.
 	mux.HandleFunc("POST /generate", s.handleGenerate)
 	mux.HandleFunc("GET /articles", s.handleArticles)
 	mux.HandleFunc("POST /articles/{id}/publish", s.handlePublish)
+	mux.HandleFunc("GET /openapi.yaml", s.handleOpenAPISpec)
+	mux.HandleFunc("GET /docs", s.handleSwaggerUI)
+	mux.HandleFunc("GET /docs/", s.handleSwaggerUI)
 
 	s.http = &http.Server{
 		Addr:         cfg.Addr,

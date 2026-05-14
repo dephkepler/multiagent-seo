@@ -4,6 +4,8 @@ info:
   version: 0.1.0
   description: SEO content pipeline — generates articles and pushes drafts to WordPress.
 servers:
+  - url: https://multiagent-seo.8cell.tech
+    description: Staging (live deployment — Try it out hits this)
   - url: http://localhost:8080
     description: Local dev
 
