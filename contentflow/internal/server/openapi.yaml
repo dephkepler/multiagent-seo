@@ -2,7 +2,93 @@ openapi: 3.0.3
 info:
   title: Contentflow API
   version: 0.1.0
-  description: SEO content pipeline — generates articles and pushes drafts to WordPress.
+  description: |
+    # Contentflow — генератор SEO-статей
+
+    Сервис по ключевому слову собирает данные о конкурентах из Google,
+    пишет статью через LLM (Claude / Groq), прогоняет её через AI-детектор,
+    при необходимости переписывает «живее», создаёт черновик в WordPress
+    и сохраняет запись в базе. На выходе вы получаете либо готовый
+    черновик в админке WP, либо опубликованную статью на сайте.
+
+    ---
+
+    ## С чего начать (для тестирования)
+
+    1. Раскройте блок **POST /generate** ниже.
+    2. Нажмите кнопку **Try it out** справа.
+    3. В выпадающем списке **Examples** выберите `real_prod_request` —
+       это рабочий payload, который мы используем в проде. Можно ничего
+       не менять, просто нажать **Execute**.
+    4. Подождите 30–90 секунд (генерация синхронная — запрос будет «висеть»).
+    5. В ответе придёт JSON со ссылкой `wp_edit_url` — это черновик в
+       админке WordPress, где можно посмотреть и довести статью до публикации.
+       Либо позвать **POST /articles/{id}/publish** с полученным `id`, чтобы
+       сразу опубликовать на сайт.
+
+    ## Самый простой запрос
+
+    Минимум, который вообще нужен — это ключевое слово.
+    Всё остальное возьмётся из конфига сервера.
+
+    ```json
+    {
+      "keyword": "crown play casino"
+    }
+    ```
+
+    ## Полный «прод-like» запрос с пояснением каждого поля
+
+    ```json
+    {
+      "keyword": "crown play casino",
+      "provider": "claude",
+      "model": "claude-sonnet-4-6",
+      "min_words": 200,
+      "max_words": 500,
+      "max_tokens": 400,
+      "max_cycles": 1,
+      "ai_threshold": 0.5,
+      "language": "en",
+      "auto_publish": false
+    }
+    ```
+
+    | Поле           | Что это                                                                   | Как выбирать значение                                                                                |
+    |----------------|---------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------|
+    | `keyword`      | Тема статьи / основное ключевое слово.                                    | Берётся из Google Sheets с кластерами. Пример: `crown play casino`, `как выбрать ноутбук`.           |
+    | `provider`     | Какой LLM-провайдер использовать.                                         | `claude` — качественнее, дороже. `groq` — быстрее и дешевле, качество ниже. По умолчанию = из конфига. |
+    | `model`        | Конкретная модель внутри провайдера.                                      | Для `claude`: `claude-sonnet-4-6` (баланс), `claude-haiku-4-5-20251001` (дёшево). Для `groq`: `llama-3.3-70b-versatile`. |
+    | `min_words`    | Минимальная длина статьи в словах (передаётся в промпт модели).           | Для теста — 200–500. Для прода — 1500–2000.                                                          |
+    | `max_words`    | Максимальная длина статьи в словах.                                       | Должна быть ≥ `min_words`. Для теста — 500–800. Для прода — 3000.                                    |
+    | `max_tokens`   | Жёсткий API-лимит на размер ответа LLM за один шаг.                       | 400 для теста (≈ \$0.001). 4000–6000 для прода. Если 0 — посчитается автоматически.                  |
+    | `max_cycles`   | Сколько раз переписывать статью, если AI-детектор её зафлажил.            | 1 для теста (быстрее). 3 для прода.                                                                  |
+    | `ai_threshold` | Порог «AI-ности», ниже которого статья считается достаточно «живой».      | 0.5 = строгий (часто переписывает). 0.8 = мягкий (почти всегда пропускает).                          |
+    | `language`     | Язык статьи.                                                              | `ru`, `en`, `uk`.                                                                                    |
+    | `auto_publish` | Сразу опубликовать на сайт или оставить черновиком в WP.                  | `false` для теста — посмотреть результат глазами и опубликовать вручную через `/articles/{id}/publish`. `true` — только когда уверены. |
+
+    ## Как тестировать дёшево
+
+    Если просто хотите убедиться, что пайплайн работает (не интересует
+    качество статьи) — используйте пример `cheap_test`. Он ставит:
+    - `min_words: 50`, `max_words: 100` — статья на 1 абзац
+    - `max_tokens: 400` — жёсткий потолок
+    - `max_cycles: 1` — без долгих циклов переписывания
+
+    Такой запрос стоит около \$0.001 и проходит за ~15 секунд.
+
+    ## Эндпоинты в двух словах
+
+    - **POST /generate** — основной. Запускает весь пайплайн от ключа до WP-черновика. Долгий (30–90с), синхронный.
+    - **GET /articles** — список всех сгенерированных статей в базе. Быстрый.
+    - **POST /articles/{id}/publish** — опубликовать ранее созданный черновик в WP. Берёт `id` из ответа `/generate` или из `/articles`.
+
+    ## Что делать, если что-то пошло не так
+
+    - **404 `no_cluster`** — для этого ключа нет строки в Google Sheets с кластером. Добавьте строку в таблицу, и тогда генерация заработает.
+    - **400 `keyword is required`** — забыли передать `keyword` в теле, или он пустой.
+    - **500 `internal error`** — ошибка на стороне сервера (LLM-провайдер, WP, БД). Детали в логах сервера.
+    - **Запрос завис на минуту+** — это нормально, генерация синхронная. Не отменяйте до 2 минут.
 servers:
   - url: https://multiagent-seo.8cell.tech
     description: Staging (live deployment — Try it out hits this)
@@ -17,22 +103,49 @@ paths:
   /generate:
     post:
       tags: [Articles]
-      summary: Generate an article (synchronous)
+      summary: Сгенерировать статью по ключевому слову (синхронно, 30–90 с)
       description: |
-        Runs the full 5-step pipeline and returns the finished article:
+        ## Как пользоваться
 
-        1. **SERP** — fetch top competitors via DataForSEO for the keyword.
-        2. **Brief** — LLM call: build an SEO brief from competitors + target keywords.
-        3. **Writer** — LLM call: draft the full article from the brief.
-        4. **Editor** — LLM call: polish for SEO and readability.
-        5. **Originality check + humanize loop** — runs AI detection; if AI score
-           ≥ `ai_threshold`, rewrites the article and re-checks, up to `max_cycles` times.
+        1. Нажмите **Try it out** (кнопка справа).
+        2. В **Examples** выберите `real_prod_request` — там уже стоит готовый
+           боевой payload. Можно ничего не менять.
+        3. (Опционально) В теле запроса поменяйте `keyword` на свою тему.
+           Тема должна быть в Google Sheets — иначе вернётся 404 `no_cluster`.
+        4. Нажмите **Execute**. Запрос будет «висеть» 30–90 секунд — это норма.
+        5. В ответе придёт JSON. Главное в нём:
+           - `wp_edit_url` — ссылка на черновик в админке WordPress (можно
+             открыть в новой вкладке и посмотреть результат);
+           - `id` — внутренний id статьи; передайте его в
+             `POST /articles/{id}/publish`, чтобы опубликовать на сайт;
+           - `token_usage.total_input` / `total_output` — сколько LLM-токенов
+             потратили;
+           - `check_result.ai_score` — насколько статья «пахнет AI» (0 = идеально живая, 1 = полностью AI).
 
-        Then a WordPress draft is created and the row is saved in Postgres.
+        ## Что происходит под капотом
 
-        **Latency:** 30–90s per request depending on length and humanize cycles.
-        **Cost:** every request burns LLM tokens — use `max_tokens` and small
-        `min_words/max_words` for cheap tests.
+        Пайплайн из 5 шагов:
+
+        1. **SERP** — получаем топ-выдачу Google для ключа через DataForSEO.
+        2. **Brief** — LLM пишет SEO-бриф, опираясь на конкурентов и кластер ключей.
+        3. **Writer** — LLM пишет статью по брифу (`min_words`–`max_words`).
+        4. **Editor** — LLM полирует SEO и читаемость.
+        5. **Originality check** — прогон через AI-детектор. Если `ai_score ≥ ai_threshold`,
+           статья переписывается «живее» и проверяется снова — до `max_cycles` раз.
+
+        Затем создаётся черновик в WordPress и запись в Postgres.
+
+        ## Сколько это стоит
+
+        - **`cheap_test` (пример ниже)** — ~\$0.001 за запрос, ~15 секунд.
+        - **`real_prod_request` (200–500 слов, claude-sonnet)** — ~\$0.02–0.05, ~30–60 секунд.
+        - **Полноразмерный прод (1500+ слов, 3 цикла humanize)** — ~\$0.10–0.30, ~60–120 секунд.
+
+        ## Подсказки
+
+        - Если просто хотите проверить, что сервис жив — берите `cheap_test`.
+        - Если хотите воспроизвести то, что делает команда в проде — берите `real_prod_request`.
+        - `auto_publish: true` сразу публикует на сайт. **Не ставьте**, пока не посмотрели результат глазами.
       operationId: generate
       requestBody:
         required: true
