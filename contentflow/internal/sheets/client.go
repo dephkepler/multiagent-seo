@@ -1,15 +1,17 @@
-// Package sheets reads a keyword cluster for an article topic from a Google
-// Sheets table. The table has two required columns (topic, keyword) and one
-// optional column (title). One topic may repeat across many rows — each row
-// contributes a keyword. The title (if present) is taken from the first
-// matching row.
+// Package sheets reads a keyword cluster + H1 for an article topic from a
+// Google Sheets table. Each row describes one article: the topic column is
+// matched against the requested keyword, the keyword column holds a
+// comma-separated list of target keywords, and the H1 column (optional)
+// gives the article heading the LLM must use.
 //
-// Expected layout (configurable):
+// Expected layout (column letters are configurable):
 //
-//	| A: topic          | B: keyword                  | C: title (optional)            |
-//	| high flyer casino | high flyer casino           | High Flyer Casino Review: ...  |
-//	| high flyer casino | high flyer casino ontario   | High Flyer Casino Review: ...  |
-//	| canplay casino    | canplay casino              | CanPlay Casino Review: ...     |
+//	| A: Title (lookup key)              | B: Keywords (comma-separated)                                                 | C: H1 (optional)                   |
+//	| Android Game Development Services  | Android Game Development, Android Game Development Services, ...              | Android Game Development Services  |
+//	| game performance testing services  | game performance testing, game performance testing services, video game ...   | Game Performance Testing Services  |
+//
+// One row per article. If a topic appears in more than one row (legacy data),
+// keywords from every matching row are merged and the first non-empty H1 wins.
 package sheets
 
 import (
@@ -27,19 +29,21 @@ import (
 	"contentflow/internal/config"
 )
 
-// Result is the data pulled for a given topic: every matching keyword plus an
-// optional suggested article title (from the title column if configured).
+// Result is the data pulled for a given topic: the full list of target
+// keywords (split out of the comma-separated cell) plus an optional H1.
+// The Title field is kept (rather than renamed to H1) so the prompt layer
+// stays untouched — semantically it now holds the article's H1 heading.
 type Result struct {
 	Keywords []string
-	Title    string
+	Title    string // article H1 (from the H1 column)
 }
 
 // Client looks up a keyword cluster for an article topic.
 type Client interface {
-	// Lookup returns Result.Keywords with every keyword whose topic column
-	// matches (case-insensitive, trimmed) and Result.Title with the first
-	// non-empty title among matching rows (if the title column is configured).
-	// Empty Keywords with nil error means "no cluster for this topic".
+	// Lookup matches topic against the topic column (case-insensitive, trimmed),
+	// splits the keyword column by commas into Result.Keywords, and puts the
+	// H1 column value into Result.Title.
+	// Empty Keywords with nil error means "no row for this topic".
 	Lookup(ctx context.Context, topic string) (Result, error)
 }
 
@@ -103,6 +107,7 @@ func (c *client) Lookup(ctx context.Context, topic string) (Result, error) {
 
 	titleIdx := columnOffset(c.cfg.TopicColumn, c.cfg.TitleColumn)
 
+	seen := make(map[string]struct{})
 	var out Result
 	for i, row := range resp.Values {
 		if c.cfg.HeaderRow && i == 0 {
@@ -114,11 +119,19 @@ func (c *client) Lookup(ctx context.Context, topic string) (Result, error) {
 		if normalize(fmt.Sprint(row[0])) != topic {
 			continue
 		}
-		kw := strings.TrimSpace(fmt.Sprint(row[1]))
-		if kw == "" {
-			continue
+
+		for kw := range strings.SplitSeq(fmt.Sprint(row[1]), ",") {
+			kw = strings.TrimSpace(kw)
+			if kw == "" {
+				continue
+			}
+			key := normalize(kw)
+			if _, dup := seen[key]; dup {
+				continue
+			}
+			seen[key] = struct{}{}
+			out.Keywords = append(out.Keywords, kw)
 		}
-		out.Keywords = append(out.Keywords, kw)
 
 		if wantTitle && out.Title == "" && titleIdx >= 0 && len(row) > titleIdx {
 			if t := strings.TrimSpace(fmt.Sprint(row[titleIdx])); t != "" {
@@ -129,8 +142,8 @@ func (c *client) Lookup(ctx context.Context, topic string) (Result, error) {
 
 	c.log.Debug("sheets lookup",
 		"topic", topic,
-		"matches", len(out.Keywords),
-		"has_title", out.Title != "",
+		"keywords", len(out.Keywords),
+		"has_h1", out.Title != "",
 		"rows_scanned", len(resp.Values),
 	)
 	return out, nil

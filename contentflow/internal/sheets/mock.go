@@ -5,14 +5,21 @@ import (
 	"strings"
 )
 
-// NewMock returns an in-memory Client with a few canned topic→Result entries.
-// Used when Google credentials are not configured (dev / local runs).
+// NewMock returns an in-memory Client with a few canned topic→Result entries
+// matching the production sheet layout (one row per article; Keywords pre-split,
+// Title = the article's H1). Used when Google credentials are not configured.
 func NewMock() Client {
 	return &mockClient{
 		data: map[string]Result{
-			"как выбрать кофемашину для дома": {
-				Keywords: []string{"рожковая кофемашина", "капсульная кофемашина", "лучшая кофемашина 2026"},
-				Title:    "Как выбрать кофемашину для дома: подробный гид",
+			"android game development services": {
+				Keywords: []string{
+					"Android Game Development",
+					"Android Game Development Services",
+					"Android Game Development Company",
+					"Android Game App Development",
+					"Android Game Development Studio",
+				},
+				Title: "Android Game Development Services",
 			},
 			"как выбрать ноутбук": {
 				Keywords: []string{"игровой ноутбук", "лёгкий ультрабук", "лучший ноутбук 2026"},

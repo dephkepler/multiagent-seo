@@ -534,8 +534,9 @@ components:
         suggested_title:
           type: string
           description: |
-            Debug: suggested article title from the Sheets `title` column (if any).
-            The LLM is told to adjust only if clearly better.
+            Article H1 — taken from the Sheets H1 column (column C). The LLM is
+            instructed to use this wording verbatim as the article heading.
+            Empty when the matching row has no H1.
           example: "High Flyer Casino Review: Bonuses, Login & Ontario Guide"
         provider:
           type: string

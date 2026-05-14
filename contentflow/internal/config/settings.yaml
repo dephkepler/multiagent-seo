@@ -2,10 +2,10 @@ llm:
   model: "llama-3.3-70b-versatile" # groq free tier; prod: claude-sonnet-4-6
 
 sheets:
-  sheet: "Sheet1"         # worksheet (tab) name
-  topicColumn: "A"        # column with the article topic
-  keywordColumn: "B"      # column with the target keyword
-  titleColumn: "C"        # optional suggested article title; empty string disables
+  sheet: "casino2"        # worksheet (tab) name
+  topicColumn: "A"        # column with the article title (lookup key — matched against the /generate "keyword")
+  keywordColumn: "B"      # column with a comma-separated list of target keywords for the article
+  titleColumn: "C"        # column with the article H1; empty string disables
   headerRow: true         # skip the first row (headers)
 
 worker:

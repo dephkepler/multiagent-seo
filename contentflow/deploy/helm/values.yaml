@@ -23,10 +23,10 @@ configuration:
     model: llama-3.3-70b-versatile
 
   sheets:
-    sheet: Sheet1
-    topicColumn: A
-    keywordColumn: B
-    titleColumn: C
+    sheet: "casino2"    # tab name in the spreadsheet
+    topicColumn: A      # article title (lookup key)
+    keywordColumn: B    # comma-separated target keywords
+    titleColumn: C      # article H1
     headerRow: "true"
     spreadsheetId: ""  # set per-env
 
