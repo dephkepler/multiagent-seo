@@ -19,8 +19,20 @@ paths:
       tags: [Articles]
       summary: Generate an article (synchronous)
       description: |
-        Runs the full pipeline (brief → writer → editor → WordPress draft) and
-        returns the finished article. Takes 30–60s per request.
+        Runs the full 5-step pipeline and returns the finished article:
+
+        1. **SERP** — fetch top competitors via DataForSEO for the keyword.
+        2. **Brief** — LLM call: build an SEO brief from competitors + target keywords.
+        3. **Writer** — LLM call: draft the full article from the brief.
+        4. **Editor** — LLM call: polish for SEO and readability.
+        5. **Originality check + humanize loop** — runs AI detection; if AI score
+           ≥ `ai_threshold`, rewrites the article and re-checks, up to `max_cycles` times.
+
+        Then a WordPress draft is created and the row is saved in Postgres.
+
+        **Latency:** 30–90s per request depending on length and humanize cycles.
+        **Cost:** every request burns LLM tokens — use `max_tokens` and small
+        `min_words/max_words` for cheap tests.
       operationId: generate
       requestBody:
         required: true
@@ -29,31 +41,54 @@ paths:
             schema:
               $ref: '#/components/schemas/GenerateRequest'
             examples:
-              default:
-                summary: Prod-like request (use config defaults)
+              real_prod_request:
+                summary: Real prod-like payload (matches what we actually run)
+                description: |
+                  This is the same body the team uses from Kreya — every knob
+                  set explicitly so you see what the pipeline actually receives.
+                value:
+                  keyword: "crown play casino"
+                  provider: "claude"
+                  model: "claude-sonnet-4-6"
+                  min_words: 200
+                  max_words: 500
+                  max_tokens: 400
+                  max_cycles: 1
+                  ai_threshold: 0.5
+                  language: "en"
+                  auto_publish: false
+              minimal:
+                summary: Minimal request — keyword only, config defaults for the rest
                 value: { keyword: "как выбрать ноутбук" }
               cheap_test:
-                summary: Short article + hard token cap for cheap tests
-                value: { keyword: "test", min_words: 50, max_words: 100, max_tokens: 400 }
-              override_provider:
-                summary: Force Claude for this request
-                value: { keyword: "test", provider: "claude", model: "claude-haiku-4-5-20251001", max_tokens: 500 }
-              full_override:
-                summary: Every knob set explicitly
+                summary: Cheapest possible run (~$0.001) — for smoke-testing the pipeline
+                description: |
+                  Tiny article, hard token cap, only 1 humanize cycle, low threshold.
+                  Use this when you just want to verify the wiring, not the output.
                 value:
-                  keyword: "personal finance basics"
-                  min_words: 800
-                  max_words: 1200
-                  max_tokens: 4000
-                  language: "en"
-                  site_topic: "personal finance"
-                  extra_rules: "never mention specific brokers"
-                  provider: "groq"
-                  model: "llama-3.3-70b-versatile"
+                  keyword: "test"
+                  min_words: 50
+                  max_words: 100
+                  max_tokens: 400
+                  max_cycles: 1
+                  ai_threshold: 0.9
+              override_provider:
+                summary: Force Claude Haiku (cheaper than Sonnet)
+                value:
+                  keyword: "test"
+                  provider: "claude"
+                  model: "claude-haiku-4-5-20251001"
+                  max_tokens: 500
               auto_publish:
-                summary: Generate and publish to the site in one call
+                summary: Generate + publish to WordPress in one call
+                description: |
+                  Skip the manual `POST /articles/{id}/publish` step — the response
+                  comes back already as `status: "published"` with a non-empty `wp_post_url`.
                 value:
                   keyword: "high flyer casino"
+                  provider: "claude"
+                  model: "claude-sonnet-4-6"
+                  max_words: 800
                   auto_publish: true
       responses:
         '200':
@@ -62,6 +97,45 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/GenerateResult'
+              examples:
+                draft_created:
+                  summary: Typical successful generation (draft created, not published)
+                  value:
+                    id: 42
+                    keyword: "crown play casino"
+                    status: "draft"
+                    wp_post_id: 6018
+                    wp_edit_url: "https://multiagent-seo-site.com/wp-admin/post.php?post=6018&action=edit"
+                    wp_post_url: ""
+                    content: "<h1>Crown Play Casino Review</h1><p>Crown Play is an online casino...</p>"
+                    created_at: "2026-05-14T08:59:00Z"
+                    updated_at: "2026-05-14T09:00:12Z"
+                    provider: "claude"
+                    model: "claude-sonnet-4-6"
+                    target_keywords: ["crown play casino", "crown play login", "crown play ontario"]
+                    suggested_title: "Crown Play Casino Review: Bonuses, Login & Ontario Guide"
+                    humanized: false
+                    duration_ms: 42100
+                    check_result:
+                      ai_score: 0.31
+                      plagiarism_score: 0.04
+                      original: true
+                      provider: "huggingface model=Hello-SimpleAI/chatgpt-detector-roberta"
+                    check_cycles:
+                      - cycle: 1
+                        threshold: 0.5
+                        check_result:
+                          ai_score: 0.31
+                          plagiarism_score: 0.04
+                          original: true
+                          provider: "huggingface model=Hello-SimpleAI/chatgpt-detector-roberta"
+                    token_usage:
+                      steps:
+                        - { step: "brief",  input_tokens: 820,  output_tokens: 312 }
+                        - { step: "writer", input_tokens: 1140, output_tokens: 398 }
+                        - { step: "editor", input_tokens: 1502, output_tokens: 401 }
+                      total_input: 3462
+                      total_output: 1111
         '400':
           description: |
             Validation error — one of:
@@ -106,6 +180,26 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/Article'
+              examples:
+                two_articles:
+                  summary: Two rows — one draft, one already published
+                  value:
+                    - ID: 42
+                      Keyword: "crown play casino"
+                      Status: "draft"
+                      WPPostID: 6018
+                      WPEditURL: "https://multiagent-seo-site.com/wp-admin/post.php?post=6018&action=edit"
+                      WPPostURL: ""
+                      CreatedAt: "2026-05-14T08:59:00Z"
+                      UpdatedAt: "2026-05-14T09:00:12Z"
+                    - ID: 41
+                      Keyword: "high flyer casino"
+                      Status: "published"
+                      WPPostID: 6017
+                      WPEditURL: "https://multiagent-seo-site.com/wp-admin/post.php?post=6017&action=edit"
+                      WPPostURL: "https://multiagent-seo-site.com/high-flyer-casino-review/"
+                      CreatedAt: "2026-05-13T17:22:01Z"
+                      UpdatedAt: "2026-05-13T17:24:48Z"
         '500':
           description: Internal error
 
@@ -132,6 +226,16 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PublishResult'
+              examples:
+                published:
+                  summary: Draft flipped to published — has a public URL now
+                  value:
+                    id: 42
+                    status: "published"
+                    wp_post_id: 6018
+                    wp_edit_url: "https://multiagent-seo-site.com/wp-admin/post.php?post=6018&action=edit"
+                    wp_post_url: "https://multiagent-seo-site.com/crown-play-casino-review/"
+                    updated_at: "2026-05-14T09:05:33Z"
         '400':
           description: |
             Either `id` is not a positive integer, or the article has no
@@ -232,6 +336,25 @@ components:
             non-empty `wp_post_url`. If publishing fails, the article stays
             as a draft and the failure is reported in `auto_publish_error`.
           example: false
+        max_cycles:
+          type: integer
+          minimum: 0
+          description: |
+            Max number of humanize rewrite cycles when the originality check
+            fails. `0` / omitted → falls back to `checker.maxCycles` from
+            settings (default 3). Set to `1` in tests to keep runs short.
+          example: 1
+        ai_threshold:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+          description: |
+            AI-detection threshold (0.0–1.0). The article passes when
+            `ai_score < ai_threshold`. `0` / omitted → falls back to
+            `checker.aiThreshold` from settings (default 0.8).
+            Lower = stricter (rewrites more aggressively).
+          example: 0.5
 
     ErrorResponse:
       type: object
@@ -291,6 +414,43 @@ components:
             Debug: suggested article title from the Sheets `title` column (if any).
             The LLM is told to adjust only if clearly better.
           example: "High Flyer Casino Review: Bonuses, Login & Ontario Guide"
+        provider:
+          type: string
+          description: LLM provider actually used (echoes the request or config default).
+          example: "claude"
+        model:
+          type: string
+          description: LLM model actually used.
+          example: "claude-sonnet-4-6"
+        humanized:
+          type: boolean
+          description: |
+            `true` if the article was rewritten at least once after failing the
+            originality check. Always paired with `check_cycles.length > 1`.
+          example: false
+        duration_ms:
+          type: integer
+          format: int64
+          description: Total wall-clock time of the pipeline in milliseconds.
+          example: 42100
+        competitor_data:
+          type: object
+          description: |
+            Raw SERP results from DataForSEO (top organic results for the keyword).
+            Shape mirrors the DataForSEO response — useful for debugging which
+            competitors the brief was built from.
+        check_result:
+          $ref: '#/components/schemas/CheckResult'
+        check_cycles:
+          type: array
+          description: |
+            Every check + rewrite iteration in order. `cycle: 1` is the first
+            check, `cycle: 2` is after the first humanize, etc. Length > 1 only
+            when the first check failed and a rewrite happened.
+          items:
+            $ref: '#/components/schemas/CheckCycle'
+        token_usage:
+          $ref: '#/components/schemas/TokenUsage'
 
     Article:
       type: object
@@ -319,3 +479,71 @@ components:
         wp_edit_url: { type: string, example: "https://site.com/wp-admin/post.php?post=6018&action=edit" }
         wp_post_url: { type: string, example: "https://site.com/online-casino-australia/" }
         updated_at:  { type: string, format: date-time }
+
+    CheckResult:
+      type: object
+      description: Outcome of one originality check (AI detection + plagiarism).
+      properties:
+        ai_score:
+          type: number
+          format: float
+          description: Fraction of text classified as AI-generated (0.0–1.0). Lower is better.
+          example: 0.31
+        plagiarism_score:
+          type: number
+          format: float
+          description: Fraction of text matched against existing sources (0.0–1.0).
+          example: 0.04
+        original:
+          type: boolean
+          description: "`true` when `ai_score < ai_threshold` (passes the gate)."
+          example: true
+        provider:
+          type: string
+          description: Which checker service produced this result.
+          example: "huggingface model=Hello-SimpleAI/chatgpt-detector-roberta"
+        issues:
+          type: array
+          items: { type: string }
+          description: Human-readable reasons the article was flagged. Empty when passing.
+        sentences_flagged:
+          type: array
+          items: { type: string }
+          description: Specific sentences detected as AI-written. Fed back into the humanize prompt.
+        report_url:
+          type: string
+          description: Link to full report on the provider's site (if available).
+
+    CheckCycle:
+      type: object
+      description: One check + (optional) rewrite iteration.
+      properties:
+        cycle:
+          type: integer
+          description: 1-based iteration index.
+          example: 1
+        threshold:
+          type: number
+          format: float
+          description: "`ai_threshold` applied this cycle."
+          example: 0.5
+        check_result:
+          $ref: '#/components/schemas/CheckResult'
+
+    TokenUsage:
+      type: object
+      description: Per-step LLM token consumption. `total_*` = sum of all `steps`.
+      properties:
+        steps:
+          type: array
+          items:
+            type: object
+            properties:
+              step:
+                type: string
+                description: Pipeline step that made the LLM call (`brief`, `writer`, `editor`, `humanize_1`, ...).
+                example: "brief"
+              input_tokens:  { type: integer, example: 820 }
+              output_tokens: { type: integer, example: 312 }
+        total_input:  { type: integer, example: 3462 }
+        total_output: { type: integer, example: 1111 }
