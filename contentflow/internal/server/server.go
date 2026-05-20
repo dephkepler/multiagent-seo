@@ -70,6 +70,8 @@ type GenerateRequest struct {
 	// Pointer so omitted differs from explicit false: nil = use server
 	// default (on when Pexels is configured), true/false = force.
 	IncludeImages *bool
+	// Same pointer pattern. nil = default on (Pexels recommends attribution).
+	IncludeImageAttribution *bool
 }
 
 // GenerateAccepted is the 202 response shape for POST /generate. Generation
@@ -95,17 +97,20 @@ type GenerateAccepted struct {
 type GenerateFunc func(ctx context.Context, req GenerateRequest) (*GenerateAccepted, error)
 
 type ArticleResult struct {
-	ID             int64           `json:"id"`
-	Keyword        string          `json:"keyword"`
-	Site           string          `json:"site"`
-	Status         string          `json:"status"`
-	WPPostID       int64           `json:"wp_post_id"`
-	WPEditURL      string          `json:"wp_edit_url"`
-	WPPostURL      string          `json:"wp_post_url"`
-	CompetitorData json.RawMessage `json:"competitor_data,omitempty"`
-	CheckResult    json.RawMessage `json:"check_result,omitempty"`
-	CreatedAt      time.Time       `json:"created_at"`
-	UpdatedAt      time.Time       `json:"updated_at"`
+	ID              int64           `json:"id"`
+	Keyword         string          `json:"keyword"`
+	Site            string          `json:"site"`
+	Status          string          `json:"status"`
+	WPPostID        int64           `json:"wp_post_id"`
+	WPEditURL       string          `json:"wp_edit_url"`
+	WPPostURL       string          `json:"wp_post_url"`
+	ImagesRequested int             `json:"images_requested"`
+	ImagesResolved  int             `json:"images_resolved"`
+	ImagesSkipped   int             `json:"images_skipped"`
+	CompetitorData  json.RawMessage `json:"competitor_data,omitempty"`
+	CheckResult     json.RawMessage `json:"check_result,omitempty"`
+	CreatedAt       time.Time       `json:"created_at"`
+	UpdatedAt       time.Time       `json:"updated_at"`
 }
 
 type PublishResult struct {
@@ -184,20 +189,21 @@ const maxGenerateBodyBytes = 64 << 10
 func (s *Server) handleGenerate(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxGenerateBodyBytes)
 	var body struct {
-		Keyword       string `json:"keyword"`
-		Site          string `json:"site"`
-		MinWords      int    `json:"min_words"`
-		MaxWords      int    `json:"max_words"`
-		MaxTokens     int    `json:"max_tokens"`
-		Language      string `json:"language"`
-		SiteTopic     string `json:"site_topic"`
-		ExtraRules    string `json:"extra_rules"`
-		Provider      string `json:"provider"`
-		Model         string `json:"model"`
-		AutoPublish   bool   `json:"auto_publish"`
-		MaxCycles     int    `json:"max_cycles"`
-		AIThreshold   float64 `json:"ai_threshold"`
-		IncludeImages *bool   `json:"include_images"`
+		Keyword                 string `json:"keyword"`
+		Site                    string `json:"site"`
+		MinWords                int    `json:"min_words"`
+		MaxWords                int    `json:"max_words"`
+		MaxTokens               int    `json:"max_tokens"`
+		Language                string `json:"language"`
+		SiteTopic               string `json:"site_topic"`
+		ExtraRules              string `json:"extra_rules"`
+		Provider                string `json:"provider"`
+		Model                   string `json:"model"`
+		AutoPublish             bool   `json:"auto_publish"`
+		MaxCycles               int    `json:"max_cycles"`
+		AIThreshold             float64 `json:"ai_threshold"`
+		IncludeImages           *bool   `json:"include_images"`
+		IncludeImageAttribution *bool   `json:"include_image_attribution"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		var maxErr *http.MaxBytesError
@@ -226,20 +232,21 @@ func (s *Server) handleGenerate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	result, err := s.generate(r.Context(), GenerateRequest{
-		Keyword:       body.Keyword,
-		Site:          body.Site,
-		MinWords:      body.MinWords,
-		MaxWords:      body.MaxWords,
-		MaxTokens:     body.MaxTokens,
-		Language:      body.Language,
-		SiteTopic:     body.SiteTopic,
-		ExtraRules:    body.ExtraRules,
-		Provider:      body.Provider,
-		Model:         body.Model,
-		AutoPublish:   body.AutoPublish,
-		MaxCycles:     body.MaxCycles,
-		AIThreshold:   body.AIThreshold,
-		IncludeImages: body.IncludeImages,
+		Keyword:                 body.Keyword,
+		Site:                    body.Site,
+		MinWords:                body.MinWords,
+		MaxWords:                body.MaxWords,
+		MaxTokens:               body.MaxTokens,
+		Language:                body.Language,
+		SiteTopic:               body.SiteTopic,
+		ExtraRules:              body.ExtraRules,
+		Provider:                body.Provider,
+		Model:                   body.Model,
+		AutoPublish:             body.AutoPublish,
+		MaxCycles:               body.MaxCycles,
+		AIThreshold:             body.AIThreshold,
+		IncludeImages:           body.IncludeImages,
+		IncludeImageAttribution: body.IncludeImageAttribution,
 	})
 	if err != nil {
 		if errors.Is(err, ErrNoCluster) {
@@ -290,17 +297,20 @@ func (s *Server) handleGetArticle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.writeJSON(w, r, ArticleResult{
-		ID:             article.ID,
-		Keyword:        article.Keyword,
-		Site:           article.Site,
-		Status:         article.Status,
-		WPPostID:       article.WPPostID,
-		WPEditURL:      article.WPEditURL,
-		WPPostURL:      article.WPPostURL,
-		CompetitorData: article.CompetitorData,
-		CheckResult:    article.CheckResult,
-		CreatedAt:      article.CreatedAt,
-		UpdatedAt:      article.UpdatedAt,
+		ID:              article.ID,
+		Keyword:         article.Keyword,
+		Site:            article.Site,
+		Status:          article.Status,
+		WPPostID:        article.WPPostID,
+		WPEditURL:       article.WPEditURL,
+		WPPostURL:       article.WPPostURL,
+		ImagesRequested: article.ImagesRequested,
+		ImagesResolved:  article.ImagesResolved,
+		ImagesSkipped:   article.ImagesSkipped,
+		CompetitorData:  article.CompetitorData,
+		CheckResult:     article.CheckResult,
+		CreatedAt:       article.CreatedAt,
+		UpdatedAt:       article.UpdatedAt,
 	})
 }
 

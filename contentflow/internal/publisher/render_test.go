@@ -108,7 +108,10 @@ func TestRenderHTML(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := RenderHTML(context.Background(), tc.input, "", tc.resolver)
+			got, _ := RenderHTML(context.Background(), tc.input, RenderOptions{
+				Resolver:    tc.resolver,
+				Attribution: true,
+			})
 			for _, want := range tc.mustContain {
 				if !strings.Contains(got, want) {
 					t.Errorf("expected output to contain %q, got: %s", want, got)
@@ -121,4 +124,58 @@ func TestRenderHTML(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRenderHTMLAttributionOff(t *testing.T) {
+	type photoResolver struct{}
+	// inline resolver returning full Pexels metadata
+	resolver := imgRes(ResolvedImage{
+		URL:             "https://example.com/p.jpg",
+		Photographer:    "Jane Doe",
+		PhotographerURL: "https://example.com/jane",
+		SourceURL:       "https://example.com/source",
+	})
+	_ = photoResolver{}
+
+	on, _ := RenderHTML(context.Background(), "[IMG | x | ALT: a]", RenderOptions{Resolver: resolver, Attribution: true})
+	off, _ := RenderHTML(context.Background(), "[IMG | x | ALT: a]", RenderOptions{Resolver: resolver, Attribution: false})
+
+	if !strings.Contains(on, "<figcaption>") {
+		t.Errorf("attribution=true must include <figcaption>; got %s", on)
+	}
+	if strings.Contains(off, "<figcaption>") || strings.Contains(off, "<figure>") {
+		t.Errorf("attribution=false must omit <figcaption>/<figure>; got %s", off)
+	}
+}
+
+func TestRenderHTMLStats(t *testing.T) {
+	stub := &stubResolver{queue: []stubResult{
+		{url: "https://cdn.example/one.jpg"},
+		{err: errors.New("nope")},
+	}}
+	_, stats := RenderHTML(context.Background(), "[IMG | a | ALT: a1] mid [IMG | b | ALT: a2] end", RenderOptions{
+		Resolver:    stub,
+		Attribution: true,
+	})
+	if stats.ImagesRequested != 2 {
+		t.Errorf("ImagesRequested = %d, want 2", stats.ImagesRequested)
+	}
+	if stats.ImagesResolved != 1 {
+		t.Errorf("ImagesResolved = %d, want 1", stats.ImagesResolved)
+	}
+	if stats.ImagesSkipped != 1 {
+		t.Errorf("ImagesSkipped = %d, want 1", stats.ImagesSkipped)
+	}
+
+	_, stats = RenderHTML(context.Background(), "[IMG | a | ALT: a1]", RenderOptions{Resolver: nil})
+	if stats.ImagesRequested != 1 || stats.ImagesResolved != 0 || stats.ImagesSkipped != 1 {
+		t.Errorf("nil resolver stats = %+v, want {1,0,1}", stats)
+	}
+}
+
+// imgRes returns a resolver that always answers with the given image.
+type imgRes ResolvedImage
+
+func (r imgRes) Resolve(_ context.Context, _, _, _ string) (ResolvedImage, error) {
+	return ResolvedImage(r), nil
 }

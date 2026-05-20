@@ -7,9 +7,9 @@ import (
 	"contentflow/internal/pexels"
 )
 
-// PexelsResolver searches Pexels using the article keyword combined with
-// the placeholder description; ALT is only a fallback when description is
-// empty since it describes the keyword variation, not the desired image.
+// PexelsResolver searches Pexels using "<keyword> <alt> <description>".
+// ALT carries the SEO keyword variant, so weighting it ahead of the
+// LLM's free-form description biases results toward the article topic.
 type PexelsResolver struct {
 	client *pexels.Client
 }
@@ -41,17 +41,11 @@ func (p *PexelsResolver) Resolve(ctx context.Context, keyword, description, alt 
 }
 
 func buildQuery(keyword, description, alt string) string {
-	desc := strings.TrimSpace(description)
-	if desc == "" {
-		desc = strings.TrimSpace(alt)
+	parts := make([]string, 0, 3)
+	for _, s := range []string{keyword, alt, description} {
+		if t := strings.TrimSpace(s); t != "" {
+			parts = append(parts, t)
+		}
 	}
-	kw := strings.TrimSpace(keyword)
-	switch {
-	case kw != "" && desc != "":
-		return kw + " " + desc
-	case desc != "":
-		return desc
-	default:
-		return kw
-	}
+	return strings.Join(parts, " ")
 }

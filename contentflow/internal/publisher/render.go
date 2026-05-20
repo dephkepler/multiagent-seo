@@ -21,7 +21,7 @@ var (
 )
 
 // ResolvedImage is what an ImageResolver returns. URL is required; the
-// remaining fields drive the attribution <figcaption> Pexels requires.
+// remaining fields drive the attribution <figcaption> Pexels recommends.
 type ResolvedImage struct {
 	URL             string
 	Photographer    string
@@ -36,6 +36,22 @@ type ResolvedImage struct {
 // so resolvers can build a topical search query.
 type ImageResolver interface {
 	Resolve(ctx context.Context, keyword, description, alt string) (ResolvedImage, error)
+}
+
+// RenderOptions bundles the knobs RenderHTML accepts so callers don't
+// have to keep growing a positional argument list.
+type RenderOptions struct {
+	Keyword     string
+	Resolver    ImageResolver
+	Attribution bool
+}
+
+// RenderStats reports per-render image accounting so callers can persist
+// it (e.g. in the article row) and surface it in the API.
+type RenderStats struct {
+	ImagesRequested int // how many [IMG | ...] placeholders the LLM emitted
+	ImagesResolved  int // how many got a real Pexels URL
+	ImagesSkipped   int // requested - resolved (no resolver, error, empty URL)
 }
 
 // WithUnsafe lets the writer's literal <a rel="nofollow"> EEAT anchors and
@@ -54,46 +70,55 @@ var md = goldmark.New(
 	),
 )
 
-// RenderHTML converts the LLM's Markdown to HTML. A nil resolver strips
-// all [IMG | ...] placeholders; per-placeholder Resolve errors strip just
-// that one so a single Pexels miss doesn't kill the article.
-// [INTERNAL_LINK | ...] placeholders are always stripped.
-func RenderHTML(ctx context.Context, content, keyword string, resolver ImageResolver) string {
+// RenderHTML converts the LLM's Markdown to HTML and reports image-resolve
+// stats. A nil Resolver strips all [IMG | ...] placeholders; per-placeholder
+// Resolve errors strip just that one so a single Pexels miss doesn't kill
+// the article. [INTERNAL_LINK | ...] placeholders are always stripped.
+func RenderHTML(ctx context.Context, content string, opts RenderOptions) (string, RenderStats) {
+	var stats RenderStats
 	var stripped string
-	if resolver == nil {
-		stripped = imgPlaceholderRE.ReplaceAllString(content, "")
+
+	if opts.Resolver == nil {
+		stripped = imgPlaceholderRE.ReplaceAllStringFunc(content, func(string) string {
+			stats.ImagesRequested++
+			stats.ImagesSkipped++
+			return ""
+		})
 	} else {
 		stripped = imgPlaceholderRE.ReplaceAllStringFunc(content, func(match string) string {
+			stats.ImagesRequested++
 			desc, alt := parseImgPlaceholder(match)
-			if desc == "" && alt == "" && strings.TrimSpace(keyword) == "" {
-				// Nothing to search on — strip rather than emit a broken <img>.
+			if desc == "" && alt == "" && strings.TrimSpace(opts.Keyword) == "" {
+				stats.ImagesSkipped++
 				return ""
 			}
-			img, err := resolver.Resolve(ctx, keyword, desc, alt)
+			img, err := opts.Resolver.Resolve(ctx, opts.Keyword, desc, alt)
 			if err != nil || img.URL == "" {
+				stats.ImagesSkipped++
 				return ""
 			}
-			return renderFigure(img, alt)
+			stats.ImagesResolved++
+			return renderFigure(img, alt, opts.Attribution)
 		})
 	}
 	stripped = internalLinkPlaceholderRE.ReplaceAllString(stripped, "")
 
 	var buf bytes.Buffer
 	if err := md.Convert([]byte(stripped), &buf); err != nil {
-		return content
+		return content, stats
 	}
-	return buf.String()
+	return buf.String(), stats
 }
 
-// renderFigure wraps the image in <figure>/<figcaption> when we have an
-// attribution name; otherwise emits a bare <img> so the markup stays clean
-// for stub resolvers and providers that don't require attribution.
-func renderFigure(img ResolvedImage, alt string) string {
+// renderFigure wraps the image in <figure>/<figcaption> when attribution
+// is on AND we have a photographer name; otherwise emits a bare <img>
+// (or <figure><img></figure> without caption) so the markup stays clean.
+func renderFigure(img ResolvedImage, alt string, attribution bool) string {
 	imgTag := fmt.Sprintf(`<img src=%q alt=%q loading="lazy" />`,
 		html.EscapeString(img.URL),
 		html.EscapeString(alt),
 	)
-	if img.Photographer == "" {
+	if !attribution || img.Photographer == "" {
 		return imgTag
 	}
 

@@ -139,9 +139,14 @@ func (a *Application) generate(ctx context.Context, log *slog.Logger, articleID 
 	if job.includeImages {
 		imgResolver = publisher.NewPexelsResolver(a.pexels)
 	}
+	body, renderStats := publisher.RenderHTML(ctx, edited, publisher.RenderOptions{
+		Keyword:     job.keyword,
+		Resolver:    imgResolver,
+		Attribution: job.imageAttribution,
+	})
 	postID, editURL, err := job.publisher.CreateDraft(ctx, publisher.Post{
 		Title:   job.keyword,
-		Content: publisher.RenderHTML(ctx, edited, job.keyword, imgResolver),
+		Content: body,
 	})
 	if err != nil {
 		return generateOutput{}, fmt.Errorf("publisher draft: %w", err)
@@ -149,6 +154,9 @@ func (a *Application) generate(ctx context.Context, log *slog.Logger, articleID 
 
 	if err := a.repo.UpdateDraft(ctx, articleID, postID, editURL); err != nil {
 		return generateOutput{}, fmt.Errorf("update db: %w", err)
+	}
+	if err := a.repo.SaveImageStats(ctx, articleID, renderStats.ImagesRequested, renderStats.ImagesResolved, renderStats.ImagesSkipped); err != nil {
+		log.Warn("save image stats", "err", err)
 	}
 
 	checkPassed := checkOut.result == nil || checkOut.result.Original
@@ -162,6 +170,9 @@ func (a *Application) generate(ctx context.Context, log *slog.Logger, articleID 
 		"duration_ms", durationMS,
 		"total_input_tokens", summary.TotalInput,
 		"total_output_tokens", summary.TotalOutput,
+		"images_requested", renderStats.ImagesRequested,
+		"images_resolved", renderStats.ImagesResolved,
+		"images_skipped", renderStats.ImagesSkipped,
 	)
 
 	return generateOutput{

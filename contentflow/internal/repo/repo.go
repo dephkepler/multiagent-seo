@@ -21,17 +21,20 @@ const (
 var ErrNotFound = errors.New("article not found")
 
 type Article struct {
-	ID             int64
-	Keyword        string
-	Site           string
-	Status         string
-	WPPostID       int64
-	WPEditURL      string
-	WPPostURL      string
-	CompetitorData json.RawMessage
-	CheckResult    json.RawMessage
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	ID              int64
+	Keyword         string
+	Site            string
+	Status          string
+	WPPostID        int64
+	WPEditURL       string
+	WPPostURL       string
+	ImagesRequested int
+	ImagesResolved  int
+	ImagesSkipped   int
+	CompetitorData  json.RawMessage
+	CheckResult     json.RawMessage
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
 }
 
 type Repo struct {
@@ -68,6 +71,9 @@ func scanArticle(s scannable, a *Article) error {
 		&a.WPPostID,
 		&a.WPEditURL,
 		&a.WPPostURL,
+		&a.ImagesRequested,
+		&a.ImagesResolved,
+		&a.ImagesSkipped,
 		&a.CreatedAt,
 		&a.UpdatedAt,
 	)
@@ -83,6 +89,9 @@ func scanArticleFull(s scannable, a *Article) error {
 		&a.WPPostID,
 		&a.WPEditURL,
 		&a.WPPostURL,
+		&a.ImagesRequested,
+		&a.ImagesResolved,
+		&a.ImagesSkipped,
 		&a.CompetitorData,
 		&a.CheckResult,
 		&a.CreatedAt,
@@ -126,6 +135,7 @@ func (r *Repo) GetArticle(ctx context.Context, id int64) (*Article, error) {
 		       COALESCE(wp_post_id, 0),
 		       COALESCE(wp_edit_url, ''),
 		       COALESCE(wp_post_url, ''),
+		       images_requested, images_resolved, images_skipped,
 		       competitor_data,
 		       check_result,
 		       created_at, updated_at
@@ -138,6 +148,15 @@ func (r *Repo) GetArticle(ctx context.Context, id int64) (*Article, error) {
 		return nil, err
 	}
 	return &a, nil
+}
+
+// SaveImageStats records the per-render image counts. Called once after
+// RenderHTML so /articles/{id} can report how many Pexels lookups landed.
+func (r *Repo) SaveImageStats(ctx context.Context, id int64, requested, resolved, skipped int) error {
+	_, err := r.db.Exec(ctx, `
+		UPDATE articles SET images_requested=$1, images_resolved=$2, images_skipped=$3, updated_at=NOW() WHERE id=$4
+	`, requested, resolved, skipped, id)
+	return err
 }
 
 func (r *Repo) SaveCompetitorData(ctx context.Context, id int64, data any) error {
@@ -168,6 +187,7 @@ func (r *Repo) ListArticles(ctx context.Context) ([]Article, error) {
 		       COALESCE(wp_post_id, 0),
 		       COALESCE(wp_edit_url, ''),
 		       COALESCE(wp_post_url, ''),
+		       images_requested, images_resolved, images_skipped,
 		       created_at, updated_at
 		FROM articles ORDER BY created_at DESC
 	`)

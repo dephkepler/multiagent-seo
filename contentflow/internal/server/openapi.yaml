@@ -73,7 +73,8 @@ info:
       "ai_threshold": 0.5,
       "language": "en",
       "auto_publish": false,
-      "include_images": true
+      "include_images": true,
+      "include_image_attribution": true
     }
     ```
 
@@ -101,6 +102,7 @@ info:
     | `language`     | Язык статьи.                                                              | `ru`, `en`, `uk`.                                                                                    |
     | `auto_publish` | Сразу опубликовать на сайт или оставить черновиком в WP.                  | `false` для теста — посмотреть результат глазами и опубликовать вручную через `/articles/{id}/publish`. `true` — только когда уверены. |
     | `include_images` | Включить картинки из Pexels в статье.                                   | `true` — добавить картинки (нужен ключ Pexels на сервере). `false` — вырезать плейсхолдеры. Не передавать — серверный дефолт. |
+    | `include_image_attribution` | Показывать подпись «Photo by ... on Pexels» под картинкой.   | `true` (дефолт) — с подписью. `false` — голый `<img>`. По лицензии Pexels подпись желательна, но не обязательна. |
 
     ## Как тестировать дёшево
 
@@ -627,6 +629,16 @@ components:
             - `false` — strip all `[IMG | ...]` placeholders, no images in the article.
             - omitted — use the server default (on when Pexels is configured, off otherwise).
           example: true
+        include_image_attribution:
+          type: boolean
+          description: |
+            Whether to render `<figcaption>Photo by ... on Pexels</figcaption>` under each
+            embedded image. Pexels' license recommends attribution but doesn't require it.
+            - `true` (default) — captions are rendered.
+            - `false` — bare `<img>` only, no `<figcaption>` and no `<figure>` wrapper.
+            - omitted — defaults to `true`.
+            Has no effect when `include_images` is `false`.
+          example: true
 
     ErrorResponse:
       type: object
@@ -739,6 +751,20 @@ components:
           type: string
           description: Публичный URL статьи. Заполнен только при `status=published`.
           example: ""
+        images_requested:
+          type: integer
+          description: Сколько `[IMG | ...]` плейсхолдеров LLM написал в статью.
+          example: 3
+        images_resolved:
+          type: integer
+          description: Сколько картинок реально подтянулись из Pexels и попали в HTML.
+          example: 3
+        images_skipped:
+          type: integer
+          description: |
+            Сколько плейсхолдеров отвалилось: либо `include_images: false`, либо
+            Pexels не вернул совпадений, либо ошибка API. `requested = resolved + skipped`.
+          example: 0
         competitor_data:
           type: object
           description: |

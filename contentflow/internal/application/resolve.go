@@ -16,22 +16,23 @@ import (
 
 // resolvedJob holds per-request settings merged with config defaults.
 type resolvedJob struct {
-	keyword       string
-	site          string
-	publisher     publisher.Publisher
-	minWords      int
-	maxWords      int
-	maxTokens     int
-	language      string
-	siteTopic     string
-	extraRules    string
-	cluster       prompt.Cluster
-	client        llm.Client
-	provider      string
-	model         string
-	maxCycles     int
-	aiThreshold   float64
-	includeImages bool
+	keyword          string
+	site             string
+	publisher        publisher.Publisher
+	minWords         int
+	maxWords         int
+	maxTokens        int
+	language         string
+	siteTopic        string
+	extraRules       string
+	cluster          prompt.Cluster
+	client           llm.Client
+	provider         string
+	model            string
+	maxCycles        int
+	aiThreshold      float64
+	includeImages    bool
+	imageAttribution bool
 }
 
 func (a *Application) resolveJob(ctx context.Context, req server.GenerateRequest) (resolvedJob, error) {
@@ -49,17 +50,24 @@ func (a *Application) resolveJob(ctx context.Context, req server.GenerateRequest
 	if req.IncludeImages != nil {
 		includeImages = *req.IncludeImages
 	}
+	// Pexels license recommends attribution but doesn't require it,
+	// so default on, allow per-request opt-out.
+	attribution := true
+	if req.IncludeImageAttribution != nil {
+		attribution = *req.IncludeImageAttribution
+	}
 
 	job := resolvedJob{
-		keyword:       req.Keyword,
-		site:          site,
-		publisher:     pub,
-		minWords:      pickInt(req.MinWords, art.MinWords),
-		maxWords:      pickInt(req.MaxWords, art.MaxWords),
-		language:      pickStr(req.Language, art.Language),
-		siteTopic:     pickStr(req.SiteTopic, art.SiteTopic),
-		extraRules:    pickStr(req.ExtraRules, art.ExtraRules),
-		includeImages: includeImages,
+		keyword:          req.Keyword,
+		site:             site,
+		publisher:        pub,
+		minWords:         pickInt(req.MinWords, art.MinWords),
+		maxWords:         pickInt(req.MaxWords, art.MaxWords),
+		language:         pickStr(req.Language, art.Language),
+		siteTopic:        pickStr(req.SiteTopic, art.SiteTopic),
+		extraRules:       pickStr(req.ExtraRules, art.ExtraRules),
+		includeImages:    includeImages,
+		imageAttribution: attribution,
 	}
 
 	// Require a non-empty cluster: missing targets almost always means a typo
