@@ -203,6 +203,7 @@ paths:
                   set explicitly so you see what the pipeline actually receives.
                 value:
                   keyword: "crown play casino"
+                  site: "default"
                   provider: "claude"
                   model: "claude-sonnet-4-6"
                   min_words: 200
@@ -212,6 +213,7 @@ paths:
                   ai_threshold: 0.5
                   language: "en"
                   auto_publish: false
+                  include_images: true
               minimal:
                 summary: Minimal request — keyword only, config defaults for the rest
                 value: { keyword: "как выбрать ноутбук" }
@@ -233,9 +235,11 @@ paths:
                 summary: Force Claude Haiku (cheaper than Sonnet)
                 value:
                   keyword: "test"
+                  site: "default"
                   provider: "claude"
                   model: "claude-haiku-4-5-20251001"
                   max_tokens: 500
+                  include_images: false
               auto_publish:
                 summary: Generate + publish to WordPress in one call
                 description: |
@@ -243,22 +247,26 @@ paths:
                   comes back already as `status: "published"` with a non-empty `wp_post_url`.
                 value:
                   keyword: "high flyer casino"
+                  site: "default"
                   provider: "claude"
                   model: "claude-sonnet-4-6"
                   max_words: 800
                   auto_publish: true
+                  include_images: true
               playpulse_site:
                 summary: Publish to the playpulse.tech site instead of the default
                 description: |
                   Override the target WordPress site via the `site` field. The alias
                   must exist in `wordpress:` config — unknown aliases return 400
-                  `unknown_site`.
+                  `unknown_site`. `include_images: true` adds Pexels photos with
+                  attribution (requires CF_PEXELS_API_KEY on the server).
                 value:
                   keyword: "crown play casino"
                   site: "playpulse"
                   provider: "claude"
                   model: "claude-sonnet-4-6"
                   max_words: 800
+                  include_images: true
       responses:
         '202':
           description: |
