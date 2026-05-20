@@ -17,6 +17,7 @@ type Photo struct {
 	Photographer    string
 	PhotographerURL string
 	SourceURL       string // Pexels page URL, used for attribution
+	Alt             string // Pexels-provided alt text — used by callers for relevance scoring
 }
 
 type Client struct {
@@ -48,14 +49,32 @@ type searchResponse struct {
 		} `json:"src"`
 		Photographer    string `json:"photographer"`
 		PhotographerURL string `json:"photographer_url"`
+		Alt             string `json:"alt"`
 	} `json:"photos"`
 }
 
-// Search returns the first landscape photo for query, or an error when Pexels
-// has zero matches so callers can decide whether to strip or retry.
+// Search returns the first landscape photo for query; thin wrapper around
+// SearchN(ctx, query, 1) kept so existing callers and tests don't churn.
 func (c *Client) Search(ctx context.Context, query string) (*Photo, error) {
-	u := fmt.Sprintf("%s/search?query=%s&orientation=landscape&per_page=1",
-		c.baseURL, url.QueryEscape(query))
+	photos, err := c.SearchN(ctx, query, 1)
+	if err != nil {
+		return nil, err
+	}
+	if len(photos) == 0 {
+		return nil, fmt.Errorf("pexels: no photos for query %q", query)
+	}
+	return &photos[0], nil
+}
+
+// SearchN returns up to n landscape candidates for query so callers can
+// score them locally (e.g. reject photos whose alt text shares no tokens
+// with the article keyword). Photos with no usable src URL are dropped.
+func (c *Client) SearchN(ctx context.Context, query string, n int) ([]Photo, error) {
+	if n < 1 {
+		n = 1
+	}
+	u := fmt.Sprintf("%s/search?query=%s&orientation=landscape&per_page=%d",
+		c.baseURL, url.QueryEscape(query), n)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
@@ -79,24 +98,23 @@ func (c *Client) Search(ctx context.Context, query string) (*Photo, error) {
 		return nil, fmt.Errorf("decode pexels response: %w", err)
 	}
 
-	if len(body.Photos) == 0 {
-		return nil, fmt.Errorf("pexels: no photos for query %q", query)
+	out := make([]Photo, 0, len(body.Photos))
+	for _, p := range body.Photos {
+		// Prefer "landscape" (blog-friendly aspect); some photos omit it.
+		imgURL := p.Src.Landscape
+		if imgURL == "" {
+			imgURL = p.Src.Large
+		}
+		if imgURL == "" {
+			continue
+		}
+		out = append(out, Photo{
+			URL:             imgURL,
+			Photographer:    p.Photographer,
+			PhotographerURL: p.PhotographerURL,
+			SourceURL:       p.URL,
+			Alt:             p.Alt,
+		})
 	}
-
-	p := body.Photos[0]
-	// Prefer "landscape" (blog-friendly aspect); some photos omit it.
-	imgURL := p.Src.Landscape
-	if imgURL == "" {
-		imgURL = p.Src.Large
-	}
-	if imgURL == "" {
-		return nil, fmt.Errorf("pexels: photo has no usable src for query %q", query)
-	}
-
-	return &Photo{
-		URL:             imgURL,
-		Photographer:    p.Photographer,
-		PhotographerURL: p.PhotographerURL,
-		SourceURL:       p.URL,
-	}, nil
+	return out, nil
 }
