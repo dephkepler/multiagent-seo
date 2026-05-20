@@ -6,10 +6,14 @@ import "context"
 
 // Post is the rendered article handed to a Publisher. Content is opaque
 // payload already rendered to the destination's native body format
-// (HTML for WordPress).
+// (HTML for WordPress). SEOTitle/SEODesc are optional meta fields the
+// implementation maps to its CMS's SEO plugin (e.g. Yoast for WordPress);
+// they're plain text and never appear in Content.
 type Post struct {
-	Title   string
-	Content string
+	Title    string
+	Content  string
+	SEOTitle string
+	SEODesc  string
 	// Status is the CMS-native status string; empty lets the implementation choose.
 	Status string
 }

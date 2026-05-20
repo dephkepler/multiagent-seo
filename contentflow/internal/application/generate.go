@@ -135,18 +135,27 @@ func (a *Application) generate(ctx context.Context, log *slog.Logger, articleID 
 	edited, checkOut := a.checkAndHumanize(ctx, log, articleID, job, edited)
 	steps = append(steps, checkOut.stepUsages...)
 
+	// LLM is instructed to emit "SEO Title:" / "SEO Description:" labelled
+	// trailers for WP meta. They must not appear in the visible body.
+	cleaned, seoTitle, seoDesc := extractSEOFields(edited)
+	if seoTitle != "" || seoDesc != "" {
+		log.Info("seo fields extracted", "seo_title", seoTitle, "seo_desc", seoDesc)
+	}
+
 	var imgResolver publisher.ImageResolver
 	if job.includeImages {
 		imgResolver = publisher.NewPexelsResolver(a.pexels)
 	}
-	body, renderStats := publisher.RenderHTML(ctx, edited, publisher.RenderOptions{
+	body, renderStats := publisher.RenderHTML(ctx, cleaned, publisher.RenderOptions{
 		Keyword:     job.keyword,
 		Resolver:    imgResolver,
 		Attribution: job.imageAttribution,
 	})
 	postID, editURL, err := job.publisher.CreateDraft(ctx, publisher.Post{
-		Title:   job.keyword,
-		Content: body,
+		Title:    job.keyword,
+		Content:  body,
+		SEOTitle: seoTitle,
+		SEODesc:  seoDesc,
 	})
 	if err != nil {
 		return generateOutput{}, fmt.Errorf("publisher draft: %w", err)

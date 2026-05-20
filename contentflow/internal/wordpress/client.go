@@ -36,9 +36,10 @@ func New(cfg config.WordPressConfig, log *slog.Logger) publisher.Publisher {
 }
 
 type wpPost struct {
-	Title   wpContent `json:"title"`
-	Content wpContent `json:"content"`
-	Status  string    `json:"status"`
+	Title   wpContent      `json:"title"`
+	Content wpContent      `json:"content"`
+	Status  string         `json:"status"`
+	Meta    map[string]any `json:"meta,omitempty"`
 }
 
 type wpContent struct {
@@ -111,6 +112,7 @@ func (c *Client) CreateDraft(ctx context.Context, post publisher.Post) (int64, s
 		Title:   wpContent{Raw: post.Title},
 		Content: wpContent{Raw: post.Content},
 		Status:  status,
+		Meta:    seoMeta(post),
 	}
 
 	url := c.cfg.URL + "/wp-json/wp/v2/posts"
@@ -121,6 +123,26 @@ func (c *Client) CreateDraft(ctx context.Context, post publisher.Post) (int64, s
 
 	editURL := fmt.Sprintf("%s/wp-admin/post.php?post=%d&action=edit", c.cfg.URL, result.ID)
 	return result.ID, editURL, nil
+}
+
+// seoMeta returns Yoast (and Rank Math) compatible meta keys. WP silently
+// ignores meta keys the active SEO plugin doesn't register, so sending
+// both vendors is harmless if only one is installed (or neither — then
+// the meta block is a no-op).
+func seoMeta(post publisher.Post) map[string]any {
+	if post.SEOTitle == "" && post.SEODesc == "" {
+		return nil
+	}
+	m := map[string]any{}
+	if post.SEOTitle != "" {
+		m["_yoast_wpseo_title"] = post.SEOTitle
+		m["rank_math_title"] = post.SEOTitle
+	}
+	if post.SEODesc != "" {
+		m["_yoast_wpseo_metadesc"] = post.SEODesc
+		m["rank_math_description"] = post.SEODesc
+	}
+	return m
 }
 
 func (c *Client) Publish(ctx context.Context, postID int64) (string, error) {
