@@ -16,21 +16,22 @@ import (
 
 // resolvedJob holds per-request settings merged with config defaults.
 type resolvedJob struct {
-	keyword     string
-	site        string
-	publisher   publisher.Publisher
-	minWords    int
-	maxWords    int
-	maxTokens   int
-	language    string
-	siteTopic   string
-	extraRules  string
-	cluster     prompt.Cluster
-	client      llm.Client
-	provider    string
-	model       string
-	maxCycles   int
-	aiThreshold float64
+	keyword       string
+	site          string
+	publisher     publisher.Publisher
+	minWords      int
+	maxWords      int
+	maxTokens     int
+	language      string
+	siteTopic     string
+	extraRules    string
+	cluster       prompt.Cluster
+	client        llm.Client
+	provider      string
+	model         string
+	maxCycles     int
+	aiThreshold   float64
+	includeImages bool
 }
 
 func (a *Application) resolveJob(ctx context.Context, req server.GenerateRequest) (resolvedJob, error) {
@@ -42,15 +43,23 @@ func (a *Application) resolveJob(ctx context.Context, req server.GenerateRequest
 		return resolvedJob{}, fmt.Errorf("%w %q: available %v", server.ErrUnknownSite, site, a.cfg.SiteAliases())
 	}
 
+	// Default: render images when Pexels is wired up. Per-request false
+	// short-circuits the resolver so [IMG] placeholders are stripped.
+	includeImages := a.pexels != nil
+	if req.IncludeImages != nil {
+		includeImages = *req.IncludeImages
+	}
+
 	job := resolvedJob{
-		keyword:    req.Keyword,
-		site:       site,
-		publisher:  pub,
-		minWords:   pickInt(req.MinWords, art.MinWords),
-		maxWords:   pickInt(req.MaxWords, art.MaxWords),
-		language:   pickStr(req.Language, art.Language),
-		siteTopic:  pickStr(req.SiteTopic, art.SiteTopic),
-		extraRules: pickStr(req.ExtraRules, art.ExtraRules),
+		keyword:       req.Keyword,
+		site:          site,
+		publisher:     pub,
+		minWords:      pickInt(req.MinWords, art.MinWords),
+		maxWords:      pickInt(req.MaxWords, art.MaxWords),
+		language:      pickStr(req.Language, art.Language),
+		siteTopic:     pickStr(req.SiteTopic, art.SiteTopic),
+		extraRules:    pickStr(req.ExtraRules, art.ExtraRules),
+		includeImages: includeImages,
 	}
 
 	// Require a non-empty cluster: missing targets almost always means a typo

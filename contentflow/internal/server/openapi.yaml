@@ -72,18 +72,20 @@ info:
       "max_cycles": 1,
       "ai_threshold": 0.5,
       "language": "en",
-      "auto_publish": false
+      "auto_publish": false,
+      "include_images": true
     }
     ```
 
-    > **Картинки в статье.** Per-request тумблера нет — картинки добавляются
-    > автоматически, если на сервере выставлен `CF_PEXELS_API_KEY`. LLM сам
-    > расставляет в тексте плейсхолдеры `[IMG | описание | ALT: текст]`,
-    > а на этапе публикации в WordPress они меняются на `<figure><img></figure>`
-    > с фото из Pexels и подписью автора (требование TOS Pexels).
-    > Если ключ Pexels не настроен — плейсхолдеры просто вырезаются,
-    > статья публикуется без картинок. Логи (`pexels configured`
-    > vs `pexels enabled but ... empty`) покажут, в каком состоянии сервис.
+    > **Картинки в статье.** Управляются полем `include_images`:
+    > - `true` — расставить картинки из Pexels (требует `CF_PEXELS_API_KEY` на сервере).
+    > - `false` — выключить картинки, плейсхолдеры `[IMG | ...]` будут вырезаны.
+    > - не передавать — серверный дефолт: включено, если Pexels настроен.
+    >
+    > LLM в любом случае расставляет в тексте `[IMG | описание | ALT: текст]`;
+    > на этапе публикации они либо превращаются в `<figure><img></figure>`
+    > с фото из Pexels + подпись автора (TOS), либо вырезаются.
+    > Логи покажут состояние сервера: `pexels configured` vs `pexels disabled`.
 
     | Поле           | Что это                                                                   | Как выбирать значение                                                                                |
     |----------------|---------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------|
@@ -98,6 +100,7 @@ info:
     | `ai_threshold` | Порог «AI-ности», ниже которого статья считается достаточно «живой».      | 0.5 = строгий (часто переписывает). 0.8 = мягкий (почти всегда пропускает).                          |
     | `language`     | Язык статьи.                                                              | `ru`, `en`, `uk`.                                                                                    |
     | `auto_publish` | Сразу опубликовать на сайт или оставить черновиком в WP.                  | `false` для теста — посмотреть результат глазами и опубликовать вручную через `/articles/{id}/publish`. `true` — только когда уверены. |
+    | `include_images` | Включить картинки из Pexels в статье.                                   | `true` — добавить картинки (нужен ключ Pexels на сервере). `false` — вырезать плейсхолдеры. Не передавать — серверный дефолт. |
 
     ## Как тестировать дёшево
 
@@ -216,6 +219,7 @@ paths:
                 summary: Cheapest possible run (~$0.001) — for smoke-testing the pipeline
                 description: |
                   Tiny article, hard token cap, only 1 humanize cycle, low threshold.
+                  `include_images: false` skips Pexels calls so the test doesn't burn quota.
                   Use this when you just want to verify the wiring, not the output.
                 value:
                   keyword: "test"
@@ -224,6 +228,7 @@ paths:
                   max_tokens: 400
                   max_cycles: 1
                   ai_threshold: 0.9
+                  include_images: false
               override_provider:
                 summary: Force Claude Haiku (cheaper than Sonnet)
                 value:
@@ -605,6 +610,15 @@ components:
             `checker.aiThreshold` from settings (default 0.8).
             Lower = stricter (rewrites more aggressively).
           example: 0.5
+        include_images:
+          type: boolean
+          description: |
+            Whether to render Pexels images for `[IMG | ...]` placeholders the LLM emits.
+            - `true` — fetch images from Pexels and embed `<figure>` with attribution.
+              Requires `CF_PEXELS_API_KEY` on the server; otherwise placeholders are stripped.
+            - `false` — strip all `[IMG | ...]` placeholders, no images in the article.
+            - omitted — use the server default (on when Pexels is configured, off otherwise).
+          example: true
 
     ErrorResponse:
       type: object

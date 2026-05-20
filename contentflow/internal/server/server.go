@@ -67,6 +67,9 @@ type GenerateRequest struct {
 	AutoPublish bool
 	MaxCycles   int
 	AIThreshold float64
+	// Pointer so omitted differs from explicit false: nil = use server
+	// default (on when Pexels is configured), true/false = force.
+	IncludeImages *bool
 }
 
 // GenerateAccepted is the 202 response shape for POST /generate. Generation
@@ -181,19 +184,20 @@ const maxGenerateBodyBytes = 64 << 10
 func (s *Server) handleGenerate(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxGenerateBodyBytes)
 	var body struct {
-		Keyword     string `json:"keyword"`
-		Site        string `json:"site"`
-		MinWords    int    `json:"min_words"`
-		MaxWords    int    `json:"max_words"`
-		MaxTokens   int    `json:"max_tokens"`
-		Language    string `json:"language"`
-		SiteTopic   string `json:"site_topic"`
-		ExtraRules  string `json:"extra_rules"`
-		Provider    string `json:"provider"`
-		Model       string `json:"model"`
-		AutoPublish bool   `json:"auto_publish"`
-		MaxCycles   int     `json:"max_cycles"`
-		AIThreshold float64 `json:"ai_threshold"`
+		Keyword       string `json:"keyword"`
+		Site          string `json:"site"`
+		MinWords      int    `json:"min_words"`
+		MaxWords      int    `json:"max_words"`
+		MaxTokens     int    `json:"max_tokens"`
+		Language      string `json:"language"`
+		SiteTopic     string `json:"site_topic"`
+		ExtraRules    string `json:"extra_rules"`
+		Provider      string `json:"provider"`
+		Model         string `json:"model"`
+		AutoPublish   bool   `json:"auto_publish"`
+		MaxCycles     int    `json:"max_cycles"`
+		AIThreshold   float64 `json:"ai_threshold"`
+		IncludeImages *bool   `json:"include_images"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		var maxErr *http.MaxBytesError
@@ -222,19 +226,20 @@ func (s *Server) handleGenerate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	result, err := s.generate(r.Context(), GenerateRequest{
-		Keyword:     body.Keyword,
-		Site:        body.Site,
-		MinWords:    body.MinWords,
-		MaxWords:    body.MaxWords,
-		MaxTokens:   body.MaxTokens,
-		Language:    body.Language,
-		SiteTopic:   body.SiteTopic,
-		ExtraRules:  body.ExtraRules,
-		Provider:    body.Provider,
-		Model:       body.Model,
-		AutoPublish: body.AutoPublish,
-		MaxCycles:   body.MaxCycles,
-		AIThreshold: body.AIThreshold,
+		Keyword:       body.Keyword,
+		Site:          body.Site,
+		MinWords:      body.MinWords,
+		MaxWords:      body.MaxWords,
+		MaxTokens:     body.MaxTokens,
+		Language:      body.Language,
+		SiteTopic:     body.SiteTopic,
+		ExtraRules:    body.ExtraRules,
+		Provider:      body.Provider,
+		Model:         body.Model,
+		AutoPublish:   body.AutoPublish,
+		MaxCycles:     body.MaxCycles,
+		AIThreshold:   body.AIThreshold,
+		IncludeImages: body.IncludeImages,
 	})
 	if err != nil {
 		if errors.Is(err, ErrNoCluster) {

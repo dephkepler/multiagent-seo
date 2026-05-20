@@ -135,9 +135,13 @@ func (a *Application) generate(ctx context.Context, log *slog.Logger, articleID 
 	edited, checkOut := a.checkAndHumanize(ctx, log, articleID, job, edited)
 	steps = append(steps, checkOut.stepUsages...)
 
+	var imgResolver publisher.ImageResolver
+	if job.includeImages {
+		imgResolver = publisher.NewPexelsResolver(a.pexels)
+	}
 	postID, editURL, err := job.publisher.CreateDraft(ctx, publisher.Post{
 		Title:   job.keyword,
-		Content: publisher.RenderHTML(ctx, edited, job.keyword, publisher.NewPexelsResolver(a.pexels)),
+		Content: publisher.RenderHTML(ctx, edited, job.keyword, imgResolver),
 	})
 	if err != nil {
 		return generateOutput{}, fmt.Errorf("publisher draft: %w", err)
