@@ -3,36 +3,51 @@ package config
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/spf13/viper"
 )
 
+// DefaultSite is the fallback site alias and the one required at startup.
+const DefaultSite = "default"
+
 type Config struct {
-	LLM        LLMConfig        `mapstructure:"llm"`
-	Database   DatabaseConfig   `mapstructure:"database"`
-	Sheets     SheetsConfig     `mapstructure:"sheets"`
-	WordPress  WordPressConfig  `mapstructure:"wordpress"`
-	Telegram   TelegramConfig   `mapstructure:"telegram"`
-	Worker     WorkerConfig     `mapstructure:"worker"`
-	Article    ArticleConfig    `mapstructure:"article"`
-	Server     ServerConfig     `mapstructure:"server"`
-	DataForSEO DataForSEOConfig `mapstructure:"dataforseo"`
-	Checker    CheckerConfig    `mapstructure:"checker"`
+	LLM        LLMConfig                  `mapstructure:"llm"`
+	Database   DatabaseConfig             `mapstructure:"database"`
+	Sheets     SheetsConfig               `mapstructure:"sheets"`
+	WordPress  map[string]WordPressConfig `mapstructure:"wordpress"`
+	Telegram   TelegramConfig             `mapstructure:"telegram"`
+	Worker     WorkerConfig               `mapstructure:"worker"`
+	Article    ArticleConfig              `mapstructure:"article"`
+	Server     ServerConfig               `mapstructure:"server"`
+	DataForSEO DataForSEOConfig           `mapstructure:"dataforseo"`
+	Checker    CheckerConfig              `mapstructure:"checker"`
+	Pexels     PexelsConfig               `mapstructure:"pexels"`
+}
+
+// SiteAliases returns the configured WordPress site aliases sorted alphabetically
+// so logs and error messages stay deterministic.
+func (c *Config) SiteAliases() []string {
+	out := make([]string, 0, len(c.WordPress))
+	for k := range c.WordPress {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 type LLMConfig struct {
 	Provider     string `mapstructure:"provider"`
-	APIKey       string `mapstructure:"apiKey"` // primary key for the default provider
+	APIKey       string `mapstructure:"apiKey"`
 	Model        string `mapstructure:"model"`
-	GroqAPIKey   string `mapstructure:"groqApiKey"`   // optional — used when per-request provider=groq
-	ClaudeAPIKey string `mapstructure:"claudeApiKey"` // optional — used when per-request provider=claude
+	GroqAPIKey   string `mapstructure:"groqApiKey"`
+	ClaudeAPIKey string `mapstructure:"claudeApiKey"`
 }
 
-// KeyFor returns the API key for the given provider, falling back to APIKey
-// when the requested provider matches the default and no explicit per-provider
-// key is configured.
+// KeyFor falls back to APIKey only when the requested provider matches the
+// default one and no per-provider key is set.
 func (c LLMConfig) KeyFor(provider string) string {
 	p := strings.ToLower(strings.TrimSpace(provider))
 	switch p {
@@ -55,6 +70,10 @@ type ServerConfig struct {
 	Addr         string        `mapstructure:"addr"`
 	ReadTimeout  time.Duration `mapstructure:"readTimeout"`
 	WriteTimeout time.Duration `mapstructure:"writeTimeout"`
+	// ShutdownWaitTimeout bounds shutdown drain; past it the DB pool closes
+	// even with goroutines still running, which may surface pool-closed errors.
+	ShutdownWaitTimeout  time.Duration `mapstructure:"shutdownWaitTimeout"`
+	BackgroundJobTimeout time.Duration `mapstructure:"backgroundJobTimeout"`
 }
 
 type DatabaseConfig struct {
@@ -64,11 +83,11 @@ type DatabaseConfig struct {
 type SheetsConfig struct {
 	CredentialsFile string `mapstructure:"credentialsFile"`
 	SpreadsheetID   string `mapstructure:"spreadsheetId"`
-	Sheet           string `mapstructure:"sheet"`         // worksheet name, e.g. "Keywords"
-	TopicColumn     string `mapstructure:"topicColumn"`   // column letter holding the topic, e.g. "A"
-	KeywordColumn   string `mapstructure:"keywordColumn"` // column letter holding the keyword, e.g. "B"
-	TitleColumn     string `mapstructure:"titleColumn"`   // optional column with a suggested article title, e.g. "C"; empty = disabled
-	HeaderRow       bool   `mapstructure:"headerRow"`     // true if row 1 is a header and should be skipped
+	Sheet           string `mapstructure:"sheet"`
+	TopicColumn     string `mapstructure:"topicColumn"`
+	KeywordColumn   string `mapstructure:"keywordColumn"`
+	TitleColumn     string `mapstructure:"titleColumn"` // empty disables suggested-title lookup
+	HeaderRow       bool   `mapstructure:"headerRow"`
 }
 
 type WordPressConfig struct {
@@ -95,10 +114,14 @@ type ArticleConfig struct {
 }
 
 type DataForSEOConfig struct {
-	Login    string `mapstructure:"login"`
-	Password string `mapstructure:"password"`
-	// SERPLimit is how many competitor results to fetch (default 5).
-	SERPLimit int `mapstructure:"serpLimit"`
+	Login     string `mapstructure:"login"`
+	Password  string `mapstructure:"password"`
+	SERPLimit int    `mapstructure:"serpLimit"`
+}
+
+type PexelsConfig struct {
+	Enabled bool   `mapstructure:"enabled"`
+	APIKey  string `mapstructure:"apiKey"`
 }
 
 type CheckerConfig struct {
@@ -106,9 +129,8 @@ type CheckerConfig struct {
 	Provider    string  `mapstructure:"provider"`
 	APIKey      string  `mapstructure:"apiKey"`
 	AIThreshold float64 `mapstructure:"aiThreshold"`
-	// Model is the detector model identifier — only used by providers that support model selection (e.g. huggingface).
-	Model string `mapstructure:"model"`
-	// MaxCycles is the maximum number of humanize rewrites before giving up and publishing anyway.
+	Model       string  `mapstructure:"model"`
+	// MaxCycles caps humanize rewrites; on overflow the article is published as-is.
 	MaxCycles int `mapstructure:"maxCycles"`
 }
 
@@ -129,43 +151,53 @@ func NewConfig() (*Config, error) {
 	v.SetDefault("server.addr", ":8080")
 	v.SetDefault("server.readTimeout", 10*time.Second)
 	v.SetDefault("server.writeTimeout", 5*time.Minute)
+	v.SetDefault("server.shutdownWaitTimeout", 30*time.Second)
+	v.SetDefault("server.backgroundJobTimeout", 15*time.Minute)
 	v.SetDefault("dataforseo.serpLimit", 5)
 	v.SetDefault("checker.provider", "mock")
 	v.SetDefault("checker.aiThreshold", 0.8)
 	v.SetDefault("checker.maxCycles", 3)
+	v.SetDefault("pexels.enabled", true)
 
 	v.SetEnvPrefix("CF")
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	v.AutomaticEnv()
 
+	// Env vars only target the "default" WordPress entry; multi-site config lives in YAML.
 	bindings := map[string]string{
-		"llm.apiKey":             "CF_LLM_API_KEY",
-		"llm.groqApiKey":         "CF_LLM_GROQ_API_KEY",
-		"llm.claudeApiKey":       "CF_LLM_CLAUDE_API_KEY",
-		"database.url":           "CF_DATABASE_URL",
-		"wordpress.url":          "CF_WORDPRESS_URL",
-		"wordpress.user":         "CF_WORDPRESS_USER",
-		"wordpress.appPassword":  "CF_WORDPRESS_APP_PASSWORD",
-		"telegram.botToken":      "CF_TELEGRAM_BOT_TOKEN",
-		"sheets.credentialsFile":  "CF_SHEETS_CREDENTIALS_FILE",
-		"sheets.spreadsheetId":    "CF_SHEETS_SPREADSHEET_ID",
-		"sheets.sheet":            "CF_SHEETS_SHEET",
-		"sheets.topicColumn":      "CF_SHEETS_TOPIC_COLUMN",
-		"sheets.keywordColumn":    "CF_SHEETS_KEYWORD_COLUMN",
-		"sheets.titleColumn":      "CF_SHEETS_TITLE_COLUMN",
-		"sheets.headerRow":        "CF_SHEETS_HEADER_ROW",
-		"dataforseo.login":        "CF_DATAFORSEO_LOGIN",
-		"dataforseo.password":     "CF_DATAFORSEO_PASSWORD",
-		"dataforseo.serpLimit":    "CF_DATAFORSEO_SERP_LIMIT",
-		"checker.provider":        "CF_CHECKER_PROVIDER",
-		"checker.apiKey":          "CF_CHECKER_API_KEY",
-		"checker.aiThreshold":     "CF_CHECKER_AI_THRESHOLD",
-		"checker.model":           "CF_CHECKER_MODEL",
-		"checker.maxCycles":       "CF_CHECKER_MAX_CYCLES",
+		"llm.apiKey":                  "CF_LLM_API_KEY",
+		"llm.groqApiKey":              "CF_LLM_GROQ_API_KEY",
+		"llm.claudeApiKey":            "CF_LLM_CLAUDE_API_KEY",
+		"database.url":                "CF_DATABASE_URL",
+		"wordpress.default.url":         "CF_WORDPRESS_URL",
+		"wordpress.default.user":        "CF_WORDPRESS_USER",
+		"wordpress.default.appPassword": "CF_WORDPRESS_APP_PASSWORD",
+		"telegram.botToken":           "CF_TELEGRAM_BOT_TOKEN",
+		"sheets.credentialsFile":      "CF_SHEETS_CREDENTIALS_FILE",
+		"sheets.spreadsheetId":        "CF_SHEETS_SPREADSHEET_ID",
+		"sheets.sheet":                "CF_SHEETS_SHEET",
+		"sheets.topicColumn":          "CF_SHEETS_TOPIC_COLUMN",
+		"sheets.keywordColumn":        "CF_SHEETS_KEYWORD_COLUMN",
+		"sheets.titleColumn":          "CF_SHEETS_TITLE_COLUMN",
+		"sheets.headerRow":            "CF_SHEETS_HEADER_ROW",
+		"dataforseo.login":            "CF_DATAFORSEO_LOGIN",
+		"dataforseo.password":         "CF_DATAFORSEO_PASSWORD",
+		"dataforseo.serpLimit":        "CF_DATAFORSEO_SERP_LIMIT",
+		"checker.provider":            "CF_CHECKER_PROVIDER",
+		"checker.apiKey":              "CF_CHECKER_API_KEY",
+		"checker.aiThreshold":         "CF_CHECKER_AI_THRESHOLD",
+		"checker.model":               "CF_CHECKER_MODEL",
+		"checker.maxCycles":           "CF_CHECKER_MAX_CYCLES",
+		"pexels.enabled":              "CF_PEXELS_ENABLED",
+		"pexels.apiKey":               "CF_PEXELS_API_KEY",
 	}
 	for key, env := range bindings {
 		_ = v.BindEnv(key, env)
 	}
+
+	// Accept the unprefixed PEXELS_API_KEY too; CF_PEXELS_API_KEY still wins
+	// when both are set (viper resolves in registration order).
+	_ = v.BindEnv("pexels.apiKey", "PEXELS_API_KEY")
 
 	v.SetConfigType("yaml")
 	v.AddConfigPath("./internal/config")
@@ -199,8 +231,7 @@ func NewConfig() (*Config, error) {
 	return cfg, nil
 }
 
-// Validate checks that all required config fields are set.
-// Returns an error listing every missing field, not just the first.
+// Validate reports every missing required field at once, not just the first.
 func (c *Config) Validate() error {
 	var missing []string
 
@@ -210,14 +241,24 @@ func (c *Config) Validate() error {
 	if c.Database.URL == "" {
 		missing = append(missing, "database.url")
 	}
-	if c.WordPress.URL == "" {
-		missing = append(missing, "wordpress.url")
-	}
-	if c.WordPress.User == "" {
-		missing = append(missing, "wordpress.user")
-	}
-	if c.WordPress.AppPassword == "" {
-		missing = append(missing, "wordpress.appPassword")
+	if len(c.WordPress) == 0 {
+		missing = append(missing, "wordpress (at least one site required)")
+	} else {
+		if _, ok := c.WordPress[DefaultSite]; !ok {
+			missing = append(missing, fmt.Sprintf("wordpress.%s (required entry)", DefaultSite))
+		}
+		for _, alias := range c.SiteAliases() {
+			site := c.WordPress[alias]
+			if site.URL == "" {
+				missing = append(missing, fmt.Sprintf("wordpress.%s.url", alias))
+			}
+			if site.User == "" {
+				missing = append(missing, fmt.Sprintf("wordpress.%s.user", alias))
+			}
+			if site.AppPassword == "" {
+				missing = append(missing, fmt.Sprintf("wordpress.%s.appPassword", alias))
+			}
+		}
 	}
 
 	if len(missing) > 0 {

@@ -5,9 +5,7 @@ import (
 	"strings"
 )
 
-// NewMock returns an in-memory Client with a few canned topic→Result entries
-// matching the production sheet layout (one row per article; Keywords pre-split,
-// Title = the article's H1). Used when Google credentials are not configured.
+// NewMock returns an in-memory Client used when Google credentials are missing.
 func NewMock() Client {
 	return &mockClient{
 		data: map[string]Result{
@@ -39,7 +37,7 @@ func (m *mockClient) Lookup(_ context.Context, topic string) (Result, error) {
 	if !ok {
 		return Result{}, nil
 	}
-	// Return a defensive copy so callers can't mutate the mock's state.
+	// Defensive copy so callers can't mutate the mock's state.
 	cp := Result{Title: r.Title, Keywords: make([]string, len(r.Keywords))}
 	copy(cp.Keywords, r.Keywords)
 	return cp, nil

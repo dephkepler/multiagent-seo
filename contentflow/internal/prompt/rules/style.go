@@ -1,49 +1,47 @@
 package rules
 
-// Style, tone, trust signals, and naming conventions.
 var (
 	Conversational = Rule{
 		ID:   "style.conversational",
-		Body: "Style: conversational, simple language, no complex literary or academic constructions",
+		Body: `Active voice and direct statements. Avoid bureaucratic constructs like "It is believed that..." or "One could argue that..." — write as if explaining to a colleague`,
+	}
+	LeadWithConclusion = Rule{
+		ID:   "style.lead_with_conclusion",
+		Body: "Lead with the conclusion in each section, then explain — not the other way around",
 	}
 	NoWater = Rule{
 		ID:   "style.no_water",
-		Body: "No filler text — every paragraph must carry information",
+		Body: "No filler. Do not repeat the same idea in different words — every paragraph must carry new information",
 	}
-	NoAIFillerPhrases = Rule{
-		ID:   "style.no_ai_filler",
-		Body: `No AI filler phrases ("In conclusion", "It is worth noting", "It goes without saying", etc.)`,
+	PassiveVoiceLimit = Rule{
+		ID:   "style.passive_voice_limit",
+		Body: "Passive voice: no more than 15% of sentences",
 	}
-	ConclusionHeadingNatural = Rule{
-		ID:   "style.conclusion_heading_natural",
-		Body: `Conclusion heading must NOT be "Conclusion", "Final words", "Final thoughts", or "Final verdict" — use a natural conversational heading`,
+	VariedSentenceTypes = Rule{
+		ID:   "style.varied_sentence_types",
+		Body: `Vary sentence types throughout — statements, concessions ("yes, this works, but only if..."), rhetorical questions, personal assessments ("honestly", "in practice")`,
 	}
-	EEAT = Rule{
-		ID:   "style.eeat",
-		Body: "Apply EEAT (Experience, Expertise, Authoritativeness, Trust) signals throughout the article",
+	SpecificsOverGeneralizations = Rule{
+		ID:   "style.specifics_over_generalizations",
+		Body: `Use specifics instead of vague generalizations — not "many experts say" but an actual source or number`,
 	}
-	AuthoritativeSource = Rule{
-		ID:   "style.authoritative_source",
-		Body: `Reference at least one authoritative source or expert opinion — a nofollow link is acceptable ([SOURCE: "..." url="..."])`,
-	}
-	PracticalNoFluff = Rule{
-		ID:   "style.practical_no_fluff",
-		Body: "Keep it practical and specific, no fluff",
+	BannedPhrases = Rule{
+		ID:   "style.banned_phrases",
+		Body: `Banned words and phrases: unique, comprehensive, multifaceted, "it should be noted", "it is worth mentioning", thus, aforementioned, "is" (replace with a direct verb), "currently" (replace with a specific year or fact), leverages, utilises, "in today's world", "in conclusion it can be said"`,
 	}
 )
 
-// StyleGroup — tone, anti-clichés, EEAT, conclusion heading naming.
 func StyleGroup() Group {
 	return Group{
-		Name: "Style & Quality",
+		Name: "Writing Style",
 		Rules: []Rule{
 			Conversational,
+			LeadWithConclusion,
 			NoWater,
-			NoAIFillerPhrases,
-			ConclusionHeadingNatural,
-			EEAT,
-			AuthoritativeSource,
-			PracticalNoFluff,
+			PassiveVoiceLimit,
+			VariedSentenceTypes,
+			SpecificsOverGeneralizations,
+			BannedPhrases,
 		},
 	}
 }

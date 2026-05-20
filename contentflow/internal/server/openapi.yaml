@@ -78,6 +78,7 @@ info:
     | Поле           | Что это                                                                   | Как выбирать значение                                                                                |
     |----------------|---------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------|
     | `keyword`      | Тема статьи / основное ключевое слово.                                    | Берётся из Google Sheets с кластерами. Пример: `crown play casino`, `как выбрать ноутбук`.           |
+    | `site`         | На какой WordPress-сайт публиковать черновик.                             | Алиас из секции `wordpress:` в конфиге. Доступны `default` и `playpulse`. Пусто = `default`.         |
     | `provider`     | Какой LLM-провайдер использовать.                                         | `claude` — качественнее, дороже. `groq` — быстрее и дешевле, качество ниже. По умолчанию = из конфига. |
     | `model`        | Конкретная модель внутри провайдера.                                      | Для `claude`: `claude-sonnet-4-6` (баланс), `claude-haiku-4-5-20251001` (дёшево). Для `groq`: `llama-3.3-70b-versatile`. |
     | `min_words`    | Минимальная длина статьи в словах (передаётся в промпт модели).           | Для теста — 200–500. Для прода — 1500–2000.                                                          |
@@ -231,6 +232,18 @@ paths:
                   model: "claude-sonnet-4-6"
                   max_words: 800
                   auto_publish: true
+              playpulse_site:
+                summary: Publish to the playpulse.tech site instead of the default
+                description: |
+                  Override the target WordPress site via the `site` field. The alias
+                  must exist in `wordpress:` config — unknown aliases return 400
+                  `unknown_site`.
+                value:
+                  keyword: "crown play casino"
+                  site: "playpulse"
+                  provider: "claude"
+                  model: "claude-sonnet-4-6"
+                  max_words: 800
       responses:
         '202':
           description: |
@@ -265,6 +278,7 @@ paths:
             - `keyword is too long` (>200 chars)
             - `min_words, max_words and max_tokens must be non-negative`
             - `min_words must be <= max_words`
+            - `unknown_site` — `site` does not match any alias in `wordpress:` config
           content:
             text/plain:
               schema: { type: string }
@@ -493,6 +507,17 @@ components:
           type: string
           maxLength: 200
           example: "как выбрать ноутбук"
+        site:
+          type: string
+          description: |
+            Алиас WordPress-сайта из конфига (`wordpress.<alias>` в `config.yaml`),
+            на котором будет создан черновик статьи. Если поле не передано или
+            пустое — используется `default`. Для добавления нового сайта в этот
+            список заведи новую запись в `wordpress:` и перезапусти сервис.
+
+            На момент написания доступны: `default`, `playpulse`.
+          example: "playpulse"
+          default: "default"
         min_words:
           type: integer
           minimum: 0
@@ -627,6 +652,12 @@ components:
             Заголовок (H1) из колонки C. LLM получит инструкцию использовать
             именно эту формулировку, без пересочинений.
           example: "Android Game Development Services"
+        site:
+          type: string
+          description: |
+            WordPress-сайт, на котором будет создан черновик.
+            Совпадает с переданным `site` в запросе (или `default`, если не передан).
+          example: "default"
         provider:
           type: string
           description: LLM-провайдер для этой генерации (`claude` или `groq`).
@@ -649,6 +680,10 @@ components:
       properties:
         id:          { type: integer, format: int64, example: 42 }
         keyword:     { type: string, example: "Android Game Development Services" }
+        site:
+          type: string
+          description: WordPress-сайт, в который ушла статья. Алиас из `wordpress:` конфига.
+          example: "default"
         status:
           type: string
           enum: [generating, draft, published, failed]
@@ -687,6 +722,7 @@ components:
       properties:
         ID:        { type: integer, format: int64, example: 1 }
         Keyword:   { type: string, example: "high flyer casino" }
+        Site:      { type: string, example: "default", description: "WordPress site alias (from `wordpress:` config)" }
         Status:
           type: string
           enum: [generating, draft, published, failed]
@@ -701,6 +737,7 @@ components:
       type: object
       properties:
         id:          { type: integer, format: int64, example: 10 }
+        site:        { type: string, example: "default", description: "WordPress site alias the article was published to." }
         status:
           type: string
           enum: [published]

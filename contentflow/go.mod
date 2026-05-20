@@ -4,8 +4,10 @@ go 1.25.0
 
 require (
 	github.com/golang-migrate/migrate/v4 v4.19.1
+	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.9.2
 	github.com/spf13/viper v1.21.0
+	github.com/yuin/goldmark v1.8.2
 	golang.org/x/oauth2 v0.36.0
 	google.golang.org/api v0.276.0
 )
@@ -21,7 +23,6 @@ require (
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-viper/mapstructure/v2 v2.4.0 // indirect
 	github.com/google/s2a-go v0.1.9 // indirect
-	github.com/google/uuid v1.6.0 // indirect
 	github.com/googleapis/enterprise-certificate-proxy v0.3.14 // indirect
 	github.com/googleapis/gax-go/v2 v2.21.0 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect

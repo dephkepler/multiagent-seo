@@ -10,6 +10,11 @@ import (
 )
 
 func (a *Application) publishArticle(ctx context.Context, id int64) (*server.PublishResult, error) {
+	log := a.log.With(
+		"request_id", server.RequestIDFromContext(ctx),
+		"article_id", id,
+	)
+
 	article, err := a.repo.GetArticle(ctx, id)
 	if err != nil {
 		if errors.Is(err, repo.ErrNotFound) {
@@ -28,9 +33,15 @@ func (a *Application) publishArticle(ctx context.Context, id int64) (*server.Pub
 		return nil, server.ErrNoDraftToPublish
 	}
 
-	postURL, err := a.wp.Publish(ctx, article.WPPostID)
+	pub, ok := a.publisherFor(article.Site)
+	if !ok {
+		// Stored alias is no longer in YAML — surface it so the operator can restore the entry.
+		return nil, fmt.Errorf("%w %q for article %d", server.ErrUnknownSite, article.Site, id)
+	}
+
+	postURL, err := pub.Publish(ctx, article.WPPostID)
 	if err != nil {
-		return nil, fmt.Errorf("wordpress publish: %w", err)
+		return nil, fmt.Errorf("publish: %w", err)
 	}
 
 	if err := a.repo.MarkPublished(ctx, id, postURL); err != nil {
@@ -42,14 +53,15 @@ func (a *Application) publishArticle(ctx context.Context, id int64) (*server.Pub
 		return nil, fmt.Errorf("fetch article after publish: %w", err)
 	}
 
-	a.log.Info("article published",
-		"article_id", id,
+	log.Info("article published",
+		"site", updated.Site,
 		"wp_post_id", updated.WPPostID,
 		"wp_post_url", updated.WPPostURL,
 	)
 
 	return &server.PublishResult{
 		ID:        updated.ID,
+		Site:      updated.Site,
 		Status:    updated.Status,
 		WPPostID:  updated.WPPostID,
 		WPEditURL: updated.WPEditURL,
@@ -57,4 +69,3 @@ func (a *Application) publishArticle(ctx context.Context, id int64) (*server.Pub
 		UpdatedAt: updated.UpdatedAt,
 	}, nil
 }
-

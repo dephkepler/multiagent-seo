@@ -1,3 +1,4 @@
+// Package wordpress implements publisher.Publisher against the WordPress REST API.
 package wordpress
 
 import (
@@ -6,36 +7,31 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"time"
 
 	"contentflow/internal/config"
+	"contentflow/internal/publisher"
 )
 
-type Client interface {
-	CreateDraft(ctx context.Context, post Post) (int64, string, error)
-	Publish(ctx context.Context, postID int64) (string, error)
-}
+// maxResponseBytes guards against a misbehaving proxy or server; real WP
+// REST replies we use are tiny JSON objects.
+const maxResponseBytes = 1 << 20
 
-type Post struct {
-	Title    string
-	Content  string
-	SEOTitle string
-	SEODesc  string
-	Status   string
-}
-
-type client struct {
+type Client struct {
 	cfg        config.WordPressConfig
 	httpClient *http.Client
+	log        *slog.Logger
 }
 
-func New(cfg config.WordPressConfig) Client {
-	return &client{
+func New(cfg config.WordPressConfig, log *slog.Logger) publisher.Publisher {
+	return &Client{
 		cfg: cfg,
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
+		log: log,
 	}
 }
 
@@ -54,10 +50,8 @@ type wpResponse struct {
 	Link string `json:"link"`
 }
 
-// do marshals body, performs the HTTP request with Basic Auth, verifies the
-// response status matches wantStatus, and decodes the JSON response into out.
-// out may be nil if the caller does not need the decoded response.
-func (c *client) do(ctx context.Context, method, url string, body any, wantStatus int, out any) error {
+// do issues the request with Basic Auth and decodes into out (may be nil).
+func (c *Client) do(ctx context.Context, method, url string, body any, wantStatus int, out any) error {
 	buf, err := json.Marshal(body)
 	if err != nil {
 		return fmt.Errorf("marshal post: %w", err)
@@ -65,36 +59,58 @@ func (c *client) do(ctx context.Context, method, url string, body any, wantStatu
 
 	req, err := http.NewRequestWithContext(ctx, method, url, bytes.NewReader(buf))
 	if err != nil {
-		return fmt.Errorf("wordpress request failed: %w", err)
+		return fmt.Errorf("wordpress request: %w", err)
 	}
 	req.SetBasicAuth(c.cfg.User, c.cfg.AppPassword)
 	req.Header.Set("Content-Type", "application/json")
 
+	start := time.Now()
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("wordpress request failed: %w", err)
+		c.log.Error("wordpress request failed",
+			"method", method,
+			"url", url,
+			"duration_ms", time.Since(start).Milliseconds(),
+			"err", err,
+		)
+		return fmt.Errorf("wordpress request: %w", err)
 	}
 	defer resp.Body.Close()
 
+	durationMS := time.Since(start).Milliseconds()
+	c.log.Info("wordpress request",
+		"method", method,
+		"url", url,
+		"status", resp.StatusCode,
+		"duration_ms", durationMS,
+	)
+
+	// Cap reads so a runaway response can't blow memory.
+	body_ := io.LimitReader(resp.Body, maxResponseBytes)
+
 	if resp.StatusCode != wantStatus {
-		b, _ := io.ReadAll(resp.Body)
+		b, _ := io.ReadAll(body_)
 		return fmt.Errorf("wordpress returned %d: %s", resp.StatusCode, string(b))
 	}
 
 	if out == nil {
 		return nil
 	}
-	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+	if err := json.NewDecoder(body_).Decode(out); err != nil {
 		return fmt.Errorf("decode response: %w", err)
 	}
 	return nil
 }
 
-func (c *client) CreateDraft(ctx context.Context, post Post) (int64, string, error) {
+func (c *Client) CreateDraft(ctx context.Context, post publisher.Post) (int64, string, error) {
+	status := post.Status
+	if status == "" {
+		status = "draft"
+	}
 	body := wpPost{
 		Title:   wpContent{Raw: post.Title},
 		Content: wpContent{Raw: post.Content},
-		Status:  "draft",
+		Status:  status,
 	}
 
 	url := c.cfg.URL + "/wp-json/wp/v2/posts"
@@ -107,7 +123,7 @@ func (c *client) CreateDraft(ctx context.Context, post Post) (int64, string, err
 	return result.ID, editURL, nil
 }
 
-func (c *client) Publish(ctx context.Context, postID int64) (string, error) {
+func (c *Client) Publish(ctx context.Context, postID int64) (string, error) {
 	body := map[string]string{"status": "publish"}
 
 	url := fmt.Sprintf("%s/wp-json/wp/v2/posts/%d", c.cfg.URL, postID)

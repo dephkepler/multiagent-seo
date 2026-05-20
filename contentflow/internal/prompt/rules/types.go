@@ -1,9 +1,5 @@
 // Package rules defines composable writing rules for LLM prompts.
-//
-// A Rule is an atomic instruction (e.g. "H1 must be 50-70 characters").
-// A Group bundles related Rules (e.g. all Title rules).
-// A Preset is a named composition of Groups that a prompt renders into its
-// final body. Presets are immutable — Without/With return new copies.
+// Presets are immutable; Without/With return new copies.
 package rules
 
 import (
@@ -11,26 +7,22 @@ import (
 	"strings"
 )
 
-// Rule is an atomic instruction injected into an LLM prompt.
 type Rule struct {
-	ID   string // stable identifier, e.g. "titles.h1_contains_keyword"
-	Body string // free-form text sent to the model
+	ID   string
+	Body string
 }
 
-// Group bundles related Rules under a section heading.
 type Group struct {
 	Name  string
 	Rules []Rule
 }
 
-// Preset is the composable unit used by prompt builders.
 type Preset struct {
 	Name   string
 	Groups []Group
 }
 
-// Without returns a copy of the preset with the given rule IDs excluded.
-// Empty groups left after filtering are dropped.
+// Without returns a copy with the given rule IDs excluded; empty groups are dropped.
 func (p Preset) Without(ids ...string) Preset {
 	if len(ids) == 0 {
 		return p
@@ -56,8 +48,7 @@ func (p Preset) Without(ids ...string) Preset {
 	return out
 }
 
-// With appends rules to a group by name (creating it if missing) and returns
-// a new preset. Existing order is preserved.
+// With appends rules to a named group (creating it if missing) and returns a new preset.
 func (p Preset) With(groupName string, extra ...Rule) Preset {
 	if len(extra) == 0 {
 		return p
@@ -74,8 +65,7 @@ func (p Preset) With(groupName string, extra ...Rule) Preset {
 	return out
 }
 
-// Render formats the preset as markdown sections with grouped numbered lists.
-// The numbering resets per group.
+// Render formats the preset as markdown sections; numbering resets per group.
 func (p Preset) Render() string {
 	var b strings.Builder
 	for i, g := range p.Groups {

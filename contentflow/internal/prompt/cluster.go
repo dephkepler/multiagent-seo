@@ -5,16 +5,13 @@ import (
 	"strings"
 )
 
-// Cluster holds the target keywords the article must cover and the article's
-// H1 heading from the sheet. Rendered as a labeled block appended after the
-// rule list.
+// Cluster holds the target keywords and H1 heading sourced from the sheet.
 type Cluster struct {
 	Keywords []string
-	Title    string // article H1 (mandatory if non-empty, exact wording)
+	Title    string // article H1; when set the LLM must use exact wording
 }
 
-// Render returns the "## Target Keywords" block (with a mandatory "Article H1"
-// line if Title is set). Returns an empty string when both fields are empty.
+// Render returns the "## Target Keywords" block, or empty when both fields are empty.
 func (c Cluster) Render() string {
 	title := strings.TrimSpace(c.Title)
 	var kws []string

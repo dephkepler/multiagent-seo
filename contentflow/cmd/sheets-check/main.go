@@ -1,12 +1,6 @@
-// sheets-check probes the configured Google Sheets setup end-to-end:
-// fetches metadata (list of tabs), then runs a LookupKeywords for the topic
-// passed as the first argument (or a canned one). Useful for verifying
-// share permissions, tab name, and column layout.
-//
-// Usage:
-//
-//	go run ./cmd/sheets-check
-//	go run ./cmd/sheets-check "my topic"
+// sheets-check probes the configured Google Sheets setup end-to-end so
+// share permissions, tab name, and column layout can be verified without
+// running the full app.
 package main
 
 import (
@@ -40,7 +34,6 @@ func main() {
 
 	ctx := context.Background()
 
-	// Step 1: list all tabs in the spreadsheet so the user can see what's there.
 	data, err := os.ReadFile(cfg.Sheets.CredentialsFile)
 	if err != nil {
 		log.Error("read credentials", "err", err)
@@ -76,9 +69,7 @@ func main() {
 	}
 	fmt.Println()
 
-	// Step 2: dump the first 5 rows across the first 10 columns of the
-	// configured tab (best-effort; ignore errors) so you can eyeball
-	// the layout and pick the right topic/keyword columns.
+	// Best-effort sample of the first rows so the operator can eyeball the layout.
 	dumpRange := fmt.Sprintf("%s!A1:C15", cfg.Sheets.Sheet)
 	if resp, derr := svc.Spreadsheets.Values.Get(cfg.Sheets.SpreadsheetID, dumpRange).
 		Context(ctx).Do(); derr == nil {
@@ -93,7 +84,6 @@ func main() {
 		fmt.Println()
 	}
 
-	// Step 3: run the lookup via the real client, same code path as the app.
 	client, err := sheets.New(ctx, cfg.Sheets, log)
 	if err != nil {
 		log.Error("init sheets client", "err", err)

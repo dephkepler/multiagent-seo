@@ -3,16 +3,22 @@ package application
 import (
 	"context"
 	"fmt"
+	"log/slog"
+	"runtime/debug"
 	"time"
 
+	"contentflow/internal/config"
 	"contentflow/internal/llm"
 	"contentflow/internal/prompt"
+	"contentflow/internal/publisher"
 	"contentflow/internal/server"
 )
 
-// resolvedJob holds all per-request settings after merging with config defaults.
+// resolvedJob holds per-request settings merged with config defaults.
 type resolvedJob struct {
 	keyword     string
+	site        string
+	publisher   publisher.Publisher
 	minWords    int
 	maxWords    int
 	maxTokens   int
@@ -30,8 +36,16 @@ type resolvedJob struct {
 func (a *Application) resolveJob(ctx context.Context, req server.GenerateRequest) (resolvedJob, error) {
 	art := a.cfg.Article
 
+	site := pickStr(req.Site, config.DefaultSite)
+	pub, ok := a.publisherFor(site)
+	if !ok {
+		return resolvedJob{}, fmt.Errorf("%w %q: available %v", server.ErrUnknownSite, site, a.cfg.SiteAliases())
+	}
+
 	job := resolvedJob{
 		keyword:    req.Keyword,
+		site:       site,
+		publisher:  pub,
 		minWords:   pickInt(req.MinWords, art.MinWords),
 		maxWords:   pickInt(req.MaxWords, art.MaxWords),
 		language:   pickStr(req.Language, art.Language),
@@ -39,9 +53,8 @@ func (a *Application) resolveJob(ctx context.Context, req server.GenerateRequest
 		extraRules: pickStr(req.ExtraRules, art.ExtraRules),
 	}
 
-	// Look up target-keyword cluster from Sheets using the article topic.
-	// Require a non-empty cluster: generating without targets wastes tokens
-	// on what is almost certainly a typo or a topic missing from the sheet.
+	// Require a non-empty cluster: missing targets almost always means a typo
+	// or a topic missing from the sheet, so don't waste LLM tokens on it.
 	res, err := a.sh.Lookup(ctx, req.Keyword)
 	if err != nil {
 		return resolvedJob{}, fmt.Errorf("sheets lookup: %w", err)
@@ -57,9 +70,8 @@ func (a *Application) resolveJob(ctx context.Context, req server.GenerateRequest
 	)
 	job.cluster = prompt.Cluster{Keywords: res.Keywords, Title: res.Title}
 
-	// Derive a max-tokens cap: explicit wins, otherwise a buffered guess
-	// from max_words (≈3 tokens per word + 200 overhead). 0 means "no cap" for Groq
-	// and triggers the Claude 4096 default.
+	// ~3 tokens/word + 200 overhead. 0 means "no cap" on Groq and falls back
+	// to Claude's 4096 default.
 	if req.MaxTokens > 0 {
 		job.maxTokens = req.MaxTokens
 	} else if job.maxWords > 0 {
@@ -90,22 +102,15 @@ func (a *Application) resolveJob(ctx context.Context, req server.GenerateRequest
 	return job, nil
 }
 
-// backgroundJobTimeout is the upper bound for one generation pipeline.
-// Long enough for 5000-word articles with multiple humanize cycles on
-// the slowest provider; aborted with context cancellation past this.
-const backgroundJobTimeout = 15 * time.Minute
-
-// processKeyword does the synchronous prep — Sheets lookup, DB row,
-// LLM client setup — then kicks the long-running pipeline off in a
-// goroutine and returns 202 Accepted immediately. Clients poll
-// GET /articles/{id} to learn when generation finished.
+// processKeyword runs the synchronous prep and returns 202 Accepted; the
+// generation pipeline continues in a goroutine and is observed via GET /articles/{id}.
 func (a *Application) processKeyword(ctx context.Context, req server.GenerateRequest) (*server.GenerateAccepted, error) {
 	job, err := a.resolveJob(ctx, req)
 	if err != nil {
 		return nil, err
 	}
 
-	articleID, err := a.repo.CreateArticle(ctx, job.keyword)
+	articleID, err := a.repo.CreateArticle(ctx, job.keyword, job.site)
 	if err != nil {
 		a.log.Error("create article in db", "keyword", job.keyword, "err", err)
 		return nil, fmt.Errorf("create article: %w", err)
@@ -116,19 +121,27 @@ func (a *Application) processKeyword(ctx context.Context, req server.GenerateReq
 		return nil, fmt.Errorf("fetch article: %w", err)
 	}
 
-	a.wg.Add(1)
-	go func() {
-		defer a.wg.Done()
-		bgCtx, cancel := context.WithTimeout(context.Background(), backgroundJobTimeout)
-		defer cancel()
-		a.runGeneration(bgCtx, articleID, job, req.AutoPublish)
-	}()
-
-	a.log.Info("generation accepted",
+	// Propagate request_id so background-goroutine logs correlate to the caller.
+	requestID := server.RequestIDFromContext(ctx)
+	jobLog := a.log.With(
+		"request_id", requestID,
 		"article_id", articleID,
 		"keyword", job.keyword,
+		"site", job.site,
 		"provider", job.provider,
 		"model", job.model,
+	)
+
+	a.wg.Go(func() {
+		bgCtx := server.WithRequestID(a.bgCtx, requestID)
+		bgCtx, cancel := context.WithTimeout(bgCtx, a.cfg.Server.BackgroundJobTimeout)
+		defer cancel()
+		runWithRecover(jobLog, articleID, func() {
+			a.runGeneration(bgCtx, jobLog, articleID, job, req.AutoPublish)
+		})
+	})
+
+	jobLog.Info("generation accepted",
 		"target_keywords", len(job.cluster.Keywords),
 	)
 
@@ -139,38 +152,50 @@ func (a *Application) processKeyword(ctx context.Context, req server.GenerateReq
 		CreatedAt:      article.CreatedAt,
 		TargetKeywords: job.cluster.Keywords,
 		SuggestedTitle: job.cluster.Title,
+		Site:           job.site,
 		Provider:       job.provider,
 		Model:          job.model,
 		StatusURL:      fmt.Sprintf("/articles/%d", article.ID),
 	}, nil
 }
 
-// runGeneration is the body of the background goroutine. It runs the
-// full generation pipeline, persists every result (status, WP urls,
-// competitor data, check result) to the database, and handles
-// auto-publish. Nothing is returned to a caller; clients learn the
-// outcome via GET /articles/{id}.
-func (a *Application) runGeneration(ctx context.Context, articleID int64, job resolvedJob, autoPublish bool) {
-	out, err := a.generate(ctx, articleID, job)
+// runWithRecover keeps a panic in any downstream layer from crashing the process.
+func runWithRecover(log *slog.Logger, articleID int64, fn func()) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			log.Error("background generation panic",
+				"err", rec,
+				"article_id", articleID,
+				"stack", string(debug.Stack()),
+			)
+		}
+	}()
+	fn()
+}
+
+func (a *Application) runGeneration(ctx context.Context, log *slog.Logger, articleID int64, job resolvedJob, autoPublish bool) {
+	out, err := a.generate(ctx, log, articleID, job)
 	if err != nil {
-		a.log.Error("generation failed", "keyword", job.keyword, "article_id", articleID, "err", err)
-		if markErr := a.repo.MarkFailed(ctx, articleID); markErr != nil {
-			a.log.Error("mark article failed", "article_id", articleID, "err", markErr)
+		log.Error("generation failed", "err", err)
+		// Fresh ctx: the job ctx is likely already cancelled, but the failed
+		// status must still land in the DB.
+		markCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if markErr := a.repo.MarkFailed(markCtx, articleID); markErr != nil {
+			log.Error("mark article failed", "err", markErr)
 		}
 		return
 	}
 
 	if autoPublish {
 		if !out.checkPassed {
-			a.log.Warn("auto-publish blocked: originality check failed", "article_id", articleID)
+			log.Warn("auto-publish blocked: originality check failed")
 		} else if _, pubErr := a.publishArticle(ctx, articleID); pubErr != nil {
-			a.log.Error("auto-publish failed", "article_id", articleID, "err", pubErr)
+			log.Error("auto-publish failed", "err", pubErr)
 		}
 	}
 
-	a.log.Info("generation persisted",
-		"article_id", articleID,
-		"keyword", job.keyword,
+	log.Info("generation persisted",
 		"duration_ms", out.durationMS,
 		"total_input_tokens", out.tokenSummary.TotalInput,
 		"total_output_tokens", out.tokenSummary.TotalOutput,

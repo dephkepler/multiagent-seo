@@ -8,9 +8,8 @@ import (
 //go:embed openapi.yaml
 var openAPISpec []byte
 
-// swaggerUIHTML is a self-contained Swagger UI page loaded from a public CDN.
-// It points at /openapi.yaml served by this same process, so "Try it out"
-// requests go to whichever host the user opened /docs on.
+// swaggerUIHTML points at the same-origin /openapi.yaml so "Try it out"
+// requests target whichever host opened /docs.
 const swaggerUIHTML = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -33,9 +32,6 @@ const swaggerUIHTML = `<!DOCTYPE html>
 </body>
 </html>`
 
-// landingPageHTML is shown at the root URL. It's deliberately a small,
-// self-contained "this thing is alive" page that points testers at /docs
-// without needing them to know about Swagger UI in advance.
 const landingPageHTML = `<!DOCTYPE html>
 <html lang="ru">
 <head>

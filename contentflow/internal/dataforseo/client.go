@@ -18,17 +18,23 @@ type SERPItem struct {
 	Description string `json:"description"`
 }
 
+type FeaturedSnippet struct {
+	Title       string `json:"title"`
+	Description string `json:"description"`
+}
+
 type CompetitorData struct {
-	Keyword  string     `json:"keyword"`
-	SerpDate string     `json:"serp_date"`
-	Results  []SERPItem `json:"results"`
+	Keyword         string           `json:"keyword"`
+	SerpDate        string           `json:"serp_date"`
+	Results         []SERPItem       `json:"results"`
+	PAA             []string         `json:"paa,omitempty"`
+	FeaturedSnippet *FeaturedSnippet `json:"featured_snippet,omitempty"`
 }
 
 type Client interface {
 	GetSERP(ctx context.Context, keyword, languageCode string, limit int) (*CompetitorData, error)
 }
 
-// RealClient calls the DataForSEO SERP API with Basic Auth.
 type RealClient struct {
 	login    string
 	password string
@@ -60,6 +66,12 @@ type serpResponse struct {
 				URL          string `json:"url"`
 				Title        string `json:"title"`
 				Description  string `json:"description"`
+				// Nested items appear on aggregate blocks like people_also_ask.
+				Items []struct {
+					Type        string `json:"type"`
+					Title       string `json:"title"`
+					Description string `json:"description"`
+				} `json:"items"`
 			} `json:"items"`
 		} `json:"result"`
 	} `json:"tasks"`
@@ -73,7 +85,7 @@ func (c *RealClient) GetSERP(ctx context.Context, keyword, languageCode string, 
 	payload, err := json.Marshal([]serpRequest{{
 		Keyword:      keyword,
 		LanguageCode: languageCode,
-		LocationCode: 2840, // United States; override via config when needed
+		LocationCode: 2840, // United States
 		Device:       "desktop",
 		Depth:        limit,
 	}})
@@ -116,24 +128,37 @@ func (c *RealClient) GetSERP(ctx context.Context, keyword, languageCode string, 
 	}
 
 	for _, item := range result.Tasks[0].Result[0].Items {
-		if item.Type != "organic" {
-			continue
+		switch item.Type {
+		case "organic":
+			if len(data.Results) >= limit {
+				continue
+			}
+			data.Results = append(data.Results, SERPItem{
+				Rank:        item.RankAbsolute,
+				URL:         item.URL,
+				Title:       item.Title,
+				Description: item.Description,
+			})
+		case "people_also_ask":
+			for _, sub := range item.Items {
+				if sub.Title == "" {
+					continue
+				}
+				data.PAA = append(data.PAA, sub.Title)
+			}
+		case "featured_snippet", "answer_box":
+			if data.FeaturedSnippet == nil {
+				data.FeaturedSnippet = &FeaturedSnippet{
+					Title:       item.Title,
+					Description: item.Description,
+				}
+			}
 		}
-		if len(data.Results) >= limit {
-			break
-		}
-		data.Results = append(data.Results, SERPItem{
-			Rank:        item.RankAbsolute,
-			URL:         item.URL,
-			Title:       item.Title,
-			Description: item.Description,
-		})
 	}
 
 	return data, nil
 }
 
-// MockClient returns hardcoded SERP data — used when credentials are not configured.
 type MockClient struct{}
 
 func NewMock() *MockClient { return &MockClient{} }

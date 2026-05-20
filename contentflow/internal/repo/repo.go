@@ -18,12 +18,12 @@ const (
 	StatusFailed     = "failed"
 )
 
-// ErrNotFound is returned by GetArticle when no row matches the given id.
 var ErrNotFound = errors.New("article not found")
 
 type Article struct {
 	ID             int64
 	Keyword        string
+	Site           string
 	Status         string
 	WPPostID       int64
 	WPEditURL      string
@@ -53,16 +53,17 @@ func (r *Repo) Close() {
 	r.db.Close()
 }
 
-// scannable abstracts pgx.Row and pgx.Rows — both implement Scan(...any) error.
+// scannable abstracts pgx.Row and pgx.Rows so scan helpers work for both.
 type scannable interface {
 	Scan(dest ...any) error
 }
 
-// scanArticle reads a list row (without heavy JSONB columns).
+// scanArticle reads a list row (without the heavy JSONB columns).
 func scanArticle(s scannable, a *Article) error {
 	return s.Scan(
 		&a.ID,
 		&a.Keyword,
+		&a.Site,
 		&a.Status,
 		&a.WPPostID,
 		&a.WPEditURL,
@@ -72,11 +73,12 @@ func scanArticle(s scannable, a *Article) error {
 	)
 }
 
-// scanArticleFull reads a single article row including JSONB columns.
+// scanArticleFull also reads the JSONB columns.
 func scanArticleFull(s scannable, a *Article) error {
 	return s.Scan(
 		&a.ID,
 		&a.Keyword,
+		&a.Site,
 		&a.Status,
 		&a.WPPostID,
 		&a.WPEditURL,
@@ -88,11 +90,11 @@ func scanArticleFull(s scannable, a *Article) error {
 	)
 }
 
-func (r *Repo) CreateArticle(ctx context.Context, keyword string) (int64, error) {
+func (r *Repo) CreateArticle(ctx context.Context, keyword, site string) (int64, error) {
 	var id int64
 	err := r.db.QueryRow(ctx, `
-		INSERT INTO articles (keyword, status) VALUES ($1, $2) RETURNING id
-	`, keyword, StatusGenerating).Scan(&id)
+		INSERT INTO articles (keyword, site, status) VALUES ($1, $2, $3) RETURNING id
+	`, keyword, site, StatusGenerating).Scan(&id)
 	return id, err
 }
 
@@ -110,8 +112,6 @@ func (r *Repo) MarkFailed(ctx context.Context, id int64) error {
 	return err
 }
 
-// MarkPublished flips the article to the published state and records the
-// public WordPress URL.
 func (r *Repo) MarkPublished(ctx context.Context, id int64, postURL string) error {
 	_, err := r.db.Exec(ctx, `
 		UPDATE articles SET status=$1, wp_post_url=$2, updated_at=NOW() WHERE id=$3
@@ -122,7 +122,7 @@ func (r *Repo) MarkPublished(ctx context.Context, id int64, postURL string) erro
 func (r *Repo) GetArticle(ctx context.Context, id int64) (*Article, error) {
 	var a Article
 	row := r.db.QueryRow(ctx, `
-		SELECT id, keyword, status,
+		SELECT id, keyword, site, status,
 		       COALESCE(wp_post_id, 0),
 		       COALESCE(wp_edit_url, ''),
 		       COALESCE(wp_post_url, ''),
@@ -164,7 +164,7 @@ func (r *Repo) SaveCheckResult(ctx context.Context, id int64, result any) error 
 
 func (r *Repo) ListArticles(ctx context.Context) ([]Article, error) {
 	rows, err := r.db.Query(ctx, `
-		SELECT id, keyword, status,
+		SELECT id, keyword, site, status,
 		       COALESCE(wp_post_id, 0),
 		       COALESCE(wp_edit_url, ''),
 		       COALESCE(wp_post_url, ''),

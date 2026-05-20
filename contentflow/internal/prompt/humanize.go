@@ -5,8 +5,8 @@ import (
 	"strings"
 )
 
-// Humanize builds a prompt that rewrites an AI-flagged article to sound more
-// natural while preserving all SEO structure, keyword placement, and facts.
+// Humanize builds a prompt that rewrites an AI-flagged article naturally
+// while preserving SEO structure, keyword placement, and facts.
 func Humanize(article, keyword string, issues, sentencesFlagged []string) string {
 	var sb strings.Builder
 

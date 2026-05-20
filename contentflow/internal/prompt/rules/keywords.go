@@ -1,14 +1,13 @@
 package rules
 
-// Keyword placement and density rules.
 var (
-	PrimaryKeywordInTitle = Rule{
-		ID:   "keywords.primary_in_title",
-		Body: "The primary keyword must appear in the SEO title (direct match)",
+	ExactMatchPositions = Rule{
+		ID:   "keywords.exact_match_positions",
+		Body: "Exact-match primary keyword required in: SEO Title, H1, the first 100 words of the intro, at least one H2, and the conclusion",
 	}
-	PrimaryKeywordInH1 = Rule{
-		ID:   "keywords.primary_in_h1",
-		Body: "The primary keyword must appear in the H1 (direct match)",
+	IndirectMatches = Rule{
+		ID:   "keywords.indirect_matches",
+		Body: "Indirect matches (variations, morphological word forms) spread across at least 4 sections: intro, two different mid-body H2s, and the conclusion",
 	}
 	KeywordDensity = Rule{
 		ID:   "keywords.density",
@@ -16,19 +15,15 @@ var (
 	}
 	KeywordMaxPerParagraph = Rule{
 		ID:   "keywords.max_per_paragraph",
-		Body: "Max 2 keyword repetitions per paragraph",
+		Body: "Max 2 keyword mentions in a single paragraph",
 	}
-	KeywordVariations = Rule{
-		ID:   "keywords.variations",
-		Body: "Use both direct and indirect (morphological) keyword variations throughout the text",
-	}
-	LSIFromBrief = Rule{
-		ID:   "keywords.lsi_from_brief",
-		Body: "Use all LSI keywords and phrases from the brief naturally in context — this is mandatory",
+	LSICoverage = Rule{
+		ID:   "keywords.lsi_coverage",
+		Body: "Use the majority of phrases from the semantic cluster (target: 70%+ coverage). Insert them naturally in context and spread them evenly across the article — do not cluster them in one section",
 	}
 	LSICountInBrief = Rule{
 		ID:   "keywords.lsi_count_in_brief",
-		Body: "Suggest 10-15 LSI keywords (semantically related words and phrases) in the brief",
+		Body: "Brief must suggest 10-15 LSI keywords (semantically related words and phrases)",
 	}
 	TargetKeywordsAllUsed = Rule{
 		ID:   "keywords.target_all_used",
@@ -38,27 +33,20 @@ var (
 		ID:   "keywords.target_natural_spread",
 		Body: "Spread target keywords across different sections — do not cluster them in one paragraph",
 	}
-	TargetKeywordInH2 = Rule{
-		ID:   "keywords.target_in_h2",
-		Body: "At least one target keyword (if provided) must appear in an H2 heading",
-	}
 )
 
-// KeywordsGroup — placement, density, LSI, and target-keyword handling.
 func KeywordsGroup() Group {
 	return Group{
 		Name: "Keywords",
 		Rules: []Rule{
-			PrimaryKeywordInTitle,
-			PrimaryKeywordInH1,
+			ExactMatchPositions,
+			IndirectMatches,
 			KeywordDensity,
 			KeywordMaxPerParagraph,
-			KeywordVariations,
-			LSIFromBrief,
+			LSICoverage,
 			LSICountInBrief,
 			TargetKeywordsAllUsed,
 			TargetKeywordsNaturalSpread,
-			TargetKeywordInH2,
 		},
 	}
 }

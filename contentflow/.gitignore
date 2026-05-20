@@ -5,7 +5,7 @@ credentials.json
 
 # local notes / workspaces
 seo.txt
-contenthttp/
+docs/kreya/
 
 # go build output
 contentflow

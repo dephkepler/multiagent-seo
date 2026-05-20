@@ -1,77 +1,128 @@
-# Contentflow — Pipeline
+# Contentflow — флоу
 
-## Флоу
+Сервис берёт ключ ("crown play casino"), пишет SEO-статью, заливает черновик в WordPress.
+
+---
+
+## Главный флоу
 
 ```
-1. Пользователь → Telegram
-   Отправляет тему, например: "лучшие кофемашины 2024"
-
-2. Keyword Matcher
-   Ищем подходящие ключевые слова из Google Sheets под эту тему
-   (Claude подбирает наиболее релевантные)
-
-3. Brief Agent (Claude)
-   Генерирует ТЗ статьи: структура, H2/H3, ключевые тезисы, целевая аудитория
-
-4. Writer Agent (Claude)
-   Пишет статью по ТЗ
-
-5. Editor Agent (Claude)
-   Правит: SEO, читабельность, стиль
-
-6. WordPress
-   Сохраняем статью как ЧЕРНОВИК (не виден на сайте)
-
-7. Telegram → пользователю
-   "Статья готова: <ссылка на черновик в WP редакторе>"
-   Кнопки:
-     [✅ Опубликовать]
-     [✏️ Редактировал вручную]
-
-8a. Нажал "Опубликовать"
-    → меняем статус черновика на published в WordPress
-    → Telegram: "Готово: <ссылка на статью>"
-    → статус в БД: published
-
-8b. Нажал "Редактировал вручную"
-    → значит пользователь уже поправил текст в WP редакторе
-    → публикуем (draft → publish)
-    → Telegram: "Готово: <ссылка на статью>"
-    → статус в БД: edited (для аудита)
+POST /generate { keyword, site, auto_publish }
+       │
+       ▼
+  [синхронно ~1 сек]
+       │
+       ├─ берём кластер ключей из Google Sheets       (нет → 404)
+       ├─ резолвим WordPress-сайт по алиасу           (нет → 400)
+       ├─ резолвим LLM-клиента                        (claude / groq)
+       ├─ INSERT articles (status=generating)
+       │
+       ▼
+  ◄── 202 { article_id, status_url }                  клиент уходит
+       │
+       ▼
+  [фоновая горутина, до 15 минут]
+       │
+       │   step 1/5  DataForSEO    →  топ-10 SERP + PAA
+       │   step 2/5  LLM brief     →  план статьи (H2/H3)
+       │   step 3/5  LLM writer    →  полная статья (Markdown)
+       │   step 4/5  LLM editor    →  SEO-причёска
+       │   step 5/5  цикл проверки ▼
+       │
+       │      ┌────────────────────────────────────────┐
+       │      │  HuggingFace.Check → ai_score          │
+       │      │                                        │
+       │      │  ai_score < 0.8  ─►  PASS, выходим     │
+       │      │  ai_score ≥ 0.8  ─►  LLM humanize      │
+       │      │                      и снова в Check   │
+       │      │                                        │
+       │      │  до 3 итераций; не дотянули → пишем    │
+       │      │  как есть                              │
+       │      └────────────────────────────────────────┘
+       │
+       │   Markdown → HTML (+Pexels картинки)
+       │   WordPress: создать черновик
+       │   UPDATE articles SET status='draft', wp_post_id
+       │
+       ▼
+   auto_publish?
+       │
+       ├─ нет → конец. Ждём ручного POST /articles/{id}/publish
+       │
+       └─ да  → WordPress: status=publish
+                UPDATE articles SET status='published', wp_post_url
 ```
 
-## Статусы статьи
+---
 
-| Статус       | Описание                                      |
-|-------------|-----------------------------------------------|
-| `pending`    | Ключ взят, генерация ещё не началась          |
-| `generating` | Claude работает над статьёй                   |
-| `draft`      | Черновик создан в WordPress                   |
-| `published`  | Опубликовано через бота без правок            |
-| `edited`     | Опубликовано после ручного редактирования     |
-| `failed`     | Ошибка на одном из этапов                     |
+## Статусы
 
-## Стек
+```
+generating  ─►  draft  ─►  published
+     │
+     └────►  failed   (финал, обратно нет)
+```
 
-| Компонент      | Технология                        |
-|---------------|-----------------------------------|
-| Язык          | Go 1.22+                          |
-| LLM           | Claude (Anthropic SDK)            |
-| База данных   | PostgreSQL                        |
-| Ключевые слова | Google Sheets                    |
-| Публикация    | WordPress REST API                |
-| Бот           | Telegram Bot API                  |
+---
 
-## Переменные окружения
+## Ручная публикация черновика
 
-```env
-ANTHROPIC_API_KEY=        # Claude API ключ
-DATABASE_URL=             # PostgreSQL connection string
-GOOGLE_CREDENTIALS_FILE=  # Путь к JSON ключу сервис аккаунта
-SPREADSHEET_ID=           # ID таблицы Google Sheets
-WP_URL=                   # URL WordPress сайта
-WP_USER=                  # Логин WordPress
-WP_APP_PASSWORD=          # Application Password из WP Admin
-TELEGRAM_BOT_TOKEN=       # Токен бота от @BotFather
-TELEGRAM_ALLOWED_USER_IDS= # Кому разрешено пользоваться ботом
+```
+POST /articles/{id}/publish
+       │
+       ▼
+  берём wp_post_id из БД
+  дёргаем WordPress publish
+  UPDATE articles SET status='published'
+```
+
+Сайт берётся из колонки `articles.site` — публикация идёт туда же,
+где лежит черновик, даже спустя неделю.
+
+---
+
+## Внешние сервисы
+
+```
+Google Sheets   →  список target keywords для темы          ОБЯЗАТЕЛЕН
+LLM (Claude/Groq)  →  brief / writer / editor / humanize    ОБЯЗАТЕЛЕН
+PostgreSQL      →  состояние статьи                          ОБЯЗАТЕЛЕН
+WordPress       →  публикация                                ОБЯЗАТЕЛЕН
+
+DataForSEO      →  SERP конкурентов                  опционально (→ mock)
+HuggingFace     →  AI-детектор                       опционально (→ всегда pass)
+Pexels          →  фото для [IMG|...] плейсхолдеров  опционально (→ выкидываем)
+```
+
+---
+
+## Multi-site WordPress
+
+```yaml
+# config.yaml
+wordpress:
+  default:                  # обязательный алиас
+    url: "https://site-a.com"
+    user: "admin"
+    appPassword: "xxxx xxxx xxxx xxxx"
+  playpulse:                # любой свой
+    url: "https://playpulse.tech"
+    user: "admin"
+    appPassword: "xxxx xxxx xxxx xxxx"
+```
+
+`POST /generate { site: "playpulse" }` → черновик уйдёт туда.
+Пусто → `default`. Неизвестный алиас → `400 unknown_site`.
+
+---
+
+## Shutdown
+
+```
+SIGTERM
+  │
+  ├─ HTTP сервер закрывается (30 сек)
+  ├─ bgCancel() — фоновые горутины получают cancel
+  ├─ wg.Wait() — ждём дренажа
+  └─ закрываем PG pool
 ```

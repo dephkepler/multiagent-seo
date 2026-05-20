@@ -1,17 +1,6 @@
-// Package sheets reads a keyword cluster + H1 for an article topic from a
-// Google Sheets table. Each row describes one article: the topic column is
-// matched against the requested keyword, the keyword column holds a
-// comma-separated list of target keywords, and the H1 column (optional)
-// gives the article heading the LLM must use.
-//
-// Expected layout (column letters are configurable):
-//
-//	| A: Title (lookup key)              | B: Keywords (comma-separated)                                                 | C: H1 (optional)                   |
-//	| Android Game Development Services  | Android Game Development, Android Game Development Services, ...              | Android Game Development Services  |
-//	| game performance testing services  | game performance testing, game performance testing services, video game ...   | Game Performance Testing Services  |
-//
-// One row per article. If a topic appears in more than one row (legacy data),
-// keywords from every matching row are merged and the first non-empty H1 wins.
+// Package sheets reads a keyword cluster and H1 for an article topic from
+// a Google Sheets table. One row per article; on duplicate topic rows the
+// keywords merge and the first non-empty H1 wins.
 package sheets
 
 import (
@@ -29,20 +18,16 @@ import (
 	"contentflow/internal/config"
 )
 
-// Result is the data pulled for a given topic: the full list of target
-// keywords (split out of the comma-separated cell) plus an optional H1.
-// The Title field is kept (rather than renamed to H1) so the prompt layer
-// stays untouched — semantically it now holds the article's H1 heading.
+// Result holds the keywords (split out of the comma-separated cell) and the
+// article H1. Title (not H1) is kept as the field name to keep the prompt
+// layer untouched.
 type Result struct {
 	Keywords []string
-	Title    string // article H1 (from the H1 column)
+	Title    string
 }
 
-// Client looks up a keyword cluster for an article topic.
 type Client interface {
-	// Lookup matches topic against the topic column (case-insensitive, trimmed),
-	// splits the keyword column by commas into Result.Keywords, and puts the
-	// H1 column value into Result.Title.
+	// Lookup returns the row matching topic (case-insensitive, trimmed).
 	// Empty Keywords with nil error means "no row for this topic".
 	Lookup(ctx context.Context, topic string) (Result, error)
 }
@@ -53,8 +38,8 @@ type client struct {
 	log *slog.Logger
 }
 
-// New builds a live Google Sheets client. Returns an error when credentials
-// or spreadsheet ID are missing so callers can fall back to the mock.
+// New returns an error when credentials or spreadsheet ID are missing so
+// callers can fall back to the mock.
 func New(ctx context.Context, cfg config.SheetsConfig, log *slog.Logger) (Client, error) {
 	if cfg.CredentialsFile == "" || cfg.SpreadsheetID == "" {
 		return nil, fmt.Errorf("sheets: credentialsFile and spreadsheetId are required")
@@ -78,8 +63,6 @@ func New(ctx context.Context, cfg config.SheetsConfig, log *slog.Logger) (Client
 	return &client{svc: svc, cfg: cfg, log: log}, nil
 }
 
-// Lookup reads the topic/keyword/title columns for the configured sheet and
-// returns all matching entries.
 func (c *client) Lookup(ctx context.Context, topic string) (Result, error) {
 	topic = normalize(topic)
 	if topic == "" {
@@ -89,7 +72,7 @@ func (c *client) Lookup(ctx context.Context, topic string) (Result, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	// Build a range that spans topic..title (or topic..keyword when title is disabled).
+	// Range spans topic..title, or topic..keyword when title is disabled.
 	endCol := c.cfg.KeywordColumn
 	wantTitle := c.cfg.TitleColumn != ""
 	if wantTitle {
@@ -163,9 +146,8 @@ func normalize(s string) string {
 	return strings.ToLower(strings.TrimSpace(s))
 }
 
-// columnOffset returns the zero-based offset of col relative to base. Both
-// must be single-letter column references in the same row; returns -1 when
-// col is empty or parsing fails.
+// columnOffset returns the zero-based offset of col relative to base.
+// Returns -1 when either is empty or not a single-letter reference.
 func columnOffset(base, col string) int {
 	if base == "" || col == "" {
 		return -1

@@ -14,26 +14,23 @@ import (
 
 const maxKeywordLength = 200
 
-// ErrNoCluster is returned by GenerateFunc when the Sheets lookup returns
-// no keywords for the requested topic. The HTTP layer maps it to 404 so
-// the client learns about the gap before any tokens are spent.
+// ErrNoCluster signals a Sheets lookup returned no keywords for the topic;
+// the HTTP layer maps it to 404 before any tokens are spent.
 var ErrNoCluster = errors.New("no keyword cluster for topic")
 
-// Errors the publish flow can raise. Kept as sentinels so the HTTP layer
-// can map them to precise status codes without string matching.
+// Sentinel errors so the HTTP layer can map publish failures to precise
+// status codes without string matching.
 var (
 	ErrArticleNotFound  = errors.New("article not found")
 	ErrAlreadyPublished = errors.New("article already published")
 	ErrNoDraftToPublish = errors.New("article has no WordPress draft to publish")
+	ErrUnknownSite      = errors.New("unknown wordpress site")
 )
 
-// errorResponse is the JSON shape returned for non-2xx responses that carry
-// a machine-readable reason. Plain-text responses (400 validation, 500
-// internal) stay as text/plain for simplicity.
 type errorResponse struct {
-	Error   string `json:"error"`             // stable code, e.g. "no_cluster"
-	Message string `json:"message"`           // human-readable detail
-	Keyword string `json:"keyword,omitempty"` // echoed back when relevant
+	Error   string `json:"error"`
+	Message string `json:"message"`
+	Keyword string `json:"keyword,omitempty"`
 }
 
 func writeJSONError(w http.ResponseWriter, status int, body errorResponse) {
@@ -42,55 +39,62 @@ func writeJSONError(w http.ResponseWriter, status int, body errorResponse) {
 	_ = json.NewEncoder(w).Encode(body)
 }
 
-// GenerateRequest is the typed input for a generation call. All optional
-// fields fall back to config defaults (or empty) when zero-valued.
-//
-// Target keywords are not part of the request: they're resolved by the
+func (s *Server) writeJSON(w http.ResponseWriter, r *http.Request, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		s.log.Warn("encode response",
+			"err", err,
+			"path", r.URL.Path,
+			"request_id", RequestIDFromContext(r.Context()),
+		)
+	}
+}
+
+// GenerateRequest is the typed input for a generation call. Zero values
+// fall back to config defaults. Target keywords are resolved by the
 // application layer via Sheets lookup using Keyword as the topic.
 type GenerateRequest struct {
 	Keyword     string
+	Site        string
 	MinWords    int
 	MaxWords    int
-	MaxTokens   int    // hard cap on LLM output tokens; 0 = derive or provider default
-	Language    string // "" = config default
-	SiteTopic   string // "" = config default
-	ExtraRules  string // "" = config default
-	Provider    string // "" = config default (groq / claude / anthropic)
-	Model       string // "" = config default
-	AutoPublish  bool    // when true, publish the WP draft right after generation
-	MaxCycles    int     // max humanize rewrite cycles; 0 = config default
-	AIThreshold  float64 // AI detection threshold 0.0–1.0; 0 = config default
+	MaxTokens   int
+	Language    string
+	SiteTopic   string
+	ExtraRules  string
+	Provider    string
+	Model       string
+	AutoPublish bool
+	MaxCycles   int
+	AIThreshold float64
 }
 
-// GenerateAccepted is the 202 response shape for POST /generate. The
-// generation pipeline runs in a background goroutine; the client polls
-// GET /articles/{id} to learn when it finished.
+// GenerateAccepted is the 202 response shape for POST /generate. Generation
+// runs in the background; clients poll GET /articles/{id} for completion.
 type GenerateAccepted struct {
 	ID        int64     `json:"id"`
 	Keyword   string    `json:"keyword"`
-	Status    string    `json:"status"` // always "generating" at this point
+	Status    string    `json:"status"`
 	CreatedAt time.Time `json:"created_at"`
 
-	// Sheets lookup result — already known at submit time. Returning it here
-	// lets the caller verify the cluster without waiting for generation.
+	// Returned eagerly so the caller can verify the cluster without waiting.
 	TargetKeywords []string `json:"target_keywords"`
 	SuggestedTitle string   `json:"suggested_title"`
 
-	// Provider and model the pipeline is going to use.
+	Site string `json:"site"`
+
 	Provider string `json:"provider"`
 	Model    string `json:"model"`
 
-	// Convenience URLs the client should poll.
-	StatusURL string `json:"status_url"` // e.g. /articles/42
+	StatusURL string `json:"status_url"`
 }
 
 type GenerateFunc func(ctx context.Context, req GenerateRequest) (*GenerateAccepted, error)
 
-// ArticleResult is the shape returned by GET /articles/{id}. It mirrors the
-// repo.Article columns the API exposes.
 type ArticleResult struct {
 	ID             int64           `json:"id"`
 	Keyword        string          `json:"keyword"`
+	Site           string          `json:"site"`
 	Status         string          `json:"status"`
 	WPPostID       int64           `json:"wp_post_id"`
 	WPEditURL      string          `json:"wp_edit_url"`
@@ -101,9 +105,9 @@ type ArticleResult struct {
 	UpdatedAt      time.Time       `json:"updated_at"`
 }
 
-// PublishResult is the shape returned by POST /articles/{id}/publish.
 type PublishResult struct {
 	ID        int64     `json:"id"`
+	Site      string    `json:"site"`
 	Status    string    `json:"status"`
 	WPPostID  int64     `json:"wp_post_id"`
 	WPEditURL string    `json:"wp_edit_url"`
@@ -113,8 +117,7 @@ type PublishResult struct {
 
 type PublishFunc func(ctx context.Context, articleID int64) (*PublishResult, error)
 
-// Config controls HTTP server binding and timeouts. Zero values fall
-// back to sensible defaults in New.
+// Config controls HTTP server binding and timeouts; zero values use defaults.
 type Config struct {
 	Addr         string
 	ReadTimeout  time.Duration
@@ -142,19 +145,19 @@ func New(repo *repo.Repo, generate GenerateFunc, publish PublishFunc, log *slog.
 
 	s := &Server{repo: repo, generate: generate, publish: publish, log: log}
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("POST /generate", s.handleGenerate)
-	mux.HandleFunc("GET /articles", s.handleArticles)
-	mux.HandleFunc("GET /articles/{id}", s.handleGetArticle)
-	mux.HandleFunc("POST /articles/{id}/publish", s.handlePublish)
-	mux.HandleFunc("GET /openapi.yaml", s.handleOpenAPISpec)
-	mux.HandleFunc("GET /docs", s.handleSwaggerUI)
-	mux.HandleFunc("GET /docs/", s.handleSwaggerUI)
-	mux.HandleFunc("GET /{$}", s.handleLandingPage)
+	appMux := http.NewServeMux()
+	appMux.HandleFunc("POST /generate", s.handleGenerate)
+	appMux.HandleFunc("GET /articles", s.handleArticles)
+	appMux.HandleFunc("GET /articles/{id}", s.handleGetArticle)
+	appMux.HandleFunc("POST /articles/{id}/publish", s.handlePublish)
+	appMux.HandleFunc("GET /openapi.yaml", s.handleOpenAPISpec)
+	appMux.HandleFunc("GET /docs", s.handleSwaggerUI)
+	appMux.HandleFunc("GET /docs/", s.handleSwaggerUI)
+	appMux.HandleFunc("GET /{$}", s.handleLandingPage)
 
 	s.http = &http.Server{
 		Addr:         cfg.Addr,
-		Handler:      recoverMiddleware(mux, log),
+		Handler:      requestIDMiddleware(accessLogMiddleware(recoverMiddleware(appMux, log), log)),
 		ReadTimeout:  cfg.ReadTimeout,
 		WriteTimeout: cfg.WriteTimeout,
 	}
@@ -171,9 +174,15 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	return s.http.Shutdown(ctx)
 }
 
+// Real payloads are a few hundred bytes; the cap defends json.NewDecoder
+// against accidental or malicious bloat.
+const maxGenerateBodyBytes = 64 << 10
+
 func (s *Server) handleGenerate(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxGenerateBodyBytes)
 	var body struct {
 		Keyword     string `json:"keyword"`
+		Site        string `json:"site"`
 		MinWords    int    `json:"min_words"`
 		MaxWords    int    `json:"max_words"`
 		MaxTokens   int    `json:"max_tokens"`
@@ -186,7 +195,16 @@ func (s *Server) handleGenerate(w http.ResponseWriter, r *http.Request) {
 		MaxCycles   int     `json:"max_cycles"`
 		AIThreshold float64 `json:"ai_threshold"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Keyword == "" {
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+			return
+		}
+		http.Error(w, "invalid json body", http.StatusBadRequest)
+		return
+	}
+	if body.Keyword == "" {
 		http.Error(w, "keyword is required", http.StatusBadRequest)
 		return
 	}
@@ -205,6 +223,7 @@ func (s *Server) handleGenerate(w http.ResponseWriter, r *http.Request) {
 
 	result, err := s.generate(r.Context(), GenerateRequest{
 		Keyword:     body.Keyword,
+		Site:        body.Site,
 		MinWords:    body.MinWords,
 		MaxWords:    body.MaxWords,
 		MaxTokens:   body.MaxTokens,
@@ -227,14 +246,21 @@ func (s *Server) handleGenerate(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
+		if errors.Is(err, ErrUnknownSite) {
+			s.log.Warn("generate aborted: unknown site", "site", body.Site)
+			writeJSONError(w, http.StatusBadRequest, errorResponse{
+				Error:   "unknown_site",
+				Message: err.Error(),
+			})
+			return
+		}
 		s.log.Error("generate", "keyword", body.Keyword, "err", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusAccepted)
-	json.NewEncoder(w).Encode(result)
+	s.writeJSON(w, r, result)
 }
 
 func (s *Server) handleGetArticle(w http.ResponseWriter, r *http.Request) {
@@ -258,10 +284,10 @@ func (s *Server) handleGetArticle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(ArticleResult{
+	s.writeJSON(w, r, ArticleResult{
 		ID:             article.ID,
 		Keyword:        article.Keyword,
+		Site:           article.Site,
 		Status:         article.Status,
 		WPPostID:       article.WPPostID,
 		WPEditURL:      article.WPEditURL,
@@ -284,8 +310,7 @@ func (s *Server) handleArticles(w http.ResponseWriter, r *http.Request) {
 		articles = []repo.Article{}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(articles)
+	s.writeJSON(w, r, articles)
 }
 
 func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request) {
@@ -320,6 +345,5 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(result)
+	s.writeJSON(w, r, result)
 }

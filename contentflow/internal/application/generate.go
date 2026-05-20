@@ -3,29 +3,27 @@ package application
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"contentflow/internal/checker"
 	"contentflow/internal/dataforseo"
 	"contentflow/internal/prompt"
-	"contentflow/internal/wordpress"
+	"contentflow/internal/publisher"
 )
 
-// StepUsage holds token counts for one LLM call.
 type StepUsage struct {
 	Step         string `json:"step"`
 	InputTokens  int    `json:"input_tokens"`
 	OutputTokens int    `json:"output_tokens"`
 }
 
-// TokenSummary is the token usage breakdown returned in the API response.
 type TokenSummary struct {
-	Steps        []StepUsage `json:"steps"`
-	TotalInput   int         `json:"total_input"`
-	TotalOutput  int         `json:"total_output"`
+	Steps       []StepUsage `json:"steps"`
+	TotalInput  int         `json:"total_input"`
+	TotalOutput int         `json:"total_output"`
 }
 
-// generateOutput carries the article content plus pipeline metadata back to the caller.
 type generateOutput struct {
 	content        string
 	competitorData any
@@ -39,7 +37,6 @@ type generateOutput struct {
 	durationMS     int64
 }
 
-// CycleRecord tracks one check+rewrite iteration.
 type CycleRecord struct {
 	Cycle       int             `json:"cycle"`
 	Threshold   float64         `json:"threshold"`
@@ -53,15 +50,22 @@ type checkOutput struct {
 	stepUsages []StepUsage
 }
 
-func (a *Application) generate(ctx context.Context, articleID int64, job resolvedJob) (generateOutput, error) {
+func (a *Application) generate(ctx context.Context, log *slog.Logger, articleID int64, job resolvedJob) (generateOutput, error) {
 	start := time.Now()
 	var steps []StepUsage
 
 	complete := func(step, p string) (string, error) {
+		stepStart := time.Now()
 		content, u, err := job.client.Complete(ctx, p, job.maxTokens)
 		if err != nil {
 			return "", err
 		}
+		log.Debug("llm step done",
+			"step", step,
+			"duration_ms", time.Since(stepStart).Milliseconds(),
+			"input_tokens", u.InputTokens,
+			"output_tokens", u.OutputTokens,
+		)
 		steps = append(steps, StepUsage{
 			Step:         step,
 			InputTokens:  u.InputTokens,
@@ -70,22 +74,19 @@ func (a *Application) generate(ctx context.Context, articleID int64, job resolve
 		return content, nil
 	}
 
-	// Step 1: fetch top competitors from SERP.
-	a.log.Info("step 1/5: serp competitors — fetching top results",
-		"keyword", job.keyword,
+	log.Info("step 1/5: serp competitors — fetching top results",
 		"limit", a.cfg.DataForSEO.SERPLimit,
 	)
 	serpData, err := a.serp.GetSERP(ctx, job.keyword, job.language, a.cfg.DataForSEO.SERPLimit)
 	if err != nil {
-		a.log.Warn("serp lookup failed, continuing without competitor data", "err", err)
+		log.Warn("serp lookup failed, continuing without competitor data", "err", err)
 		serpData, _ = dataforseo.NewMock().GetSERP(ctx, job.keyword, job.language, 0)
 	} else {
-		a.log.Info("serp competitors loaded",
+		log.Info("serp competitors loaded",
 			"count", len(serpData.Results),
-			"keyword", job.keyword,
 		)
 		if saveErr := a.repo.SaveCompetitorData(ctx, articleID, serpData); saveErr != nil {
-			a.log.Warn("save competitor data", "err", saveErr)
+			log.Warn("save competitor data", "err", saveErr)
 		}
 	}
 
@@ -93,53 +94,53 @@ func (a *Application) generate(ctx context.Context, articleID int64, job resolve
 	for _, r := range serpData.Results {
 		competitors.Items = append(competitors.Items, prompt.CompetitorItem{
 			Rank:        r.Rank,
+			URL:         r.URL,
 			Title:       r.Title,
 			Description: r.Description,
 		})
 	}
+	competitors.PAA = append(competitors.PAA, serpData.PAA...)
+	if serpData.FeaturedSnippet != nil {
+		competitors.FeaturedSnippet = &prompt.FeaturedSnippetItem{
+			Title:       serpData.FeaturedSnippet.Title,
+			Description: serpData.FeaturedSnippet.Description,
+		}
+	}
 
-	// Step 2: brief.
-	a.log.Info("step 2/5: brief — building with competitor data + keywords",
-		"keyword", job.keyword,
+	log.Info("step 2/5: brief — building with competitor data + keywords",
 		"competitors", len(competitors.Items),
 		"target_keywords", len(job.cluster.Keywords),
-		"provider", job.provider,
-		"model", job.model,
 	)
-	brief, err := complete("brief", prompt.Brief(job.keyword, job.language, job.siteTopic, job.extraRules, competitors))
+	brief, err := complete("brief", prompt.Brief(job.keyword, job.language, job.cluster, job.siteTopic, job.extraRules, competitors))
 	if err != nil {
 		return generateOutput{}, fmt.Errorf("brief: %w", err)
 	}
 
-	// Step 3: write full article.
-	a.log.Info("step 3/5: writing — full article from brief",
-		"keyword", job.keyword,
+	log.Info("step 3/5: writing — full article from brief",
 		"min_words", job.minWords,
 		"max_words", job.maxWords,
 	)
-	article, err := complete("writer", prompt.Writer(brief, job.keyword, job.language, job.minWords, job.maxWords, job.cluster))
+	article, err := complete("writer", prompt.Writer(brief, job.keyword, job.language, job.minWords, job.maxWords, job.cluster, competitors))
 	if err != nil {
 		return generateOutput{}, fmt.Errorf("writer: %w", err)
 	}
 
-	// Step 4: editor pass.
-	a.log.Info("step 4/5: editing — SEO polish pass", "keyword", job.keyword)
-	edited, err := complete("editor", prompt.Editor(article, job.keyword, job.minWords, job.maxWords, job.cluster))
+	log.Info("step 4/5: editing — SEO polish pass")
+	edited, err := complete("editor", prompt.Editor(article, job.keyword, job.minWords, job.maxWords, job.cluster, competitors))
 	if err != nil {
 		return generateOutput{}, fmt.Errorf("editor: %w", err)
 	}
 
-	// Step 5: originality check + humanize loop.
-	a.log.Info("step 5/5: originality check — AI detection + plagiarism", "keyword", job.keyword)
-	edited, checkOut := a.checkAndHumanize(ctx, articleID, job, edited)
+	log.Info("step 5/5: originality check — AI detection + plagiarism")
+	edited, checkOut := a.checkAndHumanize(ctx, log, articleID, job, edited)
 	steps = append(steps, checkOut.stepUsages...)
 
-	postID, editURL, err := a.wp.CreateDraft(ctx, wordpress.Post{
+	postID, editURL, err := job.publisher.CreateDraft(ctx, publisher.Post{
 		Title:   job.keyword,
-		Content: edited,
+		Content: publisher.RenderHTML(ctx, edited, job.keyword, publisher.NewPexelsResolver(a.pexels)),
 	})
 	if err != nil {
-		return generateOutput{}, fmt.Errorf("wordpress draft: %w", err)
+		return generateOutput{}, fmt.Errorf("publisher draft: %w", err)
 	}
 
 	if err := a.repo.UpdateDraft(ctx, articleID, postID, editURL); err != nil {
@@ -151,8 +152,7 @@ func (a *Application) generate(ctx context.Context, articleID int64, job resolve
 	summary := buildSummary(steps)
 	durationMS := time.Since(start).Milliseconds()
 
-	a.log.Info("generation done",
-		"keyword", job.keyword,
+	log.Info("generation done",
 		"post_id", postID,
 		"check_passed", checkPassed,
 		"duration_ms", durationMS,
@@ -174,7 +174,7 @@ func (a *Application) generate(ctx context.Context, articleID int64, job resolve
 	}, nil
 }
 
-func (a *Application) checkAndHumanize(ctx context.Context, articleID int64, job resolvedJob, content string) (string, checkOutput) {
+func (a *Application) checkAndHumanize(ctx context.Context, log *slog.Logger, articleID int64, job resolvedJob, content string) (string, checkOutput) {
 	maxCycles := job.maxCycles
 	if maxCycles <= 0 {
 		maxCycles = 3
@@ -192,14 +192,14 @@ func (a *Application) checkAndHumanize(ctx context.Context, articleID int64, job
 	for cycle := 1; cycle <= maxCycles; cycle++ {
 		checkRes, err := a.checker.Check(ctx, content)
 		if err != nil {
-			a.log.Warn("originality check failed, skipping", "cycle", cycle, "err", err)
+			log.Warn("originality check failed, skipping", "cycle", cycle, "err", err)
 			break
 		}
 
 		passes := checkRes.AIScore < threshold
 		checkRes.Original = passes
 
-		a.log.Info("check result",
+		log.Info("check result",
 			"cycle", cycle,
 			"ai_score", checkRes.AIScore,
 			"threshold", threshold,
@@ -210,7 +210,7 @@ func (a *Application) checkAndHumanize(ctx context.Context, articleID int64, job
 		cycles = append(cycles, CycleRecord{Cycle: cycle, Threshold: threshold, CheckResult: checkRes})
 
 		if saveErr := a.repo.SaveCheckResult(ctx, articleID, checkRes); saveErr != nil {
-			a.log.Warn("save check result", "err", saveErr)
+			log.Warn("save check result", "err", saveErr)
 		}
 
 		if passes {
@@ -223,30 +223,38 @@ func (a *Application) checkAndHumanize(ctx context.Context, articleID int64, job
 		}
 
 		if cycle == maxCycles {
-			a.log.Warn("max humanize cycles reached, publishing as-is",
+			log.Warn("max humanize cycles reached, publishing as-is",
 				"cycles", maxCycles,
 				"final_ai_score", checkRes.AIScore,
 			)
 			break
 		}
 
-		a.log.Info("content flagged — humanize rewrite",
+		log.Info("content flagged — humanize rewrite",
 			"cycle", cycle,
 			"ai_score", checkRes.AIScore,
 			"sentences_flagged", len(checkRes.SentencesFlagged),
 		)
 
+		step := fmt.Sprintf("humanize_%d", cycle)
+		stepStart := time.Now()
 		humanizedContent, u, err := job.client.Complete(
 			ctx,
 			prompt.Humanize(content, job.keyword, checkRes.Issues, checkRes.SentencesFlagged),
 			job.maxTokens,
 		)
 		if err != nil {
-			a.log.Warn("humanize step failed, using current content", "cycle", cycle, "err", err)
+			log.Warn("humanize step failed, using current content", "cycle", cycle, "err", err)
 			break
 		}
+		log.Debug("llm step done",
+			"step", step,
+			"duration_ms", time.Since(stepStart).Milliseconds(),
+			"input_tokens", u.InputTokens,
+			"output_tokens", u.OutputTokens,
+		)
 		stepUsages = append(stepUsages, StepUsage{
-			Step:         fmt.Sprintf("humanize_%d", cycle),
+			Step:         step,
 			InputTokens:  u.InputTokens,
 			OutputTokens: u.OutputTokens,
 		})
@@ -274,4 +282,3 @@ func buildSummary(steps []StepUsage) *TokenSummary {
 	}
 	return s
 }
-
