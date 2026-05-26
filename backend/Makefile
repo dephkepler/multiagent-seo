@@ -6,6 +6,8 @@ export
 CF_DATABASE_URL ?= postgres://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@localhost:$(POSTGRES_HOST_PORT)/$(POSTGRES_DB)?sslmode=disable
 export CF_DATABASE_URL
 
+COMPOSE := docker compose -f ../devops/compose.yaml --env-file .env
+
 dev: db migrate run
 
 # creates an empty credentials.json placeholder so docker compose can always
@@ -14,7 +16,7 @@ creds:
 	@test -e credentials.json || (echo "creating empty credentials.json placeholder"; echo "{}" > credentials.json)
 
 db:
-	docker compose up -d postgres
+	$(COMPOSE) up -d postgres
 	@echo "waiting for postgres..." && sleep 2
 
 migrate:
@@ -24,13 +26,13 @@ run:
 	go run ./cmd/main.go
 
 stop:
-	docker compose down
+	$(COMPOSE) down
 
 up: creds
-	docker compose up --build -d
+	$(COMPOSE) up --build -d
 
 down:
-	docker compose down
+	$(COMPOSE) down
 
 logs:
-	docker compose logs -f app
+	$(COMPOSE) logs -f app
