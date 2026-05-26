@@ -1,0 +1,14 @@
+# macOS
+.DS_Store
+**/.DS_Store
+
+# IDE
+.idea/
+.vscode/
+
+# Claude Code per-user state (only the root one — subdir .claude is intentional)
+/.claude/settings.local.json
+
+# Root-level env (per-service .env stays under backend/, frontend/, etc.)
+/.env
+/.env.local
