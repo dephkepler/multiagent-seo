@@ -25,13 +25,15 @@ services:
       dockerfile: ../devops/docker/backend.Dockerfile
     ports:
       - "${APP_HOST_PORT}:8080"
-    env_file:
-      - ../backend/.env
     environment:
-      CF_DATABASE_URL: "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable"
-    volumes:
-      - ../backend/internal/config/config.yaml:/app/internal/config/config.yaml:ro
-      - ../backend/credentials.json:/app/credentials.json:ro
+      # 0.0.0.0 so the server is reachable from the host through the port map;
+      # the localhost default would only bind inside the container.
+      CF_APP_HOST: "0.0.0.0"
+      CF_DB_HOST: postgres
+      CF_DB_PORT: "5432"
+      CF_DB_USER: ${POSTGRES_USER}
+      CF_DB_PASSWORD: ${POSTGRES_PASSWORD}
+      CF_DB_NAME: ${POSTGRES_DB}
     depends_on:
       postgres:
         condition: service_healthy
