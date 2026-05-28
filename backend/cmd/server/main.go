@@ -10,12 +10,15 @@ import (
 
 	"github.com/rs/zerolog/log"
 
+	appauth "contentflow/internal/application/auth"
 	apphealth "contentflow/internal/application/health"
 	appwordpress "contentflow/internal/application/wordpress"
 	domainhealth "contentflow/internal/domain/health"
 	"contentflow/internal/infrastructure/db"
 	apihttp "contentflow/internal/infrastructure/http"
 	"contentflow/internal/infrastructure/http/handlers"
+	httpMiddleware "contentflow/internal/infrastructure/http/middleware"
+	"contentflow/internal/infrastructure/jwtauth"
 	"contentflow/internal/infrastructure/persistence/postgres"
 	"contentflow/pkg/config"
 	"contentflow/pkg/logger"
@@ -39,10 +42,14 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	// JWT signing/verification needs no DB, so the issuer-verifier is always ready.
+	jwtSvc := jwtauth.New(cfg.JWT.Secret, cfg.JWT.TTL)
+
 	// A DB outage must not stop the server from booting — /healthz then reports
 	// degraded instead of the process failing to start.
 	var healthRepo domainhealth.Repository
 	var wordpressSvc *appwordpress.Service
+	var authSvc *appauth.Service
 	pool, err := db.NewPool(ctx, cfg.Database)
 	if err != nil {
 		log.Warn().Err(err).Msg("database unavailable at startup; health will report degraded")
@@ -51,13 +58,17 @@ func main() {
 		healthRepo = postgres.NewHealthRepository(pool)
 		wordpressRepo := postgres.NewWordpressSiteRepository(pool, cfg.WordPress.EncryptionKey)
 		wordpressSvc = appwordpress.NewService(wordpressRepo)
+		userRepo := postgres.NewUserRepository(pool)
+		authSvc = appauth.NewService(userRepo, jwtSvc)
 	}
 
 	healthSvc := apphealth.NewService(domainhealth.NewService(healthRepo))
-	// wordpressSvc is nil without a DB; its handler then returns 503 per request.
+	// wordpressSvc/authSvc are nil without a DB; their handlers then return 503 per request.
 	wordpressHandler := handlers.NewWordpressSitesHandler(nilableWordpressService(wordpressSvc))
-	server := handlers.NewServer(handlers.NewHealthHandler(healthSvc), wordpressHandler)
-	router := apihttp.NewRouter(cfg.Server, server)
+	loginHandler := handlers.NewLoginHandler(nilableAuthService(authSvc))
+	server := handlers.NewServer(handlers.NewHealthHandler(healthSvc), wordpressHandler, loginHandler)
+	authMW := httpMiddleware.BearerAuth(jwtSvc)
+	router := apihttp.NewRouter(cfg.Server, server, authMW)
 
 	srv := &http.Server{
 		Addr:         net.JoinHostPort(cfg.Server.Host, cfg.Server.Port),
@@ -87,6 +98,13 @@ func main() {
 // nilableWordpressService returns an untyped-nil interface when the service is
 // absent, so the handler's nil guard fires instead of dereferencing a typed nil.
 func nilableWordpressService(svc *appwordpress.Service) handlers.WordpressService {
+	if svc == nil {
+		return nil
+	}
+	return svc
+}
+
+func nilableAuthService(svc *appauth.Service) handlers.AuthService {
 	if svc == nil {
 		return nil
 	}

@@ -124,13 +124,13 @@ func (r *fakeWordpressRepo) Delete(_ context.Context, id uuid.UUID) error {
 func newWordpressRouter(repo domainwp.Repository) http.Handler {
 	healthHandler := handlers.NewHealthHandler(apphealth.NewService(domainhealth.NewService(stubRepo{})))
 	wpSvc := appwordpress.NewService(repo)
-	server := handlers.NewServer(healthHandler, handlers.NewWordpressSitesHandler(wpSvc))
+	server := handlers.NewServer(healthHandler, handlers.NewWordpressSitesHandler(wpSvc), handlers.NewLoginHandler(nil))
 	return apihttp.NewRouter(config.ServerConfig{
 		Host:               "localhost",
 		Port:               "0",
 		BasePath:           "/",
 		CORSAllowedOrigins: []string{"http://localhost:3000"},
-	}, server)
+	}, server, nil)
 }
 
 func doJSON(t *testing.T, router http.Handler, method, path string, body any) *httptest.ResponseRecorder {

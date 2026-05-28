@@ -149,6 +149,12 @@ type WordPressConfig struct {
 	EncryptionKey string `env:"WP_ENCRYPTION_KEY" envDefault:"dev-insecure-change-me" validate:"required"`
 }
 
+type JWTConfig struct {
+	// Secret signs and verifies auth tokens (HS256). Dev-only default; prod MUST override.
+	Secret string        `env:"JWT_SECRET" envDefault:"dev-insecure-change-me" validate:"required"`
+	TTL    time.Duration `env:"JWT_TTL" envDefault:"24h"`
+}
+
 type Config struct {
 	Server     ServerConfig     `validate:"required"`
 	Database   DatabaseConfig   `validate:"required"`
@@ -161,6 +167,7 @@ type Config struct {
 	Checker    CheckerConfig    `validate:"required"`
 	Pexels     PexelsConfig     `validate:"required"`
 	WordPress  WordPressConfig  `validate:"required"`
+	JWT        JWTConfig        `validate:"required"`
 }
 
 func Load() (Config, error) {
@@ -174,8 +181,13 @@ func Load() (Config, error) {
 		return cfg, fmt.Errorf("config validation: %w", err)
 	}
 
-	if cfg.Sentry.Environment != "local" && cfg.WordPress.EncryptionKey == devEncryptionKey {
-		return cfg, fmt.Errorf("WP_ENCRYPTION_KEY must be overridden outside the local environment")
+	if cfg.Sentry.Environment != "local" {
+		if cfg.WordPress.EncryptionKey == devEncryptionKey {
+			return cfg, fmt.Errorf("WP_ENCRYPTION_KEY must be overridden outside the local environment")
+		}
+		if cfg.JWT.Secret == devEncryptionKey {
+			return cfg, fmt.Errorf("JWT_SECRET must be overridden outside the local environment")
+		}
 	}
 
 	return cfg, nil

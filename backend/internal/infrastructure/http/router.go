@@ -17,7 +17,7 @@ import (
 	"contentflow/pkg/logger"
 )
 
-func NewRouter(cfg config.ServerConfig, api oapigen.ServerInterface) chi.Router {
+func NewRouter(cfg config.ServerConfig, api oapigen.ServerInterface, authMW oapigen.MiddlewareFunc) chi.Router {
 	r := chi.NewRouter()
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.RequestID)
@@ -36,9 +36,14 @@ func NewRouter(cfg config.ServerConfig, api oapigen.ServerInterface) chi.Router 
 	r.Use(httpMiddleware.SentryScopeEnhancer)
 
 	sub := chi.NewRouter()
+	var mws []oapigen.MiddlewareFunc
+	if authMW != nil {
+		mws = append(mws, authMW)
+	}
 	apiHandler := oapigen.HandlerWithOptions(api, oapigen.ChiServerOptions{
 		BaseRouter:       sub,
 		ErrorHandlerFunc: openAPIErrorHandler,
+		Middlewares:      mws,
 	})
 	r.Mount(cfg.BasePath, apiHandler)
 	return r

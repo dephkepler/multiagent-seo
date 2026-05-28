@@ -112,14 +112,15 @@ func TestLLMKeyFor(t *testing.T) {
 	}
 }
 
-func TestLoad_RejectsDevEncryptionKeyOutsideLocal(t *testing.T) {
+func TestLoad_RejectsDevSecretsOutsideLocal(t *testing.T) {
 	t.Setenv("CF_SENTRY_ENVIRONMENT", "production")
 	if _, err := Load(); err == nil {
-		t.Fatal("expected error: dev WP_ENCRYPTION_KEY in non-local env")
+		t.Fatal("expected error: dev secrets in non-local env")
 	}
 
 	t.Setenv("CF_WP_ENCRYPTION_KEY", "a-real-prod-secret")
+	t.Setenv("CF_JWT_SECRET", "a-real-jwt-secret")
 	if _, err := Load(); err != nil {
-		t.Fatalf("real key in non-local env should pass: %v", err)
+		t.Fatalf("real secrets in non-local env should pass: %v", err)
 	}
 }

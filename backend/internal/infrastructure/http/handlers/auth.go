@@ -1,0 +1,56 @@
+package handlers
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"strings"
+	"time"
+
+	appauth "contentflow/internal/application/auth"
+	"contentflow/internal/infrastructure/http/problem"
+	"contentflow/internal/infrastructure/http/response"
+	"contentflow/internal/oapigen"
+	"contentflow/pkg/validate"
+)
+
+type AuthService interface {
+	Login(ctx context.Context, email, password string) (string, time.Time, error)
+}
+
+type LoginHandler struct {
+	auth AuthService
+}
+
+func NewLoginHandler(auth AuthService) *LoginHandler {
+	return &LoginHandler{auth: auth}
+}
+
+func (h *LoginHandler) Login(w http.ResponseWriter, r *http.Request) {
+	if h.auth == nil {
+		problem.Write(w, http.StatusServiceUnavailable, "database unavailable")
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
+	var body oapigen.LoginRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		problem.Write(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if err := validate.Validate(body); err != nil {
+		problem.Write(w, http.StatusBadRequest, strings.Join(validate.MissingFields(err), ", "))
+		return
+	}
+
+	token, expiresAt, err := h.auth.Login(r.Context(), body.Email, body.Password)
+	if err != nil {
+		if errors.Is(err, appauth.ErrInvalidCredentials) {
+			problem.Write(w, http.StatusUnauthorized, "invalid credentials")
+			return
+		}
+		problem.Write(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	response.WriteJSON(r.Context(), w, http.StatusOK, oapigen.LoginResponse{Token: token, ExpiresAt: expiresAt})
+}

@@ -37,7 +37,7 @@ func TestHealthz_Integration(t *testing.T) {
 
 	repo := postgres.NewHealthRepository(pool)
 	svc := apphealth.NewService(domainhealth.NewService(repo))
-	router := apihttp.NewRouter(cfg.Server, handlers.NewServer(handlers.NewHealthHandler(svc), handlers.NewWordpressSitesHandler(nil)))
+	router := apihttp.NewRouter(cfg.Server, handlers.NewServer(handlers.NewHealthHandler(svc), handlers.NewWordpressSitesHandler(nil), handlers.NewLoginHandler(nil)), nil)
 
 	srv := httptest.NewServer(router)
 	defer srv.Close()

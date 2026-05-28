@@ -7,10 +7,11 @@ import "contentflow/internal/oapigen"
 type Server struct {
 	*HealthHandler
 	*WordpressSitesHandler
+	*LoginHandler
 }
 
 var _ oapigen.ServerInterface = (*Server)(nil)
 
-func NewServer(health *HealthHandler, wordpress *WordpressSitesHandler) *Server {
-	return &Server{HealthHandler: health, WordpressSitesHandler: wordpress}
+func NewServer(health *HealthHandler, wordpress *WordpressSitesHandler, login *LoginHandler) *Server {
+	return &Server{HealthHandler: health, WordpressSitesHandler: wordpress, LoginHandler: login}
 }
