@@ -1,4 +1,4 @@
-name: contentflow
+name: multiagent-seo
 
 services:
   postgres:
