@@ -2,6 +2,7 @@
 internal/config/config.yaml
 credentials.json
 .env
+.envrc.local
 
 # local notes / workspaces
 seo.txt
