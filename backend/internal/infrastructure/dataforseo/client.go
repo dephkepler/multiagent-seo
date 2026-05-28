@@ -49,16 +49,44 @@ type serpResponse struct {
 				URL          string `json:"url"`
 				Title        string `json:"title"`
 				Description  string `json:"description"`
-				// Aggregate blocks (people_also_ask, featured_snippet) carry their
-				// real text in nested items rather than on the parent.
-				Items []struct {
-					Type        string `json:"type"`
-					Title       string `json:"title"`
-					Description string `json:"description"`
-				} `json:"items"`
+				// Aggregate blocks (people_also_ask, featured_snippet) nest their
+				// text here. DataForSEO is inconsistent about the shape — objects in
+				// some blocks, bare strings in others (e.g. related_searches) — so
+				// keep it raw and decode tolerantly rather than failing the whole
+				// response when one block's shape is unexpected.
+				Items json.RawMessage `json:"items"`
 			} `json:"items"`
 		} `json:"result"`
 	} `json:"tasks"`
+}
+
+// serpSubItem is one entry inside an aggregate block's nested items. Some blocks
+// list objects, others list bare strings — UnmarshalJSON accepts both, treating
+// a string as the title.
+type serpSubItem struct {
+	Title       string `json:"title"`
+	Description string `json:"description"`
+}
+
+func (s *serpSubItem) UnmarshalJSON(b []byte) error {
+	if len(b) > 0 && b[0] == '"' {
+		return json.Unmarshal(b, &s.Title)
+	}
+	type alias serpSubItem
+	return json.Unmarshal(b, (*alias)(s))
+}
+
+// subItems decodes a block's nested items, tolerating shapes we don't expect by
+// returning nil rather than failing the whole SERP parse.
+func subItems(raw json.RawMessage) []serpSubItem {
+	if len(raw) == 0 {
+		return nil
+	}
+	var out []serpSubItem
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil
+	}
+	return out
 }
 
 func (c *RealClient) GetSERP(ctx context.Context, keyword, languageCode string, limit int) (*articles.CompetitorData, error) {
@@ -96,9 +124,20 @@ func (c *RealClient) GetSERP(ctx context.Context, keyword, languageCode string, 
 		return nil, fmt.Errorf("dataforseo status %d", resp.StatusCode)
 	}
 
-	var result serpResponse
 	// Cap the body so a hostile/huge response can't be read fully into memory.
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&result); err != nil {
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return nil, fmt.Errorf("read dataforseo response: %w", err)
+	}
+	return parseSERPResponse(body, keyword, limit)
+}
+
+// parseSERPResponse decodes a SERP payload and maps it onto CompetitorData.
+// Split out from GetSERP so the (DataForSEO-shape-sensitive) parsing is unit
+// testable without an HTTP round-trip.
+func parseSERPResponse(body []byte, keyword string, limit int) (*articles.CompetitorData, error) {
+	var result serpResponse
+	if err := json.Unmarshal(body, &result); err != nil {
 		return nil, fmt.Errorf("decode dataforseo response: %w", err)
 	}
 
@@ -125,7 +164,7 @@ func (c *RealClient) GetSERP(ctx context.Context, keyword, languageCode string, 
 				Description: item.Description,
 			})
 		case "people_also_ask":
-			for _, sub := range item.Items {
+			for _, sub := range subItems(item.Items) {
 				if sub.Title == "" {
 					continue
 				}
@@ -137,7 +176,7 @@ func (c *RealClient) GetSERP(ctx context.Context, keyword, languageCode string, 
 			if data.FeaturedSnippet != nil {
 				continue
 			}
-			for _, sub := range item.Items {
+			for _, sub := range subItems(item.Items) {
 				if sub.Title == "" {
 					continue
 				}
