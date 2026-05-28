@@ -110,6 +110,16 @@ func (r *fakeWordpressRepo) Update(_ context.Context, id uuid.UUID, in domainwp.
 	return s, nil
 }
 
+func (r *fakeWordpressRepo) Credentials(_ context.Context, id uuid.UUID) (domainwp.Credentials, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s, ok := r.sites[id]
+	if !ok || !s.Enabled {
+		return domainwp.Credentials{}, domainwp.ErrNotFound
+	}
+	return domainwp.Credentials{URL: s.URL, Username: s.Username, AppPassword: r.passes[id]}, nil
+}
+
 func (r *fakeWordpressRepo) Delete(_ context.Context, id uuid.UUID) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()

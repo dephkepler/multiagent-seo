@@ -132,6 +132,23 @@ func (r *WordpressSiteRepository) Update(ctx context.Context, id uuid.UUID, in w
 	return site, nil
 }
 
+func (r *WordpressSiteRepository) Credentials(ctx context.Context, id uuid.UUID) (wordpress.Credentials, error) {
+	const q = `
+		SELECT url, username, pgp_sym_decrypt(app_password, @enc_key)
+		FROM wordpress_sites
+		WHERE id = @id AND deleted_at IS NULL AND enabled = true`
+
+	row := r.db.QueryRow(ctx, q, pgx.NamedArgs{"id": id, "enc_key": r.encKey})
+	var c wordpress.Credentials
+	if err := row.Scan(&c.URL, &c.Username, &c.AppPassword); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return wordpress.Credentials{}, wordpress.ErrNotFound
+		}
+		return wordpress.Credentials{}, fmt.Errorf("get wordpress credentials: %w", err)
+	}
+	return c, nil
+}
+
 func (r *WordpressSiteRepository) Delete(ctx context.Context, id uuid.UUID) error {
 	const q = `
 		UPDATE wordpress_sites SET deleted_at = now()
