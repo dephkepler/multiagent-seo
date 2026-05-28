@@ -34,6 +34,20 @@ services:
       CF_DB_USER: ${POSTGRES_USER}
       CF_DB_PASSWORD: ${POSTGRES_PASSWORD}
       CF_DB_NAME: ${POSTGRES_DB}
+      # Generation secrets — sourced from devops/.env (gitignored). Unset vars
+      # fall back to the app's config defaults / mock adapters.
+      CF_LLM_PROVIDER: ${CF_LLM_PROVIDER:-groq}
+      CF_LLM_MODEL: ${CF_LLM_MODEL:-llama-3.3-70b-versatile}
+      CF_LLM_API_KEY: ${CF_LLM_API_KEY:-}
+      CF_LLM_GROQ_API_KEY: ${CF_LLM_GROQ_API_KEY:-}
+      CF_LLM_CLAUDE_API_KEY: ${CF_LLM_CLAUDE_API_KEY:-}
+      CF_DATAFORSEO_LOGIN: ${CF_DATAFORSEO_LOGIN:-}
+      CF_DATAFORSEO_PASSWORD: ${CF_DATAFORSEO_PASSWORD:-}
+      CF_SHEETS_SPREADSHEET_ID: ${CF_SHEETS_SPREADSHEET_ID:-}
+      CF_CHECKER_PROVIDER: ${CF_CHECKER_PROVIDER:-mock}
+      CF_CHECKER_API_KEY: ${CF_CHECKER_API_KEY:-}
+      CF_CHECKER_MODEL: ${CF_CHECKER_MODEL:-}
+      CF_PEXELS_API_KEY: ${CF_PEXELS_API_KEY:-}
     depends_on:
       postgres:
         condition: service_healthy

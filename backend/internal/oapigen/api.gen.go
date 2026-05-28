@@ -38,6 +38,23 @@ func (e HealthResponseStatus) Valid() bool {
 	}
 }
 
+// Article defines model for Article.
+type Article struct {
+	CreatedAt       time.Time           `json:"created_at"`
+	Id              int64               `json:"id"`
+	ImagesRequested *int                `json:"images_requested,omitempty"`
+	ImagesResolved  *int                `json:"images_resolved,omitempty"`
+	ImagesSkipped   *int                `json:"images_skipped,omitempty"`
+	Keyword         string              `json:"keyword"`
+	Site            *string             `json:"site,omitempty"`
+	SiteId          *openapi_types.UUID `json:"site_id,omitempty"`
+	Status          string              `json:"status"`
+	UpdatedAt       time.Time           `json:"updated_at"`
+	WpEditUrl       *string             `json:"wp_edit_url,omitempty"`
+	WpPostId        *int64              `json:"wp_post_id,omitempty"`
+	WpPostUrl       *string             `json:"wp_post_url,omitempty"`
+}
+
 // CreateWordpressSiteRequest defines model for CreateWordpressSiteRequest.
 type CreateWordpressSiteRequest struct {
 	Alias       string `json:"alias" validate:"required,min=1,max=100"`
@@ -53,6 +70,34 @@ type ErrorResponse struct {
 	Status   int     `json:"status"`
 	Title    string  `json:"title"`
 	Type     *string `json:"type,omitempty"`
+}
+
+// GenerateAccepted defines model for GenerateAccepted.
+type GenerateAccepted struct {
+	CreatedAt      time.Time `json:"created_at"`
+	Id             int64     `json:"id"`
+	Keyword        string    `json:"keyword"`
+	Status         string    `json:"status"`
+	TargetKeywords []string  `json:"target_keywords,omitempty"`
+}
+
+// GenerateRequest defines model for GenerateRequest.
+type GenerateRequest struct {
+	AiThreshold             *float32           `json:"ai_threshold,omitempty"`
+	AutoPublish             *bool              `json:"auto_publish,omitempty"`
+	ExtraRules              *string            `json:"extra_rules,omitempty"`
+	IncludeImageAttribution *bool              `json:"include_image_attribution,omitempty"`
+	IncludeImages           *bool              `json:"include_images,omitempty"`
+	Keyword                 string             `json:"keyword" validate:"required,min=1,max=200"`
+	Language                *string            `json:"language,omitempty"`
+	MaxCycles               *int               `json:"max_cycles,omitempty"`
+	MaxTokens               *int               `json:"max_tokens,omitempty"`
+	MaxWords                *int               `json:"max_words,omitempty"`
+	MinWords                *int               `json:"min_words,omitempty"`
+	Model                   *string            `json:"model,omitempty"`
+	Provider                *string            `json:"provider,omitempty"`
+	SiteId                  openapi_types.UUID `json:"site_id" validate:"required"`
+	SiteTopic               *string            `json:"site_topic,omitempty"`
 }
 
 // HealthResponse defines model for HealthResponse.
@@ -114,6 +159,9 @@ type bearerAuthContextKey string
 // LoginJSONRequestBody defines body for Login for application/json ContentType.
 type LoginJSONRequestBody = LoginRequest
 
+// GenerateArticleJSONRequestBody defines body for GenerateArticle for application/json ContentType.
+type GenerateArticleJSONRequestBody = GenerateRequest
+
 // CreateWordpressSiteJSONRequestBody defines body for CreateWordpressSite for application/json ContentType.
 type CreateWordpressSiteJSONRequestBody = CreateWordpressSiteRequest
 
@@ -122,9 +170,21 @@ type UpdateWordpressSiteJSONRequestBody = UpdateWordpressSiteRequest
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
+	// List articles
+	// (GET /articles)
+	ListArticles(w http.ResponseWriter, r *http.Request)
+	// Get an article
+	// (GET /articles/{id})
+	GetArticle(w http.ResponseWriter, r *http.Request, id int64)
+	// Publish a draft article
+	// (POST /articles/{id}/publish)
+	PublishArticle(w http.ResponseWriter, r *http.Request, id int64)
 	// Authenticate and receive a JWT
 	// (POST /auth/login)
 	Login(w http.ResponseWriter, r *http.Request)
+	// Queue an article for generation
+	// (POST /generate)
+	GenerateArticle(w http.ResponseWriter, r *http.Request)
 	// Health check
 	// (GET /healthz)
 	GetHealthz(w http.ResponseWriter, r *http.Request)
@@ -149,9 +209,33 @@ type ServerInterface interface {
 
 type Unimplemented struct{}
 
+// List articles
+// (GET /articles)
+func (_ Unimplemented) ListArticles(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Get an article
+// (GET /articles/{id})
+func (_ Unimplemented) GetArticle(w http.ResponseWriter, r *http.Request, id int64) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Publish a draft article
+// (POST /articles/{id}/publish)
+func (_ Unimplemented) PublishArticle(w http.ResponseWriter, r *http.Request, id int64) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // Authenticate and receive a JWT
 // (POST /auth/login)
 func (_ Unimplemented) Login(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Queue an article for generation
+// (POST /generate)
+func (_ Unimplemented) GenerateArticle(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -200,11 +284,115 @@ type ServerInterfaceWrapper struct {
 
 type MiddlewareFunc func(http.Handler) http.Handler
 
+// ListArticles operation middleware
+func (siw *ServerInterfaceWrapper) ListArticles(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListArticles(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetArticle operation middleware
+func (siw *ServerInterfaceWrapper) GetArticle(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64"})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetArticle(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PublishArticle operation middleware
+func (siw *ServerInterfaceWrapper) PublishArticle(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64"})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PublishArticle(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // Login operation middleware
 func (siw *ServerInterfaceWrapper) Login(w http.ResponseWriter, r *http.Request) {
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.Login(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GenerateArticle operation middleware
+func (siw *ServerInterfaceWrapper) GenerateArticle(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GenerateArticle(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -478,7 +666,19 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	}
 
 	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/articles", wrapper.ListArticles)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/articles/{id}", wrapper.GetArticle)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/articles/{id}/publish", wrapper.PublishArticle)
+	})
+	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/auth/login", wrapper.Login)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/generate", wrapper.GenerateArticle)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/healthz", wrapper.GetHealthz)
@@ -509,6 +709,119 @@ type ConflictApplicationProblemPlusJSONResponse ErrorResponse
 type NotFoundApplicationProblemPlusJSONResponse ErrorResponse
 
 type UnauthorizedApplicationProblemPlusJSONResponse ErrorResponse
+
+type ListArticlesRequestObject struct {
+}
+
+type ListArticlesResponseObject interface {
+	VisitListArticlesResponse(w http.ResponseWriter) error
+}
+
+type ListArticles200JSONResponse []Article
+
+func (response ListArticles200JSONResponse) VisitListArticlesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetArticleRequestObject struct {
+	Id int64 `json:"id"`
+}
+
+type GetArticleResponseObject interface {
+	VisitGetArticleResponse(w http.ResponseWriter) error
+}
+
+type GetArticle200JSONResponse Article
+
+func (response GetArticle200JSONResponse) VisitGetArticleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetArticle404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response GetArticle404ApplicationProblemPlusJSONResponse) VisitGetArticleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PublishArticleRequestObject struct {
+	Id int64 `json:"id"`
+}
+
+type PublishArticleResponseObject interface {
+	VisitPublishArticleResponse(w http.ResponseWriter) error
+}
+
+type PublishArticle200JSONResponse Article
+
+func (response PublishArticle200JSONResponse) VisitPublishArticleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PublishArticle404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response PublishArticle404ApplicationProblemPlusJSONResponse) VisitPublishArticleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PublishArticle409ApplicationProblemPlusJSONResponse struct {
+	ConflictApplicationProblemPlusJSONResponse
+}
+
+func (response PublishArticle409ApplicationProblemPlusJSONResponse) VisitPublishArticleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
 
 type LoginRequestObject struct {
 	Body *LoginJSONRequestBody
@@ -560,6 +873,60 @@ func (response Login401ApplicationProblemPlusJSONResponse) VisitLoginResponse(w 
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GenerateArticleRequestObject struct {
+	Body *GenerateArticleJSONRequestBody
+}
+
+type GenerateArticleResponseObject interface {
+	VisitGenerateArticleResponse(w http.ResponseWriter) error
+}
+
+type GenerateArticle202JSONResponse GenerateAccepted
+
+func (response GenerateArticle202JSONResponse) VisitGenerateArticleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(202)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GenerateArticle400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response GenerateArticle400ApplicationProblemPlusJSONResponse) VisitGenerateArticleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GenerateArticle404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response GenerateArticle404ApplicationProblemPlusJSONResponse) VisitGenerateArticleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -801,9 +1168,21 @@ func (response UpdateWordpressSite404ApplicationProblemPlusJSONResponse) VisitUp
 
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
+	// List articles
+	// (GET /articles)
+	ListArticles(ctx context.Context, request ListArticlesRequestObject) (ListArticlesResponseObject, error)
+	// Get an article
+	// (GET /articles/{id})
+	GetArticle(ctx context.Context, request GetArticleRequestObject) (GetArticleResponseObject, error)
+	// Publish a draft article
+	// (POST /articles/{id}/publish)
+	PublishArticle(ctx context.Context, request PublishArticleRequestObject) (PublishArticleResponseObject, error)
 	// Authenticate and receive a JWT
 	// (POST /auth/login)
 	Login(ctx context.Context, request LoginRequestObject) (LoginResponseObject, error)
+	// Queue an article for generation
+	// (POST /generate)
+	GenerateArticle(ctx context.Context, request GenerateArticleRequestObject) (GenerateArticleResponseObject, error)
 	// Health check
 	// (GET /healthz)
 	GetHealthz(ctx context.Context, request GetHealthzRequestObject) (GetHealthzResponseObject, error)
@@ -853,6 +1232,82 @@ type strictHandler struct {
 	options     StrictHTTPServerOptions
 }
 
+// ListArticles operation middleware
+func (sh *strictHandler) ListArticles(w http.ResponseWriter, r *http.Request) {
+	var request ListArticlesRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListArticles(ctx, request.(ListArticlesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListArticles")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListArticlesResponseObject); ok {
+		if err := validResponse.VisitListArticlesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetArticle operation middleware
+func (sh *strictHandler) GetArticle(w http.ResponseWriter, r *http.Request, id int64) {
+	var request GetArticleRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetArticle(ctx, request.(GetArticleRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetArticle")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetArticleResponseObject); ok {
+		if err := validResponse.VisitGetArticleResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// PublishArticle operation middleware
+func (sh *strictHandler) PublishArticle(w http.ResponseWriter, r *http.Request, id int64) {
+	var request PublishArticleRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.PublishArticle(ctx, request.(PublishArticleRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "PublishArticle")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(PublishArticleResponseObject); ok {
+		if err := validResponse.VisitPublishArticleResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // Login operation middleware
 func (sh *strictHandler) Login(w http.ResponseWriter, r *http.Request) {
 	var request LoginRequestObject
@@ -877,6 +1332,37 @@ func (sh *strictHandler) Login(w http.ResponseWriter, r *http.Request) {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(LoginResponseObject); ok {
 		if err := validResponse.VisitLoginResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GenerateArticle operation middleware
+func (sh *strictHandler) GenerateArticle(w http.ResponseWriter, r *http.Request) {
+	var request GenerateArticleRequestObject
+
+	var body GenerateArticleJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GenerateArticle(ctx, request.(GenerateArticleRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GenerateArticle")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GenerateArticleResponseObject); ok {
+		if err := validResponse.VisitGenerateArticleResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

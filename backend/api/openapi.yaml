@@ -17,6 +17,8 @@ tags:
     description: Authentication
   - name: WordPress Sites
     description: WordPress publishing targets
+  - name: Articles
+    description: SEO article generation and publishing
 
 paths:
   /healthz:
@@ -159,6 +161,98 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+  /generate:
+    post:
+      operationId: generateArticle
+      security:
+        - bearerAuth: [ ]
+      tags: [ Articles ]
+      summary: Queue an article for generation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GenerateRequest"
+      responses:
+        "202":
+          description: Generation accepted; poll GET /articles/{id} for status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenerateAccepted"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /articles:
+    get:
+      operationId: listArticles
+      security:
+        - bearerAuth: [ ]
+      tags: [ Articles ]
+      summary: List articles
+      responses:
+        "200":
+          description: All articles, newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Article"
+
+  /articles/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+    get:
+      operationId: getArticle
+      security:
+        - bearerAuth: [ ]
+      tags: [ Articles ]
+      summary: Get an article
+      responses:
+        "200":
+          description: Article
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Article"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /articles/{id}/publish:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+    post:
+      operationId: publishArticle
+      security:
+        - bearerAuth: [ ]
+      tags: [ Articles ]
+      summary: Publish a draft article
+      responses:
+        "200":
+          description: Published
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Article"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
 components:
   securitySchemes:
     bearerAuth:
@@ -193,6 +287,104 @@ components:
             $ref: "#/components/schemas/ErrorResponse"
 
   schemas:
+    GenerateRequest:
+      type: object
+      required: [ keyword, site_id ]
+      properties:
+        keyword:
+          type: string
+          x-oapi-codegen-extra-tags:
+            validate: "required,min=1,max=200"
+        site_id:
+          type: string
+          format: uuid
+          x-oapi-codegen-extra-tags:
+            validate: "required"
+        min_words:
+          type: integer
+        max_words:
+          type: integer
+        max_tokens:
+          type: integer
+        language:
+          type: string
+        site_topic:
+          type: string
+        extra_rules:
+          type: string
+        provider:
+          type: string
+        model:
+          type: string
+        auto_publish:
+          type: boolean
+        max_cycles:
+          type: integer
+        ai_threshold:
+          type: number
+        include_images:
+          type: boolean
+          nullable: true
+        include_image_attribution:
+          type: boolean
+          nullable: true
+
+    GenerateAccepted:
+      type: object
+      required: [ id, keyword, status, created_at ]
+      properties:
+        id:
+          type: integer
+          format: int64
+        keyword:
+          type: string
+        status:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        target_keywords:
+          type: array
+          items:
+            type: string
+
+    Article:
+      type: object
+      required: [ id, keyword, status, created_at, updated_at ]
+      properties:
+        id:
+          type: integer
+          format: int64
+        keyword:
+          type: string
+        site:
+          type: string
+        site_id:
+          type: string
+          format: uuid
+          nullable: true
+        status:
+          type: string
+        wp_post_id:
+          type: integer
+          format: int64
+        wp_edit_url:
+          type: string
+        wp_post_url:
+          type: string
+        images_requested:
+          type: integer
+        images_resolved:
+          type: integer
+        images_skipped:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
     LoginRequest:
       type: object
       required: [ email, password ]

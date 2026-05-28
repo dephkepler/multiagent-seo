@@ -8,10 +8,11 @@ type Server struct {
 	*HealthHandler
 	*WordpressSitesHandler
 	*LoginHandler
+	*ArticlesHandler
 }
 
 var _ oapigen.ServerInterface = (*Server)(nil)
 
-func NewServer(health *HealthHandler, wordpress *WordpressSitesHandler, login *LoginHandler) *Server {
-	return &Server{HealthHandler: health, WordpressSitesHandler: wordpress, LoginHandler: login}
+func NewServer(health *HealthHandler, wordpress *WordpressSitesHandler, login *LoginHandler, articles *ArticlesHandler) *Server {
+	return &Server{HealthHandler: health, WordpressSitesHandler: wordpress, LoginHandler: login, ArticlesHandler: articles}
 }

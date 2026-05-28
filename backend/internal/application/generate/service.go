@@ -435,6 +435,27 @@ func (s *Service) Publish(ctx context.Context, articleID int64) (generate.Articl
 	return *updated, nil
 }
 
+// List returns all tracked articles for the read API.
+func (s *Service) List(ctx context.Context) ([]generate.Article, error) {
+	arts, err := s.repo.List(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list articles: %w", err)
+	}
+	return arts, nil
+}
+
+// Get fetches one article, mapping the domain not-found to the use-case sentinel.
+func (s *Service) Get(ctx context.Context, id int64) (generate.Article, error) {
+	article, err := s.repo.Get(ctx, id)
+	if err != nil {
+		if errors.Is(err, generate.ErrNotFound) {
+			return generate.Article{}, ErrArticleNotFound
+		}
+		return generate.Article{}, fmt.Errorf("fetch article: %w", err)
+	}
+	return *article, nil
+}
+
 func pickStr(req, def string) string {
 	if req != "" {
 		return req
