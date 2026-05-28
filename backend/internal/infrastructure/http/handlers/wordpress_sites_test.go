@@ -11,14 +11,14 @@ import (
 
 	"github.com/google/uuid"
 
-	apphealth "contentflow/internal/application/health"
-	appwordpress "contentflow/internal/application/wordpress"
-	domainhealth "contentflow/internal/domain/health"
-	domainwp "contentflow/internal/domain/wordpress"
-	apihttp "contentflow/internal/infrastructure/http"
-	"contentflow/internal/infrastructure/http/handlers"
-	"contentflow/internal/oapigen"
-	"contentflow/pkg/config"
+	apphealth "multiagent-seo/internal/application/health"
+	appwordpress "multiagent-seo/internal/application/wordpress"
+	domainhealth "multiagent-seo/internal/domain/health"
+	domainwp "multiagent-seo/internal/domain/wordpress"
+	apihttp "multiagent-seo/internal/infrastructure/http"
+	"multiagent-seo/internal/infrastructure/http/handlers"
+	"multiagent-seo/internal/oapigen"
+	"multiagent-seo/pkg/config"
 )
 
 type fakeWordpressRepo struct {

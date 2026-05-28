@@ -7,11 +7,11 @@ import (
 
 	"github.com/getsentry/sentry-go"
 
-	"contentflow/pkg/config"
-	"contentflow/pkg/logger"
+	"multiagent-seo/pkg/config"
+	"multiagent-seo/pkg/logger"
 )
 
-// BuildDate is injected at build time via -ldflags "-X contentflow/pkg/sentry.BuildDate=<value>".
+// BuildDate is injected at build time via -ldflags "-X multiagent-seo/pkg/sentry.BuildDate=<value>".
 var BuildDate string
 
 var once sync.Once

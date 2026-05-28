@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"contentflow/pkg/config"
+	"multiagent-seo/pkg/config"
 )
 
 func TestNewPoolPingFailure(t *testing.T) {

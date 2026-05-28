@@ -5,9 +5,9 @@ import (
 	"net/http"
 	"time"
 
-	domainhealth "contentflow/internal/domain/health"
-	"contentflow/internal/infrastructure/http/response"
-	"contentflow/internal/oapigen"
+	domainhealth "multiagent-seo/internal/domain/health"
+	"multiagent-seo/internal/infrastructure/http/response"
+	"multiagent-seo/internal/oapigen"
 )
 
 type healthService interface {

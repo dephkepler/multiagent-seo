@@ -6,8 +6,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"contentflow/pkg/config"
-	"contentflow/pkg/logger"
+	"multiagent-seo/pkg/config"
+	"multiagent-seo/pkg/logger"
 )
 
 func NewPool(ctx context.Context, cfg config.DatabaseConfig) (*pgxpool.Pool, error) {

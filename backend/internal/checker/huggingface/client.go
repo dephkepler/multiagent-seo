@@ -17,7 +17,7 @@ import (
 	"time"
 	"unicode"
 
-	"contentflow/internal/checker"
+	"multiagent-seo/internal/checker"
 )
 
 const (

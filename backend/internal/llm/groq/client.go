@@ -8,8 +8,8 @@ import (
 	"log/slog"
 	"net/http"
 
-	"contentflow/internal/llm/transport"
-	"contentflow/internal/llm/usage"
+	"multiagent-seo/internal/llm/transport"
+	"multiagent-seo/internal/llm/usage"
 )
 
 const (

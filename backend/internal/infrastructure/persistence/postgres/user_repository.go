@@ -8,7 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"contentflow/internal/domain/user"
+	"multiagent-seo/internal/domain/user"
 )
 
 var _ user.Repository = (*UserRepository)(nil)

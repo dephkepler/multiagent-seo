@@ -3,7 +3,7 @@ package prompt
 import (
 	"fmt"
 
-	"contentflow/internal/prompt/rules"
+	"multiagent-seo/internal/prompt/rules"
 )
 
 func Writer(brief, keyword, language string, minWords, maxWords int, cluster Cluster, competitors Competitors) string {

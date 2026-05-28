@@ -10,12 +10,12 @@ import (
 	"testing"
 	"time"
 
-	apphealth "contentflow/internal/application/health"
-	domainhealth "contentflow/internal/domain/health"
-	apihttp "contentflow/internal/infrastructure/http"
-	"contentflow/internal/infrastructure/http/handlers"
-	"contentflow/internal/oapigen"
-	"contentflow/pkg/config"
+	apphealth "multiagent-seo/internal/application/health"
+	domainhealth "multiagent-seo/internal/domain/health"
+	apihttp "multiagent-seo/internal/infrastructure/http"
+	"multiagent-seo/internal/infrastructure/http/handlers"
+	"multiagent-seo/internal/oapigen"
+	"multiagent-seo/pkg/config"
 )
 
 type stubRepo struct{ err error }

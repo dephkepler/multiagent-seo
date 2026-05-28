@@ -5,7 +5,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"contentflow/internal/domain/wordpress"
+	"multiagent-seo/internal/domain/wordpress"
 )
 
 type Service struct {

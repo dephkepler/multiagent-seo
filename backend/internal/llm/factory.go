@@ -6,8 +6,8 @@ import (
 	"sort"
 	"strings"
 
-	"contentflow/internal/llm/claude"
-	"contentflow/internal/llm/groq"
+	"multiagent-seo/internal/llm/claude"
+	"multiagent-seo/internal/llm/groq"
 )
 
 // No model-name validation: unknown models surface as a 4xx from the provider.

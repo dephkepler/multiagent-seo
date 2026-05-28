@@ -10,11 +10,11 @@ import (
 	"github.com/google/uuid"
 	openapi_types "github.com/oapi-codegen/runtime/types"
 
-	domainwp "contentflow/internal/domain/wordpress"
-	"contentflow/internal/infrastructure/http/problem"
-	"contentflow/internal/infrastructure/http/response"
-	"contentflow/internal/oapigen"
-	"contentflow/pkg/validate"
+	domainwp "multiagent-seo/internal/domain/wordpress"
+	"multiagent-seo/internal/infrastructure/http/problem"
+	"multiagent-seo/internal/infrastructure/http/response"
+	"multiagent-seo/internal/oapigen"
+	"multiagent-seo/pkg/validate"
 )
 
 const maxBodyBytes = 64 << 10

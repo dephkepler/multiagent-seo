@@ -11,8 +11,8 @@ import (
 	"net/http"
 	"time"
 
-	"contentflow/internal/llm/retry"
-	"contentflow/internal/llm/usage"
+	"multiagent-seo/internal/llm/retry"
+	"multiagent-seo/internal/llm/usage"
 )
 
 // Cap on response read; provider JSON is tiny, so 1 MiB guards against runaway bodies.

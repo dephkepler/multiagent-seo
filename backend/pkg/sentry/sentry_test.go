@@ -3,7 +3,7 @@ package sentry
 import (
 	"testing"
 
-	"contentflow/pkg/config"
+	"multiagent-seo/pkg/config"
 )
 
 func TestInitialize_DisabledSkips(t *testing.T) {

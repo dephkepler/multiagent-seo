@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"time"
 
-	"contentflow/internal/repo"
+	"multiagent-seo/internal/repo"
 )
 
 const maxKeywordLength = 200

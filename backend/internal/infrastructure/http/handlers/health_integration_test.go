@@ -12,14 +12,14 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	apphealth "contentflow/internal/application/health"
-	domainhealth "contentflow/internal/domain/health"
-	"contentflow/internal/infrastructure/db"
-	apihttp "contentflow/internal/infrastructure/http"
-	"contentflow/internal/infrastructure/http/handlers"
-	"contentflow/internal/infrastructure/persistence/postgres"
-	"contentflow/internal/oapigen"
-	"contentflow/pkg/config"
+	apphealth "multiagent-seo/internal/application/health"
+	domainhealth "multiagent-seo/internal/domain/health"
+	"multiagent-seo/internal/infrastructure/db"
+	apihttp "multiagent-seo/internal/infrastructure/http"
+	"multiagent-seo/internal/infrastructure/http/handlers"
+	"multiagent-seo/internal/infrastructure/persistence/postgres"
+	"multiagent-seo/internal/oapigen"
+	"multiagent-seo/pkg/config"
 )
 
 func TestHealthz_Integration(t *testing.T) {

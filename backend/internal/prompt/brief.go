@@ -3,7 +3,7 @@ package prompt
 import (
 	"fmt"
 
-	"contentflow/internal/prompt/rules"
+	"multiagent-seo/internal/prompt/rules"
 )
 
 func Brief(keyword, language string, cluster Cluster, siteTopic, extraRules string, competitors Competitors) string {

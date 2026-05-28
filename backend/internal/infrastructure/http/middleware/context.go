@@ -3,7 +3,7 @@ package middleware
 import (
 	"context"
 
-	"contentflow/pkg/logger"
+	"multiagent-seo/pkg/logger"
 )
 
 func stringFromCtx(ctx context.Context, key logger.ContextKey) string {

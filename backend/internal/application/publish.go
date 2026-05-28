@@ -5,8 +5,8 @@ import (
 	"errors"
 	"fmt"
 
-	"contentflow/internal/repo"
-	"contentflow/internal/server"
+	"multiagent-seo/internal/repo"
+	"multiagent-seo/internal/server"
 )
 
 func (a *Application) publishArticle(ctx context.Context, id int64) (*server.PublishResult, error) {

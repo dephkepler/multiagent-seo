@@ -8,11 +8,11 @@ import (
 	"strings"
 	"time"
 
-	appauth "contentflow/internal/application/auth"
-	"contentflow/internal/infrastructure/http/problem"
-	"contentflow/internal/infrastructure/http/response"
-	"contentflow/internal/oapigen"
-	"contentflow/pkg/validate"
+	appauth "multiagent-seo/internal/application/auth"
+	"multiagent-seo/internal/infrastructure/http/problem"
+	"multiagent-seo/internal/infrastructure/http/response"
+	"multiagent-seo/internal/oapigen"
+	"multiagent-seo/pkg/validate"
 )
 
 type AuthService interface {

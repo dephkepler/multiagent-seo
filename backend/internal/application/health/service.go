@@ -3,7 +3,7 @@ package health
 import (
 	"context"
 
-	"contentflow/internal/domain/health"
+	"multiagent-seo/internal/domain/health"
 )
 
 type Service struct {

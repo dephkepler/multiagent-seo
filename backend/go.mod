@@ -1,4 +1,4 @@
-module contentflow
+module multiagent-seo
 
 go 1.25.0
 

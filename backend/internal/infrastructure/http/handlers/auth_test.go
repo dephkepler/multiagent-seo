@@ -10,15 +10,15 @@ import (
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 
-	appauth "contentflow/internal/application/auth"
-	domainuser "contentflow/internal/domain/user"
-	apphealth "contentflow/internal/application/health"
-	domainhealth "contentflow/internal/domain/health"
-	apihttp "contentflow/internal/infrastructure/http"
-	"contentflow/internal/infrastructure/http/handlers"
-	"contentflow/internal/infrastructure/jwtauth"
-	"contentflow/internal/oapigen"
-	"contentflow/pkg/config"
+	appauth "multiagent-seo/internal/application/auth"
+	domainuser "multiagent-seo/internal/domain/user"
+	apphealth "multiagent-seo/internal/application/health"
+	domainhealth "multiagent-seo/internal/domain/health"
+	apihttp "multiagent-seo/internal/infrastructure/http"
+	"multiagent-seo/internal/infrastructure/http/handlers"
+	"multiagent-seo/internal/infrastructure/jwtauth"
+	"multiagent-seo/internal/oapigen"
+	"multiagent-seo/pkg/config"
 )
 
 type fakeUserRepo struct {

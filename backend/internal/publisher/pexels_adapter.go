@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	"contentflow/internal/pexels"
+	"multiagent-seo/internal/pexels"
 )
 
 // pexelsCandidates is how many photos we ask Pexels for per query before

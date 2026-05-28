@@ -7,7 +7,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"contentflow/internal/application"
+	"multiagent-seo/internal/application"
 )
 
 func main() {

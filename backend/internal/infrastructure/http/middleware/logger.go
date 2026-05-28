@@ -9,7 +9,7 @@ import (
 
 	chiMiddleware "github.com/go-chi/chi/v5/middleware"
 
-	"contentflow/pkg/logger"
+	"multiagent-seo/pkg/logger"
 )
 
 const awsTraceHeader = "X-Amzn-Trace-Id"

@@ -8,8 +8,8 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
-	"contentflow/internal/domain/auth"
-	"contentflow/internal/domain/user"
+	"multiagent-seo/internal/domain/auth"
+	"multiagent-seo/internal/domain/user"
 )
 
 var ErrInvalidCredentials = errors.New("invalid credentials")

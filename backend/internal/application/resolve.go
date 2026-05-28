@@ -7,11 +7,11 @@ import (
 	"runtime/debug"
 	"time"
 
-	"contentflow/internal/config"
-	"contentflow/internal/llm"
-	"contentflow/internal/prompt"
-	"contentflow/internal/publisher"
-	"contentflow/internal/server"
+	"multiagent-seo/internal/config"
+	"multiagent-seo/internal/llm"
+	"multiagent-seo/internal/prompt"
+	"multiagent-seo/internal/publisher"
+	"multiagent-seo/internal/server"
 )
 
 // resolvedJob holds per-request settings merged with config defaults.

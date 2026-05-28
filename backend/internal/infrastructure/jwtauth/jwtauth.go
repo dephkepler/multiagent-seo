@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	"contentflow/internal/domain/auth"
-	"contentflow/pkg/jwt"
+	"multiagent-seo/internal/domain/auth"
+	"multiagent-seo/pkg/jwt"
 )
 
 var (

@@ -11,8 +11,8 @@ import (
 	"net/http"
 	"time"
 
-	"contentflow/internal/config"
-	"contentflow/internal/publisher"
+	"multiagent-seo/internal/config"
+	"multiagent-seo/internal/publisher"
 )
 
 // maxResponseBytes guards against a misbehaving proxy or server; real WP

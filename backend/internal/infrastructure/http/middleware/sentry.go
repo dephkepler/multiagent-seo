@@ -6,7 +6,7 @@ import (
 	"github.com/getsentry/sentry-go"
 	sentryhttp "github.com/getsentry/sentry-go/http"
 
-	"contentflow/pkg/logger"
+	"multiagent-seo/pkg/logger"
 )
 
 // SentryMiddleware returns a Sentry HTTP middleware that captures panics and errors.

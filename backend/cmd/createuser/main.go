@@ -10,9 +10,9 @@ import (
 	"github.com/rs/zerolog/log"
 	"golang.org/x/crypto/bcrypt"
 
-	"contentflow/internal/infrastructure/db"
-	"contentflow/pkg/config"
-	"contentflow/pkg/logger"
+	"multiagent-seo/internal/infrastructure/db"
+	"multiagent-seo/pkg/config"
+	"multiagent-seo/pkg/logger"
 )
 
 func main() {

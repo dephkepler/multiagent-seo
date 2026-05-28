@@ -8,17 +8,17 @@ import (
 	"net/http"
 	"sync"
 
-	"contentflow/internal/checker"
-	"contentflow/internal/checker/huggingface"
-	"contentflow/internal/config"
-	"contentflow/internal/dataforseo"
-	"contentflow/internal/llm"
-	"contentflow/internal/pexels"
-	"contentflow/internal/publisher"
-	"contentflow/internal/repo"
-	"contentflow/internal/server"
-	"contentflow/internal/sheets"
-	"contentflow/internal/wordpress"
+	"multiagent-seo/internal/checker"
+	"multiagent-seo/internal/checker/huggingface"
+	"multiagent-seo/internal/config"
+	"multiagent-seo/internal/dataforseo"
+	"multiagent-seo/internal/llm"
+	"multiagent-seo/internal/pexels"
+	"multiagent-seo/internal/publisher"
+	"multiagent-seo/internal/repo"
+	"multiagent-seo/internal/server"
+	"multiagent-seo/internal/sheets"
+	"multiagent-seo/internal/wordpress"
 )
 
 type Application struct {

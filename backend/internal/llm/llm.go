@@ -3,7 +3,7 @@ package llm
 import (
 	"context"
 
-	"contentflow/internal/llm/usage"
+	"multiagent-seo/internal/llm/usage"
 )
 
 type Usage = usage.Usage

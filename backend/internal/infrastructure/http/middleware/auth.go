@@ -5,10 +5,10 @@ import (
 	"net/http"
 	"strings"
 
-	"contentflow/internal/domain/auth"
-	"contentflow/internal/infrastructure/http/problem"
-	"contentflow/internal/oapigen"
-	"contentflow/pkg/logger"
+	"multiagent-seo/internal/domain/auth"
+	"multiagent-seo/internal/infrastructure/http/problem"
+	"multiagent-seo/internal/oapigen"
+	"multiagent-seo/pkg/logger"
 )
 
 // BearerAuth enforces auth on routes marked with the bearerAuth security scheme.

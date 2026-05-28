@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"contentflow/internal/domain/health"
+	"multiagent-seo/internal/domain/health"
 )
 
 type stubRepo struct{ err error }

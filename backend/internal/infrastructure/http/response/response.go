@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"contentflow/pkg/logger"
+	"multiagent-seo/pkg/logger"
 )
 
 func WriteJSON(ctx context.Context, w http.ResponseWriter, status int, body any) {

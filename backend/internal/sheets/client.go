@@ -15,7 +15,7 @@ import (
 	"google.golang.org/api/option"
 	"google.golang.org/api/sheets/v4"
 
-	"contentflow/internal/config"
+	"multiagent-seo/internal/config"
 )
 
 // Result holds the keywords (split out of the comma-separated cell) and the

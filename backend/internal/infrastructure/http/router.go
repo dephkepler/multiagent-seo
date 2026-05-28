@@ -10,11 +10,11 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 
-	httpMiddleware "contentflow/internal/infrastructure/http/middleware"
-	"contentflow/internal/infrastructure/http/problem"
-	"contentflow/internal/oapigen"
-	"contentflow/pkg/config"
-	"contentflow/pkg/logger"
+	httpMiddleware "multiagent-seo/internal/infrastructure/http/middleware"
+	"multiagent-seo/internal/infrastructure/http/problem"
+	"multiagent-seo/internal/oapigen"
+	"multiagent-seo/pkg/config"
+	"multiagent-seo/pkg/logger"
 )
 
 func NewRouter(cfg config.ServerConfig, api oapigen.ServerInterface, authMW oapigen.MiddlewareFunc) chi.Router {

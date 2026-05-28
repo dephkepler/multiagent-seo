@@ -10,7 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"contentflow/internal/domain/wordpress"
+	"multiagent-seo/internal/domain/wordpress"
 )
 
 var _ wordpress.Repository = (*WordpressSiteRepository)(nil)

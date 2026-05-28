@@ -10,19 +10,19 @@ import (
 
 	"github.com/rs/zerolog/log"
 
-	appauth "contentflow/internal/application/auth"
-	apphealth "contentflow/internal/application/health"
-	appwordpress "contentflow/internal/application/wordpress"
-	domainhealth "contentflow/internal/domain/health"
-	"contentflow/internal/infrastructure/db"
-	apihttp "contentflow/internal/infrastructure/http"
-	"contentflow/internal/infrastructure/http/handlers"
-	httpMiddleware "contentflow/internal/infrastructure/http/middleware"
-	"contentflow/internal/infrastructure/jwtauth"
-	"contentflow/internal/infrastructure/persistence/postgres"
-	"contentflow/pkg/config"
-	"contentflow/pkg/logger"
-	"contentflow/pkg/sentry"
+	appauth "multiagent-seo/internal/application/auth"
+	apphealth "multiagent-seo/internal/application/health"
+	appwordpress "multiagent-seo/internal/application/wordpress"
+	domainhealth "multiagent-seo/internal/domain/health"
+	"multiagent-seo/internal/infrastructure/db"
+	apihttp "multiagent-seo/internal/infrastructure/http"
+	"multiagent-seo/internal/infrastructure/http/handlers"
+	httpMiddleware "multiagent-seo/internal/infrastructure/http/middleware"
+	"multiagent-seo/internal/infrastructure/jwtauth"
+	"multiagent-seo/internal/infrastructure/persistence/postgres"
+	"multiagent-seo/pkg/config"
+	"multiagent-seo/pkg/logger"
+	"multiagent-seo/pkg/sentry"
 )
 
 func main() {

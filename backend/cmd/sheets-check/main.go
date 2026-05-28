@@ -13,8 +13,8 @@ import (
 	"google.golang.org/api/option"
 	sheetsv4 "google.golang.org/api/sheets/v4"
 
-	"contentflow/internal/config"
-	"contentflow/internal/sheets"
+	"multiagent-seo/internal/config"
+	"multiagent-seo/internal/sheets"
 )
 
 func main() {

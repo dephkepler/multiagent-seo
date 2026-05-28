@@ -13,7 +13,7 @@ import (
 
 	"github.com/caarlos0/env/v10"
 
-	"contentflow/pkg/validate"
+	"multiagent-seo/pkg/validate"
 )
 
 const envPrefix = "CF_"

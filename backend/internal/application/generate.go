@@ -6,10 +6,10 @@ import (
 	"log/slog"
 	"time"
 
-	"contentflow/internal/checker"
-	"contentflow/internal/dataforseo"
-	"contentflow/internal/prompt"
-	"contentflow/internal/publisher"
+	"multiagent-seo/internal/checker"
+	"multiagent-seo/internal/dataforseo"
+	"multiagent-seo/internal/prompt"
+	"multiagent-seo/internal/publisher"
 )
 
 type StepUsage struct {

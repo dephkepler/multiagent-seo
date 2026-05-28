@@ -6,7 +6,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"contentflow/pkg/uuids"
+	"multiagent-seo/pkg/uuids"
 )
 
 func TestDedupe_PreservesFirstOccurrence(t *testing.T) {
