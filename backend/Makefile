@@ -26,7 +26,7 @@ migrate-down:
 
 migrate-create:
 	@test -n "$(name)" || { echo "usage: make migrate-create name=add_xxx"; exit 1; }
-	go run -tags pgx5 github.com/golang-migrate/migrate/v4/cmd/migrate create -ext sql -dir migrations $(name)
+	migrate create -ext sql -dir migrations $(name)
 
 # creates an empty credentials.json placeholder so docker compose can always
 # bind-mount it without silently creating a host-side directory.
