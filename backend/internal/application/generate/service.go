@@ -135,13 +135,24 @@ type spec struct {
 	autoPublish      bool
 }
 
+// GenerateResult is the synchronous outcome of Generate: the freshly-created
+// article plus the resolved cluster and model info, so the caller learns the
+// targeted keywords/title and which model is running before it starts polling.
+type GenerateResult struct {
+	Article        generate.Article
+	TargetKeywords []string
+	SuggestedTitle string
+	Provider       string
+	Model          string
+}
+
 // Generate resolves the spec, creates the article in "generating" state, then
 // dispatches the pipeline through the JobRunner and returns immediately
 // (202-style). A test using SyncRunner sees runGeneration complete first.
-func (s *Service) Generate(ctx context.Context, req GenerateRequest) (generate.Article, error) {
+func (s *Service) Generate(ctx context.Context, req GenerateRequest) (GenerateResult, error) {
 	sp, err := s.resolve(ctx, req)
 	if err != nil {
-		return generate.Article{}, err
+		return GenerateResult{}, err
 	}
 
 	id, err := s.repo.Create(ctx, generate.CreateArticle{
@@ -149,12 +160,12 @@ func (s *Service) Generate(ctx context.Context, req GenerateRequest) (generate.A
 		SiteID:  sp.siteID,
 	})
 	if err != nil {
-		return generate.Article{}, fmt.Errorf("create article: %w", err)
+		return GenerateResult{}, fmt.Errorf("create article: %w", err)
 	}
 
 	article, err := s.repo.Get(ctx, id)
 	if err != nil {
-		return generate.Article{}, fmt.Errorf("fetch article: %w", err)
+		return GenerateResult{}, fmt.Errorf("fetch article: %w", err)
 	}
 
 	jobLog := s.log.With(
@@ -170,7 +181,13 @@ func (s *Service) Generate(ctx context.Context, req GenerateRequest) (generate.A
 	})
 
 	jobLog.Info("generation accepted", "target_keywords", len(sp.cluster.Keywords))
-	return *article, nil
+	return GenerateResult{
+		Article:        *article,
+		TargetKeywords: sp.cluster.Keywords,
+		SuggestedTitle: sp.cluster.Title,
+		Provider:       sp.provider,
+		Model:          sp.model,
+	}, nil
 }
 
 func (s *Service) resolve(ctx context.Context, req GenerateRequest) (spec, error) {

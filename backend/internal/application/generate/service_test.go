@@ -102,13 +102,13 @@ func TestGenerate_HappyPath(t *testing.T) {
 		nil,
 	)
 
-	art, err := svc.Generate(context.Background(), appgen.GenerateRequest{Keyword: "test keyword", SiteID: uuid.New()})
+	res, err := svc.Generate(context.Background(), appgen.GenerateRequest{Keyword: "test keyword", SiteID: uuid.New()})
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
 
 	// SyncRunner ran the pipeline inline; the stored article must reach draft.
-	stored, err := repo.Get(context.Background(), art.ID)
+	stored, err := repo.Get(context.Background(), res.Article.ID)
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}

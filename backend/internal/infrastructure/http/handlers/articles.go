@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -18,7 +19,7 @@ import (
 )
 
 type generateService interface {
-	Generate(ctx context.Context, req appgen.GenerateRequest) (generate.Article, error)
+	Generate(ctx context.Context, req appgen.GenerateRequest) (appgen.GenerateResult, error)
 	Publish(ctx context.Context, id int64) (generate.Article, error)
 	List(ctx context.Context) ([]generate.Article, error)
 	Get(ctx context.Context, id int64) (generate.Article, error)
@@ -53,17 +54,37 @@ func (h *ArticlesHandler) GenerateArticle(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	article, err := h.svc.Generate(r.Context(), toGenerateRequest(body))
+	res, err := h.svc.Generate(r.Context(), toGenerateRequest(body))
 	if err != nil {
 		h.writeError(w, err)
 		return
 	}
-	response.WriteJSON(r.Context(), w, http.StatusAccepted, oapigen.GenerateAccepted{
-		Id:        article.ID,
-		Keyword:   article.Keyword,
-		Status:    string(article.Status),
-		CreatedAt: article.CreatedAt,
-	})
+	a := res.Article
+	accepted := oapigen.GenerateAccepted{
+		Id:             a.ID,
+		Keyword:        a.Keyword,
+		Status:         string(a.Status),
+		CreatedAt:      a.CreatedAt,
+		TargetKeywords: res.TargetKeywords,
+		StatusUrl:      ptr(fmt.Sprintf("/articles/%d", a.ID)),
+	}
+	if res.SuggestedTitle != "" {
+		accepted.SuggestedTitle = &res.SuggestedTitle
+	}
+	if res.Provider != "" {
+		accepted.Provider = &res.Provider
+	}
+	if res.Model != "" {
+		accepted.Model = &res.Model
+	}
+	if a.Site != "" {
+		accepted.Site = &a.Site
+	}
+	if a.SiteID != uuid.Nil {
+		site := a.SiteID
+		accepted.SiteId = &site
+	}
+	response.WriteJSON(r.Context(), w, http.StatusAccepted, accepted)
 }
 
 func (h *ArticlesHandler) ListArticles(w http.ResponseWriter, r *http.Request) {
@@ -180,6 +201,14 @@ func toArticle(a generate.Article) oapigen.Article {
 	out.ImagesRequested = &a.ImagesRequested
 	out.ImagesResolved = &a.ImagesResolved
 	out.ImagesSkipped = &a.ImagesSkipped
+	if len(a.CompetitorData) > 0 {
+		cd := a.CompetitorData
+		out.CompetitorData = &cd
+	}
+	if len(a.CheckResult) > 0 {
+		cr := a.CheckResult
+		out.CheckResult = &cr
+	}
 	return out
 }
 
@@ -190,3 +219,5 @@ func deref[T any](p *T) T {
 	}
 	return *p
 }
+
+func ptr[T any](v T) *T { return &v }

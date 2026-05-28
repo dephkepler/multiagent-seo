@@ -347,6 +347,20 @@ components:
           type: array
           items:
             type: string
+        suggested_title:
+          type: string
+        site:
+          type: string
+        site_id:
+          type: string
+          format: uuid
+          nullable: true
+        provider:
+          type: string
+        model:
+          type: string
+        status_url:
+          type: string
 
     Article:
       type: object
@@ -378,6 +392,14 @@ components:
           type: integer
         images_skipped:
           type: integer
+        competitor_data:
+          type: object
+          nullable: true
+          x-go-type: json.RawMessage
+        check_result:
+          type: object
+          nullable: true
+          x-go-type: json.RawMessage
         created_at:
           type: string
           format: date-time

@@ -36,6 +36,14 @@ func NewRouter(cfg config.ServerConfig, api oapigen.ServerInterface, authMW oapi
 	r.Use(httpMiddleware.SentryScopeEnhancer)
 
 	sub := chi.NewRouter()
+	// Public, unauthenticated docs routes. Registered on the same base router as
+	// the API operations; oapigen bakes auth into each operation handler (not via
+	// router middleware), so these stay open.
+	sub.Get("/", handleLandingPage)
+	sub.Get("/docs", handleSwaggerUI)
+	sub.Get("/docs/", handleSwaggerUI)
+	sub.Get("/openapi.json", handleOpenAPISpec)
+
 	var mws []oapigen.MiddlewareFunc
 	if authMW != nil {
 		mws = append(mws, authMW)

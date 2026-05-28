@@ -25,11 +25,14 @@ type fakeGenerateService struct {
 	pubErr    error
 }
 
-func (s *fakeGenerateService) Generate(_ context.Context, req appgen.GenerateRequest) (generate.Article, error) {
+func (s *fakeGenerateService) Generate(_ context.Context, req appgen.GenerateRequest) (appgen.GenerateResult, error) {
 	if s.genErr != nil {
-		return generate.Article{}, s.genErr
+		return appgen.GenerateResult{}, s.genErr
 	}
-	return generate.Article{ID: 1, Keyword: req.Keyword, SiteID: req.SiteID, Status: generate.StatusGenerating}, nil
+	return appgen.GenerateResult{
+		Article:        generate.Article{ID: 1, Keyword: req.Keyword, SiteID: req.SiteID, Status: generate.StatusGenerating},
+		TargetKeywords: []string{req.Keyword},
+	}, nil
 }
 
 func (s *fakeGenerateService) Publish(context.Context, int64) (generate.Article, error) {
