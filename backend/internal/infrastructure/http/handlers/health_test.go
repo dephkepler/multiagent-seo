@@ -3,6 +3,7 @@ package handlers_test
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -76,14 +77,20 @@ func TestGetHealthz_Load(t *testing.T) {
 	defer srv.Close()
 
 	const (
-		workers      = 50
-		perWorker    = 200
-		totalReqs    = workers * perWorker
+		workers   = 50
+		perWorker = 200
+		totalReqs = workers * perWorker
 	)
 
 	var ok, failed int64
 	var wg sync.WaitGroup
-	client := &http.Client{Timeout: 5 * time.Second}
+	// Reuse keep-alive connections across the load (one idle conn per worker),
+	// otherwise 10k short-lived connections exhaust ephemeral ports on macOS.
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+	tr.MaxIdleConns = workers
+	tr.MaxIdleConnsPerHost = workers
+	client := &http.Client{Timeout: 5 * time.Second, Transport: tr}
+	defer client.CloseIdleConnections()
 	start := time.Now()
 
 	for range workers {
@@ -97,6 +104,8 @@ func TestGetHealthz_Load(t *testing.T) {
 					}
 					continue
 				}
+				// Drain so the connection returns to the keep-alive pool.
+				_, _ = io.Copy(io.Discard, resp.Body)
 				resp.Body.Close()
 				atomic.AddInt64(&ok, 1)
 			}
