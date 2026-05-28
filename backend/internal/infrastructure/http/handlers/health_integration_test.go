@@ -1,12 +1,8 @@
 //go:build integration
 
-// Run with a reachable Postgres (CF_DB_* env), e.g. against devops/compose:
-//   CF_DB_PORT=55433 CF_DB_USER=contentflow CF_DB_PASSWORD=contentflow \
-//   CF_DB_NAME=contentflow go test -tags integration ./internal/infrastructure/http/handlers/
 package handlers_test
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -14,30 +10,24 @@ import (
 
 	apphealth "multiagent-seo/internal/application/health"
 	domainhealth "multiagent-seo/internal/domain/health"
-	"multiagent-seo/internal/infrastructure/db"
 	apihttp "multiagent-seo/internal/infrastructure/http"
 	"multiagent-seo/internal/infrastructure/http/handlers"
 	"multiagent-seo/internal/infrastructure/persistence/postgres"
 	"multiagent-seo/internal/oapigen"
+	"multiagent-seo/internal/testsupport"
 	"multiagent-seo/pkg/config"
 )
 
 func TestHealthz_Integration(t *testing.T) {
-	cfg, err := config.Load()
-	if err != nil {
-		t.Skipf("config load failed: %v", err)
-	}
-
-	ctx := context.Background()
-	pool, err := db.NewPool(ctx, cfg.Database)
-	if err != nil {
-		t.Skipf("no reachable database: %v", err)
-	}
-	defer pool.Close()
+	pool := testsupport.NewTestDB(t, baseConnStr)
 
 	repo := postgres.NewHealthRepository(pool)
 	svc := apphealth.NewService(domainhealth.NewService(repo))
-	router := apihttp.NewRouter(cfg.Server, handlers.NewServer(handlers.NewHealthHandler(svc), handlers.NewWordpressSitesHandler(nil), handlers.NewLoginHandler(nil), handlers.NewArticlesHandler(nil)), nil)
+	router := apihttp.NewRouter(
+		config.ServerConfig{BasePath: "/", CORSAllowedOrigins: []string{"http://localhost:3000"}},
+		handlers.NewServer(handlers.NewHealthHandler(svc), handlers.NewWordpressSitesHandler(nil), handlers.NewLoginHandler(nil), handlers.NewArticlesHandler(nil)),
+		nil,
+	)
 
 	srv := httptest.NewServer(router)
 	defer srv.Close()
