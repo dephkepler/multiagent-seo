@@ -1,17 +1,32 @@
-.PHONY: dev db migrate run stop up down logs creds generate
+.PHONY: dev db run stop up down logs creds generate migrate-up migrate-down migrate-create
 
 -include .env
 export
 
-CF_DATABASE_URL ?= postgres://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@localhost:$(POSTGRES_HOST_PORT)/$(POSTGRES_DB)?sslmode=disable
-export CF_DATABASE_URL
+# Map app-config DB vars from the compose POSTGRES_* vars so migrate.sh and the
+# server pick them up without extra env juggling.
+export CF_DB_HOST ?= localhost
+export CF_DB_PORT ?= $(POSTGRES_HOST_PORT)
+export CF_DB_USER ?= $(POSTGRES_USER)
+export CF_DB_PASSWORD ?= $(POSTGRES_PASSWORD)
+export CF_DB_NAME ?= $(POSTGRES_DB)
 
 COMPOSE := docker compose -f ../devops/compose.yaml --env-file .env
 
-dev: db migrate run
+dev: db migrate-up run
 
 generate:
 	go tool oapi-codegen -config api/oapi-codegen.yaml -o internal/oapigen/api.gen.go api/openapi.yaml
+
+migrate-up:
+	./migrate.sh up
+
+migrate-down:
+	./migrate.sh down 1
+
+migrate-create:
+	@test -n "$(name)" || { echo "usage: make migrate-create name=add_xxx"; exit 1; }
+	go run -tags pgx5 github.com/golang-migrate/migrate/v4/cmd/migrate create -ext sql -dir migrations $(name)
 
 # creates an empty credentials.json placeholder so docker compose can always
 # bind-mount it without silently creating a host-side directory.
@@ -22,11 +37,8 @@ db:
 	$(COMPOSE) up -d postgres
 	@echo "waiting for postgres..." && sleep 2
 
-migrate:
-	go run ./cmd/migrate
-
 run:
-	go run ./cmd/main.go
+	go run ./cmd/server
 
 stop:
 	$(COMPOSE) down

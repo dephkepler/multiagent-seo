@@ -17,21 +17,8 @@ services:
       timeout: 3s
       retries: 20
 
-  migrate:
-    build:
-      context: ../backend
-      dockerfile: ../devops/docker/backend.Dockerfile
-    command: ["/app/migrate"]
-    restart: no
-    environment:
-      CF_DATABASE_URL: "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable"
-    volumes:
-      - ../backend/internal/config/config.yaml:/app/internal/config/config.yaml:ro
-      - ../backend/credentials.json:/app/credentials.json:ro
-    depends_on:
-      postgres:
-        condition: service_healthy
-
+  # Migrations are applied separately (host: `make migrate-up`), not as a compose
+  # service — matches the reference, whose compose holds only infra services.
   app:
     build:
       context: ../backend
@@ -46,8 +33,8 @@ services:
       - ../backend/internal/config/config.yaml:/app/internal/config/config.yaml:ro
       - ../backend/credentials.json:/app/credentials.json:ro
     depends_on:
-      migrate:
-        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
 
 volumes:
   postgres_data:
