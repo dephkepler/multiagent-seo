@@ -153,6 +153,9 @@ type Photo struct {
 // tokens. Without this filter image search drifts into abstract/metaphor shots
 // for niche topics.
 func PickRelevant(photos []Photo, keyword, placeholderALT string) *Photo {
+	if len(photos) == 0 {
+		return nil
+	}
 	wanted := tokenize(keyword + " " + placeholderALT)
 	if len(wanted) == 0 {
 		// No useful keyword tokens to score against — accept the top hit.
