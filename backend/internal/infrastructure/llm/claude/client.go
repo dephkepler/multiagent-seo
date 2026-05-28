@@ -61,7 +61,8 @@ func (c *codec) ParseResponse(body []byte) (string, usage.Usage, error) {
 		Content []struct {
 			Text string `json:"text"`
 		} `json:"content"`
-		Usage struct {
+		StopReason string `json:"stop_reason"`
+		Usage      struct {
 			InputTokens  int `json:"input_tokens"`
 			OutputTokens int `json:"output_tokens"`
 		} `json:"usage"`
@@ -75,5 +76,6 @@ func (c *codec) ParseResponse(body []byte) (string, usage.Usage, error) {
 	return result.Content[0].Text, usage.Usage{
 		InputTokens:  result.Usage.InputTokens,
 		OutputTokens: result.Usage.OutputTokens,
+		FinishReason: result.StopReason,
 	}, nil
 }

@@ -8,12 +8,28 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"multiagent-seo/internal/domain/generate"
 )
 
 var _ generate.ArticleRepository = (*ArticleRepository)(nil)
+
+// mapPGError classifies known PostgreSQL error codes into clearer errors.
+// Unclassified codes (and non-pg errors) are returned unchanged.
+func mapPGError(err error) error {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) {
+		return err
+	}
+	switch pgErr.Code {
+	case "23503": // foreign_key_violation
+		return fmt.Errorf("invalid site reference: %w", err)
+	default:
+		return err
+	}
+}
 
 type ArticleRepository struct {
 	db *pgxpool.Pool
@@ -37,7 +53,8 @@ func (r *ArticleRepository) Create(ctx context.Context, in generate.CreateArticl
 		"status":  generate.StatusGenerating,
 	}).Scan(&id)
 	if err != nil {
-		return 0, fmt.Errorf("create article: %w", err)
+		// A bad/deleted site_id violates the articles.site_id FK (pg 23503).
+		return 0, fmt.Errorf("create article: %w", mapPGError(err))
 	}
 	return id, nil
 }

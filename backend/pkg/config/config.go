@@ -29,6 +29,12 @@ type ServerConfig struct {
 	BackgroundJobTimeout time.Duration `env:"APP_BACKGROUND_JOB_TIMEOUT" envDefault:"15m"`
 }
 
+// LoggerConfig controls log verbosity. Level is the initial value; it can be
+// changed at runtime via the admin log-level endpoint. Output is always JSON.
+type LoggerConfig struct {
+	Level string `env:"LOG_LEVEL" envDefault:"info" validate:"required"`
+}
+
 type DatabaseConfig struct {
 	Host          string `env:"DB_HOST" envDefault:"localhost" validate:"required"`
 	Port          string `env:"DB_PORT" envDefault:"5432" validate:"required"`
@@ -157,6 +163,7 @@ type JWTConfig struct {
 
 type Config struct {
 	Server     ServerConfig     `validate:"required"`
+	Logger     LoggerConfig     `validate:"required"`
 	Database   DatabaseConfig   `validate:"required"`
 	Sentry     SentryConfig     `validate:"required"`
 	LLM        LLMConfig        `validate:"required"`

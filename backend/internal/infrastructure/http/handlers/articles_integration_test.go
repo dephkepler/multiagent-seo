@@ -54,7 +54,7 @@ func itArtBuild(t *testing.T) http.Handler {
 	if err != nil {
 		t.Fatalf("checker.New: %v", err)
 	}
-	images := pexels.New("")
+	images := pexels.New("", nil)
 	publisher := wordpress.NewProvider(postgres.NewWordpressSiteRepository(pool, "k"), nil)
 	runner := appgen.NewSyncRunner()
 

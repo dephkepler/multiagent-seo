@@ -70,5 +70,6 @@ type ResolvedImage struct {
 type RenderStats struct {
 	ImagesRequested int // [IMG | ...] placeholders the LLM emitted
 	ImagesResolved  int // placeholders that got a real image URL
-	ImagesSkipped   int // requested - resolved (no resolver, error, empty URL)
+	ImagesSkipped   int // benign skip: no resolver, empty URL, or topical skip
+	ImagesFailed    int // Resolve returned a non-nil error
 }

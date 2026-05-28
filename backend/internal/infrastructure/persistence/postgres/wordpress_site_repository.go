@@ -40,13 +40,22 @@ func (r *WordpressSiteRepository) Create(ctx context.Context, in wordpress.Creat
 
 	site, err := scanSite(row)
 	if err != nil {
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-			return wordpress.Site{}, wordpress.ErrAliasExists
+		if mapped := mapSiteAliasError(err); mapped != nil {
+			return wordpress.Site{}, mapped
 		}
 		return wordpress.Site{}, fmt.Errorf("create wordpress site: %w", err)
 	}
 	return site, nil
+}
+
+// mapSiteAliasError returns wordpress.ErrAliasExists for a unique-violation
+// (pg 23505) on the alias, or nil if err is not a unique violation.
+func mapSiteAliasError(err error) error {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+		return wordpress.ErrAliasExists
+	}
+	return nil
 }
 
 func (r *WordpressSiteRepository) List(ctx context.Context) ([]wordpress.Site, error) {
@@ -123,9 +132,8 @@ func (r *WordpressSiteRepository) Update(ctx context.Context, id uuid.UUID, in w
 		if errors.Is(err, pgx.ErrNoRows) {
 			return wordpress.Site{}, wordpress.ErrNotFound
 		}
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-			return wordpress.Site{}, wordpress.ErrAliasExists
+		if mapped := mapSiteAliasError(err); mapped != nil {
+			return wordpress.Site{}, mapped
 		}
 		return wordpress.Site{}, fmt.Errorf("update wordpress site: %w", err)
 	}

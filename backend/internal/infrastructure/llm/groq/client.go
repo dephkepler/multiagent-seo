@@ -57,6 +57,7 @@ func (c *codec) ParseResponse(body []byte) (string, usage.Usage, error) {
 			Message struct {
 				Content string `json:"content"`
 			} `json:"message"`
+			FinishReason string `json:"finish_reason"`
 		} `json:"choices"`
 		Usage struct {
 			PromptTokens     int `json:"prompt_tokens"`
@@ -72,5 +73,6 @@ func (c *codec) ParseResponse(body []byte) (string, usage.Usage, error) {
 	return result.Choices[0].Message.Content, usage.Usage{
 		InputTokens:  result.Usage.PromptTokens,
 		OutputTokens: result.Usage.CompletionTokens,
+		FinishReason: result.Choices[0].FinishReason,
 	}, nil
 }

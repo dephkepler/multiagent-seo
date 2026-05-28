@@ -18,6 +18,10 @@ import (
 // REST replies we use are tiny JSON objects.
 const maxResponseBytes = 1 << 20
 
+// maxLoggedBodyBytes caps the response body we put in error logs so a large
+// error page can't flood the log lines.
+const maxLoggedBodyBytes = 4 << 10
+
 var _ generate.Publisher = (*Publisher)(nil)
 
 // Publisher targets one site: creds are bound at construction so each
@@ -26,15 +30,17 @@ type Publisher struct {
 	url         string
 	username    string
 	appPassword string
+	siteID      string
 	httpClient  *http.Client
 	log         *slog.Logger
 }
 
-func New(url, username, appPassword string, log *slog.Logger) generate.Publisher {
+func New(url, username, appPassword, siteID string, log *slog.Logger) generate.Publisher {
 	return &Publisher{
 		url:         url,
 		username:    username,
 		appPassword: appPassword,
+		siteID:      siteID,
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
@@ -58,6 +64,14 @@ type wpResponse struct {
 	Link string `json:"link"`
 }
 
+// truncate returns at most max bytes of b as a string, marking when cut.
+func truncate(b []byte, max int) string {
+	if len(b) <= max {
+		return string(b)
+	}
+	return string(b[:max]) + "...(truncated)"
+}
+
 // do issues the request with Basic Auth and decodes into out (may be nil).
 func (p *Publisher) do(ctx context.Context, method, url string, body any, wantStatus int, out any) error {
 	buf, err := json.Marshal(body)
@@ -75,7 +89,8 @@ func (p *Publisher) do(ctx context.Context, method, url string, body any, wantSt
 	start := time.Now()
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
-		p.log.Error("wordpress request failed",
+		p.log.ErrorContext(ctx, "wordpress request failed",
+			"site_id", p.siteID,
 			"method", method,
 			"url", url,
 			"duration_ms", time.Since(start).Milliseconds(),
@@ -85,7 +100,8 @@ func (p *Publisher) do(ctx context.Context, method, url string, body any, wantSt
 	}
 	defer resp.Body.Close()
 
-	p.log.Info("wordpress request",
+	p.log.DebugContext(ctx, "wordpress request",
+		"site_id", p.siteID,
 		"method", method,
 		"url", url,
 		"status", resp.StatusCode,
@@ -97,6 +113,15 @@ func (p *Publisher) do(ctx context.Context, method, url string, body any, wantSt
 
 	if resp.StatusCode != wantStatus {
 		b, _ := io.ReadAll(limited)
+		// Distinguishes 401 (bad app password) from 404/5xx; body is truncated
+		// so a large error page can't flood the log.
+		p.log.ErrorContext(ctx, "wordpress request returned unexpected status",
+			"site_id", p.siteID,
+			"method", method,
+			"url", url,
+			"status", resp.StatusCode,
+			"body", truncate(b, maxLoggedBodyBytes),
+		)
 		return fmt.Errorf("wordpress returned %d: %s", resp.StatusCode, string(b))
 	}
 

@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 
@@ -73,14 +74,14 @@ func (c *RealClient) GetSERP(ctx context.Context, keyword, languageCode string, 
 		Depth:        limit,
 	}})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("dataforseo marshal payload: %w", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		apiBase+"/serp/google/organic/live/advanced",
 		bytes.NewReader(payload))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("dataforseo build request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.SetBasicAuth(c.login, c.password)
@@ -96,7 +97,8 @@ func (c *RealClient) GetSERP(ctx context.Context, keyword, languageCode string, 
 	}
 
 	var result serpResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	// Cap the body so a hostile/huge response can't be read fully into memory.
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&result); err != nil {
 		return nil, fmt.Errorf("decode dataforseo response: %w", err)
 	}
 

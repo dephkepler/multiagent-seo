@@ -2,6 +2,7 @@ package pexels
 
 import (
 	"context"
+	"log/slog"
 	"strings"
 
 	"multiagent-seo/internal/domain/generate"
@@ -17,13 +18,17 @@ const candidates = 5
 // the domain's generate.PickRelevant so the scoring lives in one place.
 type Resolver struct {
 	client *Client
+	log    *slog.Logger
 }
 
 var _ generate.ImageResolver = (*Resolver)(nil)
 
 // New returns a Resolver for the given Pexels API key.
-func New(apiKey string) *Resolver {
-	return &Resolver{client: newClient(apiKey)}
+func New(apiKey string, log *slog.Logger) *Resolver {
+	if log == nil {
+		log = slog.Default()
+	}
+	return &Resolver{client: newClient(apiKey), log: log}
 }
 
 func (r *Resolver) Resolve(ctx context.Context, keyword, description, alt string) (generate.ResolvedImage, error) {
@@ -34,6 +39,8 @@ func (r *Resolver) Resolve(ctx context.Context, keyword, description, alt string
 
 	photos, err := r.client.SearchN(ctx, query, candidates)
 	if err != nil {
+		// Log the cause here: the caller (RenderHTML) only counts the failure.
+		r.log.WarnContext(ctx, "pexels search failed", "query", query, "err", err)
 		return generate.ResolvedImage{}, err
 	}
 	if len(photos) == 0 {
@@ -46,6 +53,7 @@ func (r *Resolver) Resolve(ctx context.Context, keyword, description, alt string
 	if picked == nil {
 		// All candidates failed the topical filter — skip rather than insert
 		// an unrelated photo. RenderHTML strips the placeholder.
+		r.log.DebugContext(ctx, "pexels: no topical match, skipping image", "query", query, "candidates", len(photos))
 		return generate.ResolvedImage{}, nil
 	}
 	return generate.ResolvedImage{

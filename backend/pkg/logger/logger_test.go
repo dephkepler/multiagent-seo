@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"log/slog"
 	"testing"
 )
 
@@ -66,17 +67,53 @@ func TestNew_SkipsEmptyContextValues(t *testing.T) {
 	}
 }
 
-func TestIsDevMode(t *testing.T) {
-	t.Setenv(devEnvVar, "")
-	if isDevMode() {
-		t.Errorf("isDevMode() = true, want false when env empty")
+func TestContextHandler_InjectsIDsAndSurvivesWith(t *testing.T) {
+	var buf bytes.Buffer
+	l := slog.New(&contextHandler{Handler: slog.NewJSONHandler(&buf, nil)})
+
+	ctx := ContextWith(context.Background(), ContextKeyTraceID, "trace-1")
+	ctx = ContextWith(ctx, ContextKeyUserID, "user-9")
+
+	// .With must keep the decoration so infra loggers (built once, then .With'd
+	// per job) still correlate.
+	l.With("article_id", 7).InfoContext(ctx, "hello")
+
+	got := decodeFirst(t, &buf)
+	if got["trace_id"] != "trace-1" {
+		t.Errorf("trace_id = %v, want trace-1", got["trace_id"])
 	}
-	t.Setenv(devEnvVar, "true")
-	if !isDevMode() {
-		t.Errorf("isDevMode() = false, want true")
+	if got["user_id"] != "user-9" {
+		t.Errorf("user_id = %v, want user-9", got["user_id"])
 	}
-	t.Setenv(devEnvVar, "1")
-	if isDevMode() {
-		t.Errorf("isDevMode() should accept only exact 'true', not %q", "1")
+	if got["article_id"] != float64(7) {
+		t.Errorf("article_id = %v, want 7", got["article_id"])
+	}
+}
+
+func TestContextHandler_NoIDsOnNonContextCall(t *testing.T) {
+	var buf bytes.Buffer
+	l := slog.New(&contextHandler{Handler: slog.NewJSONHandler(&buf, nil)})
+
+	// Non-context Info passes a background context — no IDs to inject.
+	l.Info("plain")
+
+	got := decodeFirst(t, &buf)
+	if _, ok := got["trace_id"]; ok {
+		t.Errorf("trace_id should be absent, got %v", got["trace_id"])
+	}
+}
+
+func TestSetLevel_RoundTrip(t *testing.T) {
+	t.Cleanup(func() { _ = SetLevel("info") })
+	for _, want := range []string{"debug", "warn", "error", "info"} {
+		if err := SetLevel(want); err != nil {
+			t.Fatalf("SetLevel(%q): %v", want, err)
+		}
+		if got := CurrentLevel(); got != want {
+			t.Errorf("CurrentLevel() = %q after SetLevel(%q)", got, want)
+		}
+	}
+	if err := SetLevel("nonsense"); err == nil {
+		t.Error("SetLevel(\"nonsense\") = nil, want error")
 	}
 }

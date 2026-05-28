@@ -12,6 +12,7 @@ import (
 	"multiagent-seo/internal/infrastructure/http/problem"
 	"multiagent-seo/internal/infrastructure/http/response"
 	"multiagent-seo/internal/oapigen"
+	"multiagent-seo/pkg/logger"
 	"multiagent-seo/pkg/validate"
 )
 
@@ -45,10 +46,14 @@ func (h *LoginHandler) Login(w http.ResponseWriter, r *http.Request) {
 
 	token, expiresAt, err := h.auth.Login(r.Context(), body.Email, body.Password)
 	if err != nil {
+		log := logger.New(r.Context(), "handlers.auth")
 		if errors.Is(err, appauth.ErrInvalidCredentials) {
+			// Audit trail for failed logins; never log password or token.
+			log.Warn().Str("email", body.Email).Msg("login failed")
 			problem.Write(w, http.StatusUnauthorized, "invalid credentials")
 			return
 		}
+		log.Error().Err(err).Msg("internal error")
 		problem.Write(w, http.StatusInternalServerError, "internal error")
 		return
 	}

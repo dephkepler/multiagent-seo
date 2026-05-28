@@ -25,15 +25,24 @@ func BearerAuth(verifier auth.TokenVerifier) func(http.Handler) http.Handler {
 
 			token, found := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 			if !found || token == "" {
+				log := logger.New(r.Context(), "middleware.auth")
+				log.Warn().Str("reason", "missing_token").Msg("unauthorized")
 				problem.Write(w, http.StatusUnauthorized, "unauthorized")
 				return
 			}
 			userID, err := verifier.Verify(r.Context(), token)
 			if err != nil {
+				log := logger.New(r.Context(), "middleware.auth")
+				log.Warn().Str("reason", "verify_failed").Err(err).Msg("unauthorized")
 				problem.Write(w, http.StatusUnauthorized, "unauthorized")
 				return
 			}
 
+			// Report user_id on the access-log line too: RequestLogger seeded a
+			// holder before auth ran, so fill it now (same goroutine, no race).
+			if h, ok := r.Context().Value(userIDHolderKey).(*userIDHolder); ok {
+				h.id = userID
+			}
 			ctx := context.WithValue(r.Context(), logger.ContextKeyUserID, userID)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})

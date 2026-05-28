@@ -1,6 +1,7 @@
 package http
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -44,6 +45,17 @@ func NewRouter(cfg config.ServerConfig, api oapigen.ServerInterface, authMW oapi
 	sub.Get("/docs/", handleSwaggerUI)
 	sub.Get("/openapi.json", handleOpenAPISpec)
 
+	// Runtime log-level control, gated behind bearer auth. oapigen normally sets
+	// the auth marker per operation; for these hand-mounted routes we set it
+	// ourselves so BearerAuth enforces a token.
+	if authMW != nil {
+		sub.Group(func(gr chi.Router) {
+			gr.Use(requireBearer, authMW)
+			gr.Get("/debug/log-level", handleGetLogLevel)
+			gr.Put("/debug/log-level", handleSetLogLevel)
+		})
+	}
+
 	var mws []oapigen.MiddlewareFunc
 	if authMW != nil {
 		mws = append(mws, authMW)
@@ -55,6 +67,15 @@ func NewRouter(cfg config.ServerConfig, api oapigen.ServerInterface, authMW oapi
 	})
 	r.Mount(cfg.BasePath, apiHandler)
 	return r
+}
+
+// requireBearer marks the request as auth-required so BearerAuth — which is
+// otherwise gated on oapigen's per-operation scope marker — enforces a token.
+func requireBearer(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := context.WithValue(r.Context(), oapigen.BearerAuthScopes, []string{})
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
 }
 
 func openAPIErrorHandler(w http.ResponseWriter, r *http.Request, err error) {

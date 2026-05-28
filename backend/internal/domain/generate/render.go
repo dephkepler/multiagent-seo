@@ -66,7 +66,11 @@ func RenderHTML(ctx context.Context, content string, opts RenderOptions) (string
 				return ""
 			}
 			img, err := opts.Resolver.Resolve(ctx, opts.Keyword, desc, alt)
-			if err != nil || img.URL == "" {
+			if err != nil {
+				stats.ImagesFailed++
+				return ""
+			}
+			if img.URL == "" {
 				stats.ImagesSkipped++
 				return ""
 			}

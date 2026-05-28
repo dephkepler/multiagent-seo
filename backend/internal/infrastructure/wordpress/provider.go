@@ -2,6 +2,7 @@ package wordpress
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 
 	"github.com/google/uuid"
@@ -26,7 +27,9 @@ func NewProvider(sites domainwp.Repository, log *slog.Logger) *Provider {
 func (p *Provider) ForSite(ctx context.Context, siteID uuid.UUID) (generate.Publisher, error) {
 	creds, err := p.sites.Credentials(ctx, siteID)
 	if err != nil {
-		return nil, err
+		// Wrap with site_id so the caller's single error log is attributable; the
+		// caller (pipeline/Publish) logs it, so don't double-log here.
+		return nil, fmt.Errorf("wordpress credentials for site %s: %w", siteID, err)
 	}
-	return New(creds.URL, creds.Username, creds.AppPassword, p.log), nil
+	return New(creds.URL, creds.Username, creds.AppPassword, siteID.String(), p.log), nil
 }

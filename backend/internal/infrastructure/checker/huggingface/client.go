@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode"
 )
@@ -135,12 +136,12 @@ func (c *Client) score(ctx context.Context, input string) (float64, error) {
 		if doErr != nil {
 			return 0, fmt.Errorf("huggingface request: %w", doErr)
 		}
-		respBody, _ := io.ReadAll(resp.Body)
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 		resp.Body.Close()
 
 		// 503 means the model is cold-loading on HF infra; back off and retry.
 		if resp.StatusCode == http.StatusServiceUnavailable {
-			c.log.Warn("huggingface model loading, retrying",
+			c.log.WarnContext(ctx, "huggingface model loading, retrying",
 				"model", c.model, "attempt", attempt, "max", coldStartMaxTry)
 			select {
 			case <-ctx.Done():
@@ -150,15 +151,15 @@ func (c *Client) score(ctx context.Context, input string) (float64, error) {
 			continue
 		}
 		if resp.StatusCode != http.StatusOK {
-			return 0, fmt.Errorf("huggingface returned %d: %s", resp.StatusCode, string(respBody))
+			return 0, fmt.Errorf("huggingface returned %d: %s", resp.StatusCode, truncate(respBody))
 		}
 
 		var nested [][]label
 		if err := json.Unmarshal(respBody, &nested); err != nil {
-			return 0, fmt.Errorf("decode response: %w (body: %s)", err, string(respBody))
+			return 0, fmt.Errorf("decode response: %w (body: %s)", err, truncate(respBody))
 		}
 		if len(nested) == 0 || len(nested[0]) == 0 {
-			return 0, fmt.Errorf("huggingface returned empty labels: %s", string(respBody))
+			return 0, fmt.Errorf("huggingface returned empty labels: %s", truncate(respBody))
 		}
 		labels = nested[0]
 		break
@@ -205,6 +206,7 @@ func (c *Client) flagSentences(ctx context.Context, input string) []string {
 	// Bounded concurrency with stdlib only: WaitGroup + buffered semaphore.
 	sem := make(chan struct{}, sentenceCallParallel)
 	var wg sync.WaitGroup
+	var failures atomic.Int64
 	for i, s := range sentences {
 		wg.Add(1)
 		sem <- struct{}{}
@@ -213,14 +215,19 @@ func (c *Client) flagSentences(ctx context.Context, input string) []string {
 			defer func() { <-sem }()
 			score, err := c.score(ctx, s)
 			if err != nil {
-				c.log.Warn("huggingface sentence scoring failed, skipping",
-					"err", err, "len", len(s))
+				// Aggregate rather than logging per sentence: a cold model would
+				// otherwise produce a Warn storm (one per scored sentence).
+				failures.Add(1)
 				return
 			}
 			results[i] = scored{text: s, score: score}
 		}(i, s)
 	}
 	wg.Wait()
+	if n := failures.Load(); n > 0 {
+		c.log.WarnContext(ctx, "huggingface sentence scoring failed for some sentences",
+			"failed", n, "total", len(sentences))
+	}
 
 	kept := results[:0]
 	for _, r := range results {
@@ -287,4 +294,14 @@ func isHumanLabel(s string) bool {
 
 func round2(v float64) float64 {
 	return float64(int(v*100)) / 100
+}
+
+// truncate caps a response body before it lands in an error/log message so a
+// huge or runaway body can't bloat the logs.
+func truncate(b []byte) string {
+	const maxErrBody = 4 << 10
+	if len(b) > maxErrBody {
+		return string(b[:maxErrBody]) + "...(truncated)"
+	}
+	return string(b)
 }

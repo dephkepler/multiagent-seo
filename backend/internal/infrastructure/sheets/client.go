@@ -127,14 +127,14 @@ func (c *client) Lookup(ctx context.Context, topic string) (generate.Cluster, er
 	}
 
 	if len(out.Keywords) == 0 {
-		c.log.Warn("sheets lookup: no match",
+		c.log.WarnContext(ctx, "sheets lookup: no match",
 			"sheet", c.sheet,
 			"topic_normalized", topic,
 			"rows_scanned", len(resp.Values),
 			"range", rangeStr,
 		)
 	} else {
-		c.log.Info("sheets lookup",
+		c.log.DebugContext(ctx, "sheets lookup",
 			"sheet", c.sheet,
 			"topic", topic,
 			"keywords", len(out.Keywords),

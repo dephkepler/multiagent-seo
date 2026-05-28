@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"time"
@@ -84,7 +85,8 @@ func (c *Client) SearchN(ctx context.Context, query string, n int) ([]Photo, err
 	}
 
 	var body searchResponse
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+	// Cap the body so a hostile/huge response can't be read fully into memory.
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&body); err != nil {
 		return nil, fmt.Errorf("decode pexels response: %w", err)
 	}
 

@@ -16,8 +16,6 @@ import (
 )
 
 func main() {
-	logger.Init()
-
 	emailFlag := flag.String("email", "", "user email")
 	passwordFlag := flag.String("password", "", "user password")
 	flag.Parse()
@@ -33,6 +31,9 @@ func main() {
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatal().Err(err).Msg("config load")
+	}
+	if err := logger.Init(cfg.Logger.Level); err != nil {
+		log.Fatal().Err(err).Msg("logger init")
 	}
 
 	ctx := context.Background()

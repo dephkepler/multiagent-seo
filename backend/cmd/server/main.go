@@ -35,13 +35,16 @@ import (
 )
 
 func main() {
-	logger.Init()
-	slogLog := slog.Default()
-
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatal().Err(err).Msg("config load")
 	}
+
+	if err := logger.Init(cfg.Logger.Level); err != nil {
+		log.Fatal().Err(err).Msg("logger init")
+	}
+	slogLog := logger.NewSlog()
+	slog.SetDefault(slogLog)
 
 	sentryClient := sentry.New(cfg.Sentry)
 	if err := sentryClient.Initialize(); err != nil {
@@ -80,7 +83,7 @@ func main() {
 			newSERP(cfg, slogLog),
 			newTopics(ctx, cfg, slogLog),
 			newChecker(cfg, slogLog),
-			pexels.New(cfg.Pexels.APIKey),
+			pexels.New(cfg.Pexels.APIKey, slogLog),
 			infrawp.NewProvider(wordpressRepo, slogLog),
 			runner,
 			generateDefaults(cfg),

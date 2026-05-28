@@ -77,6 +77,12 @@ func (m *MockClient) Check(_ context.Context, content string) (*Result, error) {
 		}
 	}
 
+	// Fields can be empty for blank/whitespace-only content; avoid indexing [0].
+	slug := "empty"
+	if fields := strings.Fields(content); len(fields) > 0 {
+		slug = strings.ReplaceAll(strings.ToLower(fields[0]), " ", "-")
+	}
+
 	return &Result{
 		AIScore:          round2(aiScore),
 		PlagiarismScore:  round2(plagiarismScore),
@@ -84,7 +90,7 @@ func (m *MockClient) Check(_ context.Context, content string) (*Result, error) {
 		Provider:         "mock",
 		Issues:           issues,
 		SentencesFlagged: flagged,
-		ReportURL:        "https://mock.originality.ai/report/mock-id-" + strings.ReplaceAll(strings.ToLower(strings.Fields(content)[0]), " ", "-"),
+		ReportURL:        "https://mock.originality.ai/report/mock-id-" + slug,
 	}, nil
 }
 

@@ -14,6 +14,7 @@ import (
 	"multiagent-seo/internal/infrastructure/http/problem"
 	"multiagent-seo/internal/infrastructure/http/response"
 	"multiagent-seo/internal/oapigen"
+	"multiagent-seo/pkg/logger"
 	"multiagent-seo/pkg/validate"
 )
 
@@ -41,7 +42,7 @@ func (h *WordpressSitesHandler) ListWordpressSites(w http.ResponseWriter, r *htt
 	}
 	sites, err := h.sites.List(r.Context())
 	if err != nil {
-		h.writeError(w, err)
+		h.writeError(r.Context(), w, err)
 		return
 	}
 	out := make([]oapigen.WordpressSite, len(sites))
@@ -73,7 +74,7 @@ func (h *WordpressSitesHandler) CreateWordpressSite(w http.ResponseWriter, r *ht
 		AppPassword: body.AppPassword,
 	})
 	if err != nil {
-		h.writeError(w, err)
+		h.writeError(r.Context(), w, err)
 		return
 	}
 	response.WriteJSON(r.Context(), w, http.StatusCreated, toAPI(site))
@@ -85,7 +86,7 @@ func (h *WordpressSitesHandler) GetWordpressSite(w http.ResponseWriter, r *http.
 	}
 	site, err := h.sites.Get(r.Context(), id)
 	if err != nil {
-		h.writeError(w, err)
+		h.writeError(r.Context(), w, err)
 		return
 	}
 	response.WriteJSON(r.Context(), w, http.StatusOK, toAPI(site))
@@ -114,7 +115,7 @@ func (h *WordpressSitesHandler) UpdateWordpressSite(w http.ResponseWriter, r *ht
 		Enabled:     body.Enabled,
 	})
 	if err != nil {
-		h.writeError(w, err)
+		h.writeError(r.Context(), w, err)
 		return
 	}
 	response.WriteJSON(r.Context(), w, http.StatusOK, toAPI(site))
@@ -125,7 +126,7 @@ func (h *WordpressSitesHandler) DeleteWordpressSite(w http.ResponseWriter, r *ht
 		return
 	}
 	if err := h.sites.Delete(r.Context(), id); err != nil {
-		h.writeError(w, err)
+		h.writeError(r.Context(), w, err)
 		return
 	}
 	response.NoContent(w)
@@ -141,13 +142,16 @@ func (h *WordpressSitesHandler) unavailable(w http.ResponseWriter) bool {
 	return false
 }
 
-func (h *WordpressSitesHandler) writeError(w http.ResponseWriter, err error) {
+func (h *WordpressSitesHandler) writeError(ctx context.Context, w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, domainwp.ErrNotFound):
 		problem.Write(w, http.StatusNotFound, "wordpress site not found")
 	case errors.Is(err, domainwp.ErrAliasExists):
 		problem.Write(w, http.StatusConflict, "alias already in use")
 	default:
+		// Log the wrapped cause so 5xx origins are visible; client sees only "internal error".
+		log := logger.New(ctx, "handlers.wordpress_sites")
+		log.Error().Err(err).Msg("internal error")
 		problem.Write(w, http.StatusInternalServerError, "internal error")
 	}
 }

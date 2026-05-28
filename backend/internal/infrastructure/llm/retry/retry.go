@@ -25,6 +25,15 @@ type HTTPStatusError interface {
 	HTTPStatus() int
 }
 
+// statusOf extracts the HTTP status from a HTTPStatusError; 0 if absent/transport-level.
+func statusOf(err error) int {
+	var he HTTPStatusError
+	if errors.As(err, &he) {
+		return he.HTTPStatus()
+	}
+	return 0
+}
+
 // Retryable: transport failures (status 0), 429, and 5xx. Everything else is terminal.
 func shouldRetry(err error) bool {
 	if err == nil {
@@ -58,10 +67,12 @@ func Do(ctx context.Context, cfg Config, log *slog.Logger, provider string, fn f
 				idx = len(cfg.Backoffs) - 1
 			}
 			delay := cfg.Backoffs[idx]
-			log.Warn("llm retry backoff",
+			// Retries on 429/5xx/transport are expected; log at Info, not Warn.
+			log.InfoContext(ctx, "llm retry backoff",
 				"provider", provider,
 				"attempt", attempt,
 				"delay_ms", delay.Milliseconds(),
+				"status", statusOf(lastErr),
 				"prev_error", lastErr,
 			)
 			select {
