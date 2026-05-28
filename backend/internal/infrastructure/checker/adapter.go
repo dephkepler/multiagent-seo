@@ -9,10 +9,8 @@ import (
 	"multiagent-seo/internal/infrastructure/checker/huggingface"
 )
 
-// checkFunc abstracts over the concrete provider so the adapter only depends on
-// "run a check, hand back the common result fields". This also keeps the
-// checker package from caring whether the provider's result is checker.Result
-// or huggingface.Result.
+// checkFunc lets the adapter stay agnostic about whether the provider returns
+// checker.Result or huggingface.Result; both get mapped to generate.CheckResult.
 type checkFunc func(ctx context.Context, content string) (*generate.CheckResult, error)
 
 type adapter struct {
@@ -21,12 +19,9 @@ type adapter struct {
 
 var _ generate.ContentChecker = (*adapter)(nil)
 
-// New builds a generate.ContentChecker for the given provider. Supported
-// providers are "mock" (and "" as an alias) and "huggingface".
-//
-// "originality" is rejected explicitly: the legacy config comment listed it as
-// an option but no such provider was ever implemented, so callers get a clear
-// error instead of a silent mock fallback.
+// New builds a generate.ContentChecker for the given provider: "mock" (or ""),
+// or "huggingface". "originality" errors explicitly rather than silently falling
+// back to the mock — it was advertised in legacy config but never implemented.
 func New(provider, apiKey, model string, threshold float64, log *slog.Logger) (generate.ContentChecker, error) {
 	switch provider {
 	case "mock", "":

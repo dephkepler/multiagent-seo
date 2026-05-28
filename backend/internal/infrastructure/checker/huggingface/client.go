@@ -114,7 +114,6 @@ func (c *Client) Check(ctx context.Context, content string) (*Result, error) {
 }
 
 // score sends one input through the detector and returns the max non-human label score.
-// Preserves the cold-start retry loop and all error semantics of the original Check.
 func (c *Client) score(ctx context.Context, input string) (float64, error) {
 	body, err := json.Marshal(map[string]any{"inputs": input})
 	if err != nil {

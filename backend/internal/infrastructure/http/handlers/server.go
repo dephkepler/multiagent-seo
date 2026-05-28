@@ -2,8 +2,7 @@ package handlers
 
 import "multiagent-seo/internal/oapigen"
 
-// Server composes feature handlers into the generated oapigen.ServerInterface.
-// Each new feature adds its handler here and embeds it.
+// Server embeds the per-feature handlers to satisfy the generated oapigen.ServerInterface.
 type Server struct {
 	*HealthHandler
 	*WordpressSitesHandler

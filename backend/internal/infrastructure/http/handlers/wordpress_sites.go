@@ -131,8 +131,8 @@ func (h *WordpressSitesHandler) DeleteWordpressSite(w http.ResponseWriter, r *ht
 	response.NoContent(w)
 }
 
-// unavailable guards the DB-backed handler when the pool was absent at boot
-// (see cmd/server wiring); a nil service means the database is unreachable.
+// A nil service means the DB pool was missing at boot (see cmd/server wiring),
+// so we report the database as unavailable rather than panicking.
 func (h *WordpressSitesHandler) unavailable(w http.ResponseWriter) bool {
 	if h.sites == nil {
 		problem.Write(w, http.StatusServiceUnavailable, "database unavailable")

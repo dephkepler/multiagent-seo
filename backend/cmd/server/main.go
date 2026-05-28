@@ -25,8 +25,8 @@ import (
 	httpMiddleware "multiagent-seo/internal/infrastructure/http/middleware"
 	"multiagent-seo/internal/infrastructure/jwtauth"
 	infrallm "multiagent-seo/internal/infrastructure/llm"
-	"multiagent-seo/internal/infrastructure/pexels"
 	"multiagent-seo/internal/infrastructure/persistence/postgres"
+	"multiagent-seo/internal/infrastructure/pexels"
 	"multiagent-seo/internal/infrastructure/sheets"
 	infrawp "multiagent-seo/internal/infrastructure/wordpress"
 	"multiagent-seo/pkg/config"
@@ -118,9 +118,8 @@ func main() {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.Server.ShutdownWaitTimeout)
 	defer cancel()
 
-	// Stop accepting requests first (no new generation jobs can be dispatched),
-	// then drain in-flight background jobs. This ordering avoids a WaitGroup
-	// Add-vs-Wait race in the runner.
+	// Stop accepting requests before draining background jobs: no new jobs can be
+	// dispatched mid-drain, avoiding a WaitGroup Add-vs-Wait race in the runner.
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Error().Err(err).Msg("graceful shutdown failed")
 	}

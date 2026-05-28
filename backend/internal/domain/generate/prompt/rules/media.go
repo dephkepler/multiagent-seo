@@ -6,7 +6,7 @@ var (
 		Body: "3-4 images total. Place the first one immediately after the introduction. Distribute the rest evenly through the article",
 	}
 	ImagePlaceholders = Rule{
-		ID:   "media.image_placeholders",
+		ID: "media.image_placeholders",
 		Body: `Image placeholder format: [IMG | description | ALT: keyword variation | 1200px horizontal AI-generated]
 
 The description is fed verbatim to a Pexels stock-photo search, so it MUST be a real, photographable scene that matches the article topic. Treat it as a Google Images search query. Follow ALL rules below:

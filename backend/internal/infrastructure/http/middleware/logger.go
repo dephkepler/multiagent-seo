@@ -14,8 +14,8 @@ import (
 
 const awsTraceHeader = "X-Amzn-Trace-Id"
 
-// RequestLogger extracts or generates trace_id and span_id, sets them on the context,
-// and logs each HTTP request with both IDs for distributed tracing.
+// RequestLogger reuses the upstream trace ID (e.g. from the load balancer) when present
+// so logs stitch into the same distributed trace, generating one only as a fallback.
 func RequestLogger(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ww := chiMiddleware.NewWrapResponseWriter(w, r.ProtoMajor)

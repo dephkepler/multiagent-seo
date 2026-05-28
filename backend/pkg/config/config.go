@@ -139,8 +139,8 @@ type PexelsConfig struct {
 	APIKey  string `env:"PEXELS_API_KEY"`
 }
 
-// devEncryptionKey must match the WP_ENCRYPTION_KEY envDefault below; Load
-// rejects it outside the local environment so prod can't boot on it silently.
+// devEncryptionKey is the shared dev default for WP_ENCRYPTION_KEY and JWT_SECRET;
+// Load rejects it outside the local environment so prod can't boot on it silently.
 const devEncryptionKey = "dev-insecure-change-me"
 
 type WordPressConfig struct {

@@ -1,8 +1,7 @@
 // Package sheets adapts a Google Sheets keyword table to the generate.TopicSource
 // port. One row per article; on duplicate topic rows the keywords merge and the
-// first non-empty H1 wins. It is a copy of the legacy internal/sheets client,
-// decoupled from config: the constructor takes primitives so infrastructure does
-// not depend on internal/config.
+// first non-empty H1 wins. The constructor takes primitives so infrastructure
+// stays independent of internal/config.
 package sheets
 
 import (

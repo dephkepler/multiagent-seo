@@ -61,7 +61,6 @@ func (r *AsyncRunner) Go(parent context.Context, fn func(context.Context)) {
 	}()
 }
 
-// Wait returns nil when all jobs drain, ctx.Err() when ctx fires first.
 func (r *AsyncRunner) Wait(ctx context.Context) error {
 	done := make(chan struct{})
 	go func() {

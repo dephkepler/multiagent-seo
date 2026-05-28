@@ -1,6 +1,5 @@
 // Package checker is an infrastructure adapter implementing the domain
-// generate.ContentChecker port. checker.go and huggingface/ are copied from
-// the legacy internal/checker; adapter.go provides the New factory and maps
+// generate.ContentChecker port. adapter.go provides the New factory and maps
 // the local Result type onto generate.CheckResult.
 package checker
 

@@ -283,28 +283,24 @@ func (s *Service) pipeline(ctx context.Context, log *slog.Logger, articleID int6
 	}
 	competitors := prompt.CompetitorsFrom(serpData)
 
-	// Step 2/5: brief.
 	log.Info("step 2/5: brief", "competitors", len(competitors.Items), "target_keywords", len(sp.cluster.Keywords))
 	brief, _, err := sp.client.Complete(ctx, prompt.Brief(sp.keyword, sp.language, sp.cluster, sp.siteTopic, sp.extraRules, competitors), sp.maxTokens)
 	if err != nil {
 		return false, fmt.Errorf("brief: %w", err)
 	}
 
-	// Step 3/5: writer.
 	log.Info("step 3/5: writing", "min_words", sp.minWords, "max_words", sp.maxWords)
 	article, _, err := sp.client.Complete(ctx, prompt.Writer(brief, sp.keyword, sp.language, sp.minWords, sp.maxWords, sp.cluster, competitors), sp.maxTokens)
 	if err != nil {
 		return false, fmt.Errorf("writer: %w", err)
 	}
 
-	// Step 4/5: editor.
 	log.Info("step 4/5: editing")
 	edited, _, err := sp.client.Complete(ctx, prompt.Editor(article, sp.keyword, sp.minWords, sp.maxWords, sp.cluster, competitors), sp.maxTokens)
 	if err != nil {
 		return false, fmt.Errorf("editor: %w", err)
 	}
 
-	// Step 5/5: originality check + humanize loop.
 	log.Info("step 5/5: originality check")
 	edited, lastCheck := s.checkAndHumanize(ctx, log, articleID, sp, edited)
 
@@ -452,7 +448,6 @@ func (s *Service) Publish(ctx context.Context, articleID int64) (generate.Articl
 	return *updated, nil
 }
 
-// List returns all tracked articles for the read API.
 func (s *Service) List(ctx context.Context) ([]generate.Article, error) {
 	arts, err := s.repo.List(ctx)
 	if err != nil {

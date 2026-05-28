@@ -1,10 +1,7 @@
 // Package pexels is an infrastructure adapter that resolves [IMG | ...]
 // placeholders into real Pexels stock photos, implementing the domain
-// generate.ImageResolver port.
-//
-// client.go is copied from the legacy internal/pexels HTTP client; the
-// adapter logic (resolver.go) maps its results to generate.Photo and defers
-// relevance scoring to the domain's generate.PickRelevant.
+// generate.ImageResolver port. resolver.go maps client results to
+// generate.Photo and defers relevance scoring to generate.PickRelevant.
 package pexels
 
 import (

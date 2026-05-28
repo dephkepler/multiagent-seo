@@ -20,8 +20,7 @@ var (
 	internalLinkPlaceholderRE = regexp.MustCompile(`\[INTERNAL_LINK\s*\|[^\]]*?\]`)
 )
 
-// RenderOptions bundles the knobs RenderHTML accepts so callers don't have to
-// keep growing a positional argument list.
+// RenderOptions carries the optional knobs RenderHTML accepts.
 type RenderOptions struct {
 	Keyword     string
 	Resolver    ImageResolver

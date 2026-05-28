@@ -1,6 +1,5 @@
 // Package dataforseo adapts the DataForSEO SERP API to the generate.SERPProvider
-// port. It is a copy of the legacy internal/dataforseo client with the response
-// mapped onto domain value types.
+// port, mapping the response onto domain value types.
 package dataforseo
 
 import (

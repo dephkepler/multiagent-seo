@@ -9,8 +9,8 @@ import (
 	"multiagent-seo/pkg/logger"
 )
 
-// SentryMiddleware returns a Sentry HTTP middleware that captures panics and errors.
-// Sentry no-ops when not initialized, so this is safe to use regardless of Sentry being enabled.
+// SentryMiddleware captures panics and errors. Safe to always wire in: Sentry
+// no-ops when not initialized. Repanic lets the chi Recoverer still handle the panic.
 func SentryMiddleware() func(http.Handler) http.Handler {
 	handler := sentryhttp.New(sentryhttp.Options{
 		Repanic: true,
