@@ -1,0 +1,48 @@
+openapi: 3.0.3
+info:
+  title: ContentFlow API
+  description: AI SEO content generation platform.
+  version: 0.1.0
+
+servers:
+  - url: http://localhost:8080
+    description: Local development
+  - url: https://multiagent-seo.8cell.tech
+    description: Staging
+
+tags:
+  - name: Health
+    description: Liveness and readiness checks
+
+paths:
+  /healthz:
+    get:
+      operationId: getHealthz
+      tags: [ Health ]
+      summary: Health check
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+        "503":
+          description: Service is degraded (e.g. database unreachable)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+
+components:
+  schemas:
+    HealthResponse:
+      type: object
+      required: [ status, time ]
+      properties:
+        status:
+          type: string
+          enum: [ ok, degraded ]
+        time:
+          type: string
+          format: date-time

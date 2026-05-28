@@ -104,4 +104,10 @@ func TestLLMKeyFor(t *testing.T) {
 	if got := c2.KeyFor("groq"); got != "default-key" {
 		t.Errorf("KeyFor fallback = %q, want default-key", got)
 	}
+
+	// anthropic alias resolves to the claude provider for the APIKey fallback too.
+	c3 := LLMConfig{Provider: "claude", APIKey: "default-key"}
+	if got := c3.KeyFor("anthropic"); got != "default-key" {
+		t.Errorf("KeyFor(anthropic) alias fallback = %q, want default-key", got)
+	}
 }

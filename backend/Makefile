@@ -1,4 +1,4 @@
-.PHONY: dev db migrate run stop up down logs creds
+.PHONY: dev db migrate run stop up down logs creds generate
 
 -include .env
 export
@@ -9,6 +9,9 @@ export CF_DATABASE_URL
 COMPOSE := docker compose -f ../devops/compose.yaml --env-file .env
 
 dev: db migrate run
+
+generate:
+	go tool oapi-codegen -config api/oapi-codegen.yaml -o internal/oapigen/api.gen.go api/openapi.yaml
 
 # creates an empty credentials.json placeholder so docker compose can always
 # bind-mount it without silently creating a host-side directory.

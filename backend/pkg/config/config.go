@@ -68,19 +68,29 @@ type LLMConfig struct {
 	ClaudeAPIKey string `env:"LLM_CLAUDE_API_KEY"`
 }
 
+// normalizeProvider collapses the "anthropic" alias onto "claude" so both
+// names resolve to the same key, including the generic-APIKey fallback.
+func normalizeProvider(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	if s == "anthropic" {
+		return "claude"
+	}
+	return s
+}
+
 func (c LLMConfig) KeyFor(provider string) string {
-	p := strings.ToLower(strings.TrimSpace(provider))
+	p := normalizeProvider(provider)
 	switch p {
 	case "groq":
 		if c.GroqAPIKey != "" {
 			return c.GroqAPIKey
 		}
-	case "claude", "anthropic":
+	case "claude":
 		if c.ClaudeAPIKey != "" {
 			return c.ClaudeAPIKey
 		}
 	}
-	if p == strings.ToLower(c.Provider) {
+	if p == normalizeProvider(c.Provider) {
 		return c.APIKey
 	}
 	return ""
