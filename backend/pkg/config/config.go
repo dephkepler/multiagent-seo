@@ -139,6 +139,16 @@ type PexelsConfig struct {
 	APIKey  string `env:"PEXELS_API_KEY"`
 }
 
+// devEncryptionKey must match the WP_ENCRYPTION_KEY envDefault below; Load
+// rejects it outside the local environment so prod can't boot on it silently.
+const devEncryptionKey = "dev-insecure-change-me"
+
+type WordPressConfig struct {
+	// EncryptionKey is the pgcrypto symmetric key used to encrypt stored WordPress
+	// app passwords. The default is dev-only; production MUST override it.
+	EncryptionKey string `env:"WP_ENCRYPTION_KEY" envDefault:"dev-insecure-change-me" validate:"required"`
+}
+
 type Config struct {
 	Server     ServerConfig     `validate:"required"`
 	Database   DatabaseConfig   `validate:"required"`
@@ -150,6 +160,7 @@ type Config struct {
 	DataForSEO DataForSEOConfig `validate:"required"`
 	Checker    CheckerConfig    `validate:"required"`
 	Pexels     PexelsConfig     `validate:"required"`
+	WordPress  WordPressConfig  `validate:"required"`
 }
 
 func Load() (Config, error) {
@@ -161,6 +172,10 @@ func Load() (Config, error) {
 
 	if err := validate.Validate(cfg); err != nil {
 		return cfg, fmt.Errorf("config validation: %w", err)
+	}
+
+	if cfg.Sentry.Environment != "local" && cfg.WordPress.EncryptionKey == devEncryptionKey {
+		return cfg, fmt.Errorf("WP_ENCRYPTION_KEY must be overridden outside the local environment")
 	}
 
 	return cfg, nil

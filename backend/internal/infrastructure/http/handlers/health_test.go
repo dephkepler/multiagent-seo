@@ -24,7 +24,7 @@ func (s stubRepo) Ping(context.Context) error { return s.err }
 
 func newRouter(pingErr error) http.Handler {
 	svc := apphealth.NewService(domainhealth.NewService(stubRepo{err: pingErr}))
-	server := handlers.NewServer(handlers.NewHealthHandler(svc))
+	server := handlers.NewServer(handlers.NewHealthHandler(svc), handlers.NewWordpressSitesHandler(nil))
 	return apihttp.NewRouter(config.ServerConfig{
 		Host:               "localhost",
 		Port:               "0",

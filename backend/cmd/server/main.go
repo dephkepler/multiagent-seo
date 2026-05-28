@@ -11,6 +11,7 @@ import (
 	"github.com/rs/zerolog/log"
 
 	apphealth "contentflow/internal/application/health"
+	appwordpress "contentflow/internal/application/wordpress"
 	domainhealth "contentflow/internal/domain/health"
 	"contentflow/internal/infrastructure/db"
 	apihttp "contentflow/internal/infrastructure/http"
@@ -41,16 +42,21 @@ func main() {
 	// A DB outage must not stop the server from booting — /healthz then reports
 	// degraded instead of the process failing to start.
 	var healthRepo domainhealth.Repository
+	var wordpressSvc *appwordpress.Service
 	pool, err := db.NewPool(ctx, cfg.Database)
 	if err != nil {
 		log.Warn().Err(err).Msg("database unavailable at startup; health will report degraded")
 	} else {
 		defer pool.Close()
 		healthRepo = postgres.NewHealthRepository(pool)
+		wordpressRepo := postgres.NewWordpressSiteRepository(pool, cfg.WordPress.EncryptionKey)
+		wordpressSvc = appwordpress.NewService(wordpressRepo)
 	}
 
 	healthSvc := apphealth.NewService(domainhealth.NewService(healthRepo))
-	server := handlers.NewServer(handlers.NewHealthHandler(healthSvc))
+	// wordpressSvc is nil without a DB; its handler then returns 503 per request.
+	wordpressHandler := handlers.NewWordpressSitesHandler(nilableWordpressService(wordpressSvc))
+	server := handlers.NewServer(handlers.NewHealthHandler(healthSvc), wordpressHandler)
 	router := apihttp.NewRouter(cfg.Server, server)
 
 	srv := &http.Server{
@@ -76,4 +82,13 @@ func main() {
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Error().Err(err).Msg("graceful shutdown failed")
 	}
+}
+
+// nilableWordpressService returns an untyped-nil interface when the service is
+// absent, so the handler's nil guard fires instead of dereferencing a typed nil.
+func nilableWordpressService(svc *appwordpress.Service) handlers.WordpressService {
+	if svc == nil {
+		return nil
+	}
+	return svc
 }

@@ -13,6 +13,8 @@ servers:
 tags:
   - name: Health
     description: Liveness and readiness checks
+  - name: WordPress Sites
+    description: WordPress publishing targets
 
 paths:
   /healthz:
@@ -34,7 +36,115 @@ paths:
               schema:
                 $ref: "#/components/schemas/HealthResponse"
 
+  /wordpress-sites:
+    get:
+      operationId: listWordpressSites
+      tags: [ WordPress Sites ]
+      summary: List WordPress sites
+      responses:
+        "200":
+          description: All non-deleted sites
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/WordpressSite"
+    post:
+      operationId: createWordpressSite
+      tags: [ WordPress Sites ]
+      summary: Add a WordPress site
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateWordpressSiteRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WordpressSite"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /wordpress-sites/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      operationId: getWordpressSite
+      tags: [ WordPress Sites ]
+      summary: Get a WordPress site
+      responses:
+        "200":
+          description: Site
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WordpressSite"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      operationId: updateWordpressSite
+      tags: [ WordPress Sites ]
+      summary: Update a WordPress site
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateWordpressSiteRequest"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WordpressSite"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      operationId: deleteWordpressSite
+      tags: [ WordPress Sites ]
+      summary: Soft-delete a WordPress site
+      responses:
+        "204":
+          description: Deleted
+        "404":
+          $ref: "#/components/responses/NotFound"
+
 components:
+  responses:
+    BadRequest:
+      description: Invalid request
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    NotFound:
+      description: Resource not found
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Conflict:
+      description: Conflict with existing resource
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
   schemas:
     HealthResponse:
       type: object
@@ -46,3 +156,85 @@ components:
         time:
           type: string
           format: date-time
+
+    ErrorResponse:
+      type: object
+      description: RFC 7807 problem details
+      required: [ title, status ]
+      properties:
+        type:
+          type: string
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        instance:
+          type: string
+
+    WordpressSite:
+      type: object
+      required: [ id, alias, url, username, enabled, createdAt, updatedAt ]
+      properties:
+        id:
+          type: string
+          format: uuid
+        alias:
+          type: string
+        url:
+          type: string
+          format: uri
+        username:
+          type: string
+        enabled:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    CreateWordpressSiteRequest:
+      type: object
+      required: [ alias, url, username, appPassword ]
+      properties:
+        alias:
+          type: string
+          x-oapi-codegen-extra-tags:
+            validate: "required,min=1,max=100"
+        url:
+          type: string
+          x-oapi-codegen-extra-tags:
+            validate: "required,url"
+        username:
+          type: string
+          x-oapi-codegen-extra-tags:
+            validate: "required,min=1,max=255"
+        appPassword:
+          type: string
+          x-oapi-codegen-extra-tags:
+            validate: "required,min=1"
+
+    UpdateWordpressSiteRequest:
+      type: object
+      properties:
+        alias:
+          type: string
+          x-oapi-codegen-extra-tags:
+            validate: "omitempty,min=1,max=100"
+        url:
+          type: string
+          x-oapi-codegen-extra-tags:
+            validate: "omitempty,url"
+        username:
+          type: string
+          x-oapi-codegen-extra-tags:
+            validate: "omitempty,min=1,max=255"
+        appPassword:
+          type: string
+          x-oapi-codegen-extra-tags:
+            validate: "omitempty,min=1"
+        enabled:
+          type: boolean

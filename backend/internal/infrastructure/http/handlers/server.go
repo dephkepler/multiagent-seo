@@ -6,10 +6,11 @@ import "contentflow/internal/oapigen"
 // Each new feature adds its handler here and embeds it.
 type Server struct {
 	*HealthHandler
+	*WordpressSitesHandler
 }
 
 var _ oapigen.ServerInterface = (*Server)(nil)
 
-func NewServer(health *HealthHandler) *Server {
-	return &Server{HealthHandler: health}
+func NewServer(health *HealthHandler, wordpress *WordpressSitesHandler) *Server {
+	return &Server{HealthHandler: health, WordpressSitesHandler: wordpress}
 }

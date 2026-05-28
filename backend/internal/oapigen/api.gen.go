@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/oapi-codegen/runtime"
+	openapi_types "github.com/oapi-codegen/runtime/types"
 )
 
 // Defines values for HealthResponseStatus.
@@ -32,6 +34,23 @@ func (e HealthResponseStatus) Valid() bool {
 	}
 }
 
+// CreateWordpressSiteRequest defines model for CreateWordpressSiteRequest.
+type CreateWordpressSiteRequest struct {
+	Alias       string `json:"alias" validate:"required,min=1,max=100"`
+	AppPassword string `json:"appPassword" validate:"required,min=1"`
+	Url         string `json:"url" validate:"required,url"`
+	Username    string `json:"username" validate:"required,min=1,max=255"`
+}
+
+// ErrorResponse RFC 7807 problem details
+type ErrorResponse struct {
+	Detail   *string `json:"detail,omitempty"`
+	Instance *string `json:"instance,omitempty"`
+	Status   int     `json:"status"`
+	Title    string  `json:"title"`
+	Type     *string `json:"type,omitempty"`
+}
+
 // HealthResponse defines model for HealthResponse.
 type HealthResponse struct {
 	Status HealthResponseStatus `json:"status"`
@@ -41,11 +60,61 @@ type HealthResponse struct {
 // HealthResponseStatus defines model for HealthResponse.Status.
 type HealthResponseStatus string
 
+// UpdateWordpressSiteRequest defines model for UpdateWordpressSiteRequest.
+type UpdateWordpressSiteRequest struct {
+	Alias       *string `json:"alias,omitempty" validate:"omitempty,min=1,max=100"`
+	AppPassword *string `json:"appPassword,omitempty" validate:"omitempty,min=1"`
+	Enabled     *bool   `json:"enabled,omitempty"`
+	Url         *string `json:"url,omitempty" validate:"omitempty,url"`
+	Username    *string `json:"username,omitempty" validate:"omitempty,min=1,max=255"`
+}
+
+// WordpressSite defines model for WordpressSite.
+type WordpressSite struct {
+	Alias     string             `json:"alias"`
+	CreatedAt time.Time          `json:"createdAt"`
+	Enabled   bool               `json:"enabled"`
+	Id        openapi_types.UUID `json:"id"`
+	UpdatedAt time.Time          `json:"updatedAt"`
+	Url       string             `json:"url"`
+	Username  string             `json:"username"`
+}
+
+// BadRequest RFC 7807 problem details
+type BadRequest = ErrorResponse
+
+// Conflict RFC 7807 problem details
+type Conflict = ErrorResponse
+
+// NotFound RFC 7807 problem details
+type NotFound = ErrorResponse
+
+// CreateWordpressSiteJSONRequestBody defines body for CreateWordpressSite for application/json ContentType.
+type CreateWordpressSiteJSONRequestBody = CreateWordpressSiteRequest
+
+// UpdateWordpressSiteJSONRequestBody defines body for UpdateWordpressSite for application/json ContentType.
+type UpdateWordpressSiteJSONRequestBody = UpdateWordpressSiteRequest
+
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
 	// Health check
 	// (GET /healthz)
 	GetHealthz(w http.ResponseWriter, r *http.Request)
+	// List WordPress sites
+	// (GET /wordpress-sites)
+	ListWordpressSites(w http.ResponseWriter, r *http.Request)
+	// Add a WordPress site
+	// (POST /wordpress-sites)
+	CreateWordpressSite(w http.ResponseWriter, r *http.Request)
+	// Soft-delete a WordPress site
+	// (DELETE /wordpress-sites/{id})
+	DeleteWordpressSite(w http.ResponseWriter, r *http.Request, id openapi_types.UUID)
+	// Get a WordPress site
+	// (GET /wordpress-sites/{id})
+	GetWordpressSite(w http.ResponseWriter, r *http.Request, id openapi_types.UUID)
+	// Update a WordPress site
+	// (PATCH /wordpress-sites/{id})
+	UpdateWordpressSite(w http.ResponseWriter, r *http.Request, id openapi_types.UUID)
 }
 
 // Unimplemented server implementation that returns http.StatusNotImplemented for each endpoint.
@@ -55,6 +124,36 @@ type Unimplemented struct{}
 // Health check
 // (GET /healthz)
 func (_ Unimplemented) GetHealthz(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// List WordPress sites
+// (GET /wordpress-sites)
+func (_ Unimplemented) ListWordpressSites(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Add a WordPress site
+// (POST /wordpress-sites)
+func (_ Unimplemented) CreateWordpressSite(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Soft-delete a WordPress site
+// (DELETE /wordpress-sites/{id})
+func (_ Unimplemented) DeleteWordpressSite(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Get a WordPress site
+// (GET /wordpress-sites/{id})
+func (_ Unimplemented) GetWordpressSite(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Update a WordPress site
+// (PATCH /wordpress-sites/{id})
+func (_ Unimplemented) UpdateWordpressSite(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -72,6 +171,112 @@ func (siw *ServerInterfaceWrapper) GetHealthz(w http.ResponseWriter, r *http.Req
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetHealthz(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListWordpressSites operation middleware
+func (siw *ServerInterfaceWrapper) ListWordpressSites(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListWordpressSites(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateWordpressSite operation middleware
+func (siw *ServerInterfaceWrapper) CreateWordpressSite(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateWordpressSite(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteWordpressSite operation middleware
+func (siw *ServerInterfaceWrapper) DeleteWordpressSite(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid"})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteWordpressSite(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetWordpressSite operation middleware
+func (siw *ServerInterfaceWrapper) GetWordpressSite(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid"})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetWordpressSite(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateWordpressSite operation middleware
+func (siw *ServerInterfaceWrapper) UpdateWordpressSite(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid"})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateWordpressSite(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -197,9 +402,30 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/healthz", wrapper.GetHealthz)
 	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/wordpress-sites", wrapper.ListWordpressSites)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/wordpress-sites", wrapper.CreateWordpressSite)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/wordpress-sites/{id}", wrapper.DeleteWordpressSite)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/wordpress-sites/{id}", wrapper.GetWordpressSite)
+	})
+	r.Group(func(r chi.Router) {
+		r.Patch(options.BaseURL+"/wordpress-sites/{id}", wrapper.UpdateWordpressSite)
+	})
 
 	return r
 }
+
+type BadRequestApplicationProblemPlusJSONResponse ErrorResponse
+
+type ConflictApplicationProblemPlusJSONResponse ErrorResponse
+
+type NotFoundApplicationProblemPlusJSONResponse ErrorResponse
 
 type GetHealthzRequestObject struct {
 }
@@ -236,11 +462,226 @@ func (response GetHealthz503JSONResponse) VisitGetHealthzResponse(w http.Respons
 	return err
 }
 
+type ListWordpressSitesRequestObject struct {
+}
+
+type ListWordpressSitesResponseObject interface {
+	VisitListWordpressSitesResponse(w http.ResponseWriter) error
+}
+
+type ListWordpressSites200JSONResponse []WordpressSite
+
+func (response ListWordpressSites200JSONResponse) VisitListWordpressSitesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateWordpressSiteRequestObject struct {
+	Body *CreateWordpressSiteJSONRequestBody
+}
+
+type CreateWordpressSiteResponseObject interface {
+	VisitCreateWordpressSiteResponse(w http.ResponseWriter) error
+}
+
+type CreateWordpressSite201JSONResponse WordpressSite
+
+func (response CreateWordpressSite201JSONResponse) VisitCreateWordpressSiteResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateWordpressSite400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response CreateWordpressSite400ApplicationProblemPlusJSONResponse) VisitCreateWordpressSiteResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateWordpressSite409ApplicationProblemPlusJSONResponse struct {
+	ConflictApplicationProblemPlusJSONResponse
+}
+
+func (response CreateWordpressSite409ApplicationProblemPlusJSONResponse) VisitCreateWordpressSiteResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteWordpressSiteRequestObject struct {
+	Id openapi_types.UUID `json:"id"`
+}
+
+type DeleteWordpressSiteResponseObject interface {
+	VisitDeleteWordpressSiteResponse(w http.ResponseWriter) error
+}
+
+type DeleteWordpressSite204Response struct {
+}
+
+func (response DeleteWordpressSite204Response) VisitDeleteWordpressSiteResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeleteWordpressSite404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response DeleteWordpressSite404ApplicationProblemPlusJSONResponse) VisitDeleteWordpressSiteResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetWordpressSiteRequestObject struct {
+	Id openapi_types.UUID `json:"id"`
+}
+
+type GetWordpressSiteResponseObject interface {
+	VisitGetWordpressSiteResponse(w http.ResponseWriter) error
+}
+
+type GetWordpressSite200JSONResponse WordpressSite
+
+func (response GetWordpressSite200JSONResponse) VisitGetWordpressSiteResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetWordpressSite404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response GetWordpressSite404ApplicationProblemPlusJSONResponse) VisitGetWordpressSiteResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateWordpressSiteRequestObject struct {
+	Id   openapi_types.UUID `json:"id"`
+	Body *UpdateWordpressSiteJSONRequestBody
+}
+
+type UpdateWordpressSiteResponseObject interface {
+	VisitUpdateWordpressSiteResponse(w http.ResponseWriter) error
+}
+
+type UpdateWordpressSite200JSONResponse WordpressSite
+
+func (response UpdateWordpressSite200JSONResponse) VisitUpdateWordpressSiteResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateWordpressSite400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response UpdateWordpressSite400ApplicationProblemPlusJSONResponse) VisitUpdateWordpressSiteResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateWordpressSite404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response UpdateWordpressSite404ApplicationProblemPlusJSONResponse) VisitUpdateWordpressSiteResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
 	// Health check
 	// (GET /healthz)
 	GetHealthz(ctx context.Context, request GetHealthzRequestObject) (GetHealthzResponseObject, error)
+	// List WordPress sites
+	// (GET /wordpress-sites)
+	ListWordpressSites(ctx context.Context, request ListWordpressSitesRequestObject) (ListWordpressSitesResponseObject, error)
+	// Add a WordPress site
+	// (POST /wordpress-sites)
+	CreateWordpressSite(ctx context.Context, request CreateWordpressSiteRequestObject) (CreateWordpressSiteResponseObject, error)
+	// Soft-delete a WordPress site
+	// (DELETE /wordpress-sites/{id})
+	DeleteWordpressSite(ctx context.Context, request DeleteWordpressSiteRequestObject) (DeleteWordpressSiteResponseObject, error)
+	// Get a WordPress site
+	// (GET /wordpress-sites/{id})
+	GetWordpressSite(ctx context.Context, request GetWordpressSiteRequestObject) (GetWordpressSiteResponseObject, error)
+	// Update a WordPress site
+	// (PATCH /wordpress-sites/{id})
+	UpdateWordpressSite(ctx context.Context, request UpdateWordpressSiteRequestObject) (UpdateWordpressSiteResponseObject, error)
 }
 
 type StrictHandlerFunc func(ctx context.Context, w http.ResponseWriter, r *http.Request, request any) (any, error)
@@ -289,6 +730,146 @@ func (sh *strictHandler) GetHealthz(w http.ResponseWriter, r *http.Request) {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetHealthzResponseObject); ok {
 		if err := validResponse.VisitGetHealthzResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListWordpressSites operation middleware
+func (sh *strictHandler) ListWordpressSites(w http.ResponseWriter, r *http.Request) {
+	var request ListWordpressSitesRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListWordpressSites(ctx, request.(ListWordpressSitesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListWordpressSites")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListWordpressSitesResponseObject); ok {
+		if err := validResponse.VisitListWordpressSitesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateWordpressSite operation middleware
+func (sh *strictHandler) CreateWordpressSite(w http.ResponseWriter, r *http.Request) {
+	var request CreateWordpressSiteRequestObject
+
+	var body CreateWordpressSiteJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateWordpressSite(ctx, request.(CreateWordpressSiteRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateWordpressSite")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateWordpressSiteResponseObject); ok {
+		if err := validResponse.VisitCreateWordpressSiteResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteWordpressSite operation middleware
+func (sh *strictHandler) DeleteWordpressSite(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
+	var request DeleteWordpressSiteRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteWordpressSite(ctx, request.(DeleteWordpressSiteRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteWordpressSite")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteWordpressSiteResponseObject); ok {
+		if err := validResponse.VisitDeleteWordpressSiteResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetWordpressSite operation middleware
+func (sh *strictHandler) GetWordpressSite(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
+	var request GetWordpressSiteRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetWordpressSite(ctx, request.(GetWordpressSiteRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetWordpressSite")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetWordpressSiteResponseObject); ok {
+		if err := validResponse.VisitGetWordpressSiteResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdateWordpressSite operation middleware
+func (sh *strictHandler) UpdateWordpressSite(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
+	var request UpdateWordpressSiteRequestObject
+
+	request.Id = id
+
+	var body UpdateWordpressSiteJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateWordpressSite(ctx, request.(UpdateWordpressSiteRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateWordpressSite")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdateWordpressSiteResponseObject); ok {
+		if err := validResponse.VisitUpdateWordpressSiteResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

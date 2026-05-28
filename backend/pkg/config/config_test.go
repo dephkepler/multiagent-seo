@@ -111,3 +111,15 @@ func TestLLMKeyFor(t *testing.T) {
 		t.Errorf("KeyFor(anthropic) alias fallback = %q, want default-key", got)
 	}
 }
+
+func TestLoad_RejectsDevEncryptionKeyOutsideLocal(t *testing.T) {
+	t.Setenv("CF_SENTRY_ENVIRONMENT", "production")
+	if _, err := Load(); err == nil {
+		t.Fatal("expected error: dev WP_ENCRYPTION_KEY in non-local env")
+	}
+
+	t.Setenv("CF_WP_ENCRYPTION_KEY", "a-real-prod-secret")
+	if _, err := Load(); err != nil {
+		t.Fatalf("real key in non-local env should pass: %v", err)
+	}
+}
