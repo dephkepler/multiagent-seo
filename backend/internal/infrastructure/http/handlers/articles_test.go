@@ -7,9 +7,9 @@ import (
 
 	"github.com/google/uuid"
 
-	appgen "multiagent-seo/internal/application/generate"
+	apparticles "multiagent-seo/internal/application/articles"
 	apphealth "multiagent-seo/internal/application/health"
-	"multiagent-seo/internal/domain/generate"
+	"multiagent-seo/internal/domain/articles"
 	domainhealth "multiagent-seo/internal/domain/health"
 	apihttp "multiagent-seo/internal/infrastructure/http"
 	"multiagent-seo/internal/infrastructure/http/handlers"
@@ -18,39 +18,39 @@ import (
 )
 
 type fakeGenerateService struct {
-	generated generate.Article
+	generated articles.Article
 	genErr    error
-	arts      []generate.Article
+	arts      []articles.Article
 	getErr    error
 	pubErr    error
 }
 
-func (s *fakeGenerateService) Generate(_ context.Context, req appgen.GenerateRequest) (appgen.GenerateResult, error) {
+func (s *fakeGenerateService) Generate(_ context.Context, req apparticles.GenerateRequest) (apparticles.GenerateResult, error) {
 	if s.genErr != nil {
-		return appgen.GenerateResult{}, s.genErr
+		return apparticles.GenerateResult{}, s.genErr
 	}
-	return appgen.GenerateResult{
-		Article:        generate.Article{ID: 1, Keyword: req.Keyword, SiteID: req.SiteID, Status: generate.StatusGenerating},
+	return apparticles.GenerateResult{
+		Article:        articles.Article{ID: 1, Keyword: req.Keyword, SiteID: req.SiteID, Status: articles.StatusGenerating},
 		TargetKeywords: []string{req.Keyword},
 	}, nil
 }
 
-func (s *fakeGenerateService) Publish(context.Context, int64) (generate.Article, error) {
+func (s *fakeGenerateService) Publish(context.Context, int64) (articles.Article, error) {
 	if s.pubErr != nil {
-		return generate.Article{}, s.pubErr
+		return articles.Article{}, s.pubErr
 	}
-	return generate.Article{ID: 1, Status: generate.StatusPublished}, nil
+	return articles.Article{ID: 1, Status: articles.StatusPublished}, nil
 }
 
-func (s *fakeGenerateService) List(context.Context) ([]generate.Article, error) {
+func (s *fakeGenerateService) List(context.Context) ([]articles.Article, error) {
 	return s.arts, nil
 }
 
-func (s *fakeGenerateService) Get(context.Context, int64) (generate.Article, error) {
+func (s *fakeGenerateService) Get(context.Context, int64) (articles.Article, error) {
 	if s.getErr != nil {
-		return generate.Article{}, s.getErr
+		return articles.Article{}, s.getErr
 	}
-	return generate.Article{ID: 1, Keyword: "x", Status: generate.StatusDraft}, nil
+	return articles.Article{ID: 1, Keyword: "x", Status: articles.StatusDraft}, nil
 }
 
 func newArticlesRouter(svc *fakeGenerateService) http.Handler {
@@ -76,7 +76,7 @@ func TestArticles_Generate(t *testing.T) {
 }
 
 func TestArticles_GenerateNoCluster(t *testing.T) {
-	router := newArticlesRouter(&fakeGenerateService{genErr: appgen.ErrNoCluster})
+	router := newArticlesRouter(&fakeGenerateService{genErr: apparticles.ErrNoCluster})
 	rec := doJSON(t, router, http.MethodPost, "/generate", oapigen.GenerateRequest{
 		Keyword: "unknown",
 		SiteId:  uuid.New(),
@@ -98,7 +98,7 @@ func TestArticles_GenerateZeroSiteID(t *testing.T) {
 }
 
 func TestArticles_List(t *testing.T) {
-	router := newArticlesRouter(&fakeGenerateService{arts: []generate.Article{{ID: 1, Keyword: "a", Status: generate.StatusDraft}}})
+	router := newArticlesRouter(&fakeGenerateService{arts: []articles.Article{{ID: 1, Keyword: "a", Status: articles.StatusDraft}}})
 	rec := doJSON(t, router, http.MethodGet, "/articles", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("list status = %d, want 200 (body=%s)", rec.Code, rec.Body.String())
@@ -106,7 +106,7 @@ func TestArticles_List(t *testing.T) {
 }
 
 func TestArticles_GetMissing(t *testing.T) {
-	router := newArticlesRouter(&fakeGenerateService{getErr: appgen.ErrArticleNotFound})
+	router := newArticlesRouter(&fakeGenerateService{getErr: apparticles.ErrArticleNotFound})
 	rec := doJSON(t, router, http.MethodGet, "/articles/99", nil)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("get missing status = %d, want 404 (body=%s)", rec.Code, rec.Body.String())
@@ -114,7 +114,7 @@ func TestArticles_GetMissing(t *testing.T) {
 }
 
 func TestArticles_PublishMissing(t *testing.T) {
-	router := newArticlesRouter(&fakeGenerateService{pubErr: appgen.ErrArticleNotFound})
+	router := newArticlesRouter(&fakeGenerateService{pubErr: apparticles.ErrArticleNotFound})
 	rec := doJSON(t, router, http.MethodPost, "/articles/99/publish", nil)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("publish missing status = %d, want 404 (body=%s)", rec.Code, rec.Body.String())

@@ -5,7 +5,7 @@ import (
 	"net/url"
 	"strings"
 
-	"multiagent-seo/internal/domain/generate"
+	"multiagent-seo/internal/domain/articles"
 )
 
 type CompetitorItem struct {
@@ -28,7 +28,7 @@ type Competitors struct {
 
 // CompetitorsFrom adapts the SERP port's CompetitorData into the prompt's
 // render shape. A nil data yields an empty (no-op) Competitors.
-func CompetitorsFrom(data *generate.CompetitorData) Competitors {
+func CompetitorsFrom(data *articles.CompetitorData) Competitors {
 	var c Competitors
 	if data == nil {
 		return c

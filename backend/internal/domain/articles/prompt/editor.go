@@ -3,11 +3,11 @@ package prompt
 import (
 	"fmt"
 
-	"multiagent-seo/internal/domain/generate"
-	"multiagent-seo/internal/domain/generate/prompt/rules"
+	"multiagent-seo/internal/domain/articles"
+	"multiagent-seo/internal/domain/articles/prompt/rules"
 )
 
-func Editor(article, keyword string, minWords, maxWords int, cluster generate.Cluster, competitors Competitors) string {
+func Editor(article, keyword string, minWords, maxWords int, cluster articles.Cluster, competitors Competitors) string {
 	return fmt.Sprintf(`You are an SEO editor. Review and improve the article below without changing its meaning or structure.
 
 PRIMARY KEYWORD: "%s"

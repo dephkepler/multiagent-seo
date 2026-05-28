@@ -10,8 +10,8 @@ import (
 
 	"github.com/google/uuid"
 
-	appgen "multiagent-seo/internal/application/generate"
-	"multiagent-seo/internal/domain/generate"
+	apparticles "multiagent-seo/internal/application/articles"
+	"multiagent-seo/internal/domain/articles"
 	"multiagent-seo/internal/infrastructure/checker"
 	"multiagent-seo/internal/infrastructure/dataforseo"
 	apihttp "multiagent-seo/internal/infrastructure/http"
@@ -31,13 +31,13 @@ const itArtKnownKeyword = "android game development services"
 
 type itArtFakeLLM struct{}
 
-func (itArtFakeLLM) Complete(context.Context, string, int) (string, generate.Usage, error) {
-	return "Generated article body. It has several sentences. Each one is short and clear.", generate.Usage{}, nil
+func (itArtFakeLLM) Complete(context.Context, string, int) (string, articles.Usage, error) {
+	return "Generated article body. It has several sentences. Each one is short and clear.", articles.Usage{}, nil
 }
 
 type itArtFakeFactory struct{}
 
-func (itArtFakeFactory) ForModel(string, string) (generate.LLMClient, error) {
+func (itArtFakeFactory) ForModel(string, string) (articles.LLMClient, error) {
 	return itArtFakeLLM{}, nil
 }
 
@@ -56,11 +56,11 @@ func itArtBuild(t *testing.T) http.Handler {
 	}
 	images := pexels.New("", nil)
 	publisher := wordpress.NewProvider(postgres.NewWordpressSiteRepository(pool, "k"), nil)
-	runner := appgen.NewSyncRunner()
+	runner := apparticles.NewSyncRunner()
 
-	svc := appgen.NewService(
+	svc := apparticles.NewService(
 		articleRepo, itArtFakeFactory{}, serp, topics, check, images, publisher, runner,
-		appgen.Defaults{
+		apparticles.Defaults{
 			MinWords: 300, MaxWords: 600, Language: "en",
 			Provider: "groq", Model: "m", AIThreshold: 0.9, MaxCycles: 1, SERPLimit: 5,
 		},
@@ -119,10 +119,10 @@ func TestItArt_GenerateAndPersist(t *testing.T) {
 	if got.Keyword != itArtKnownKeyword {
 		t.Errorf("keyword = %q, want %q", got.Keyword, itArtKnownKeyword)
 	}
-	if !generate.Status(got.Status).IsTerminal() {
+	if !articles.Status(got.Status).IsTerminal() {
 		t.Errorf("status = %q, want terminal (failed/published)", got.Status)
 	}
-	if got.Status != string(generate.StatusFailed) {
+	if got.Status != string(articles.StatusFailed) {
 		t.Logf("observed terminal status = %q (expected failed: random site has no WP creds)", got.Status)
 	}
 	if got.CompetitorData == nil {

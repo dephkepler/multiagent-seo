@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"multiagent-seo/internal/domain/generate"
+	"multiagent-seo/internal/domain/articles"
 	"multiagent-seo/internal/infrastructure/llm/claude"
 	"multiagent-seo/internal/infrastructure/llm/groq"
 	"multiagent-seo/internal/infrastructure/llm/transport"
@@ -19,7 +19,7 @@ var providers = map[string]func(apiKey, model string, log *slog.Logger) *transpo
 	"anthropic": claude.New,
 }
 
-func New(provider, apiKey, model string, log *slog.Logger) (generate.LLMClient, error) {
+func New(provider, apiKey, model string, log *slog.Logger) (articles.LLMClient, error) {
 	if log == nil {
 		log = slog.Default()
 	}

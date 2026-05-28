@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"strings"
 
-	"multiagent-seo/internal/domain/generate"
+	"multiagent-seo/internal/domain/articles"
 )
 
 // renderCluster returns the "## Target Keywords" block, or empty when both the
 // title and keywords are empty.
-func renderCluster(c generate.Cluster) string {
+func renderCluster(c articles.Cluster) string {
 	title := strings.TrimSpace(c.Title)
 	var kws []string
 	for _, k := range c.Keywords {

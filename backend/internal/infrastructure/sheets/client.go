@@ -1,4 +1,4 @@
-// Package sheets adapts a Google Sheets keyword table to the generate.TopicSource
+// Package sheets adapts a Google Sheets keyword table to the articles.TopicSource
 // port. One row per article; on duplicate topic rows the keywords merge and the
 // first non-empty H1 wins. The constructor takes primitives so infrastructure
 // stays independent of internal/config.
@@ -16,7 +16,7 @@ import (
 	"google.golang.org/api/option"
 	"google.golang.org/api/sheets/v4"
 
-	"multiagent-seo/internal/domain/generate"
+	"multiagent-seo/internal/domain/articles"
 )
 
 type client struct {
@@ -30,11 +30,11 @@ type client struct {
 	log           *slog.Logger
 }
 
-var _ generate.TopicSource = (*client)(nil)
+var _ articles.TopicSource = (*client)(nil)
 
 // New returns an error when credentials or spreadsheet ID are missing so
 // callers can fall back to the mock.
-func New(ctx context.Context, credentialsFile, spreadsheetID, sheet, topicCol, keywordCol, titleCol string, headerRow bool, log *slog.Logger) (generate.TopicSource, error) {
+func New(ctx context.Context, credentialsFile, spreadsheetID, sheet, topicCol, keywordCol, titleCol string, headerRow bool, log *slog.Logger) (articles.TopicSource, error) {
 	if credentialsFile == "" || spreadsheetID == "" {
 		return nil, fmt.Errorf("sheets: credentialsFile and spreadsheetId are required")
 	}
@@ -66,10 +66,10 @@ func New(ctx context.Context, credentialsFile, spreadsheetID, sheet, topicCol, k
 	}, nil
 }
 
-func (c *client) Lookup(ctx context.Context, topic string) (generate.Cluster, error) {
+func (c *client) Lookup(ctx context.Context, topic string) (articles.Cluster, error) {
 	topic = normalize(topic)
 	if topic == "" {
-		return generate.Cluster{}, nil
+		return articles.Cluster{}, nil
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
@@ -88,13 +88,13 @@ func (c *client) Lookup(ctx context.Context, topic string) (generate.Cluster, er
 		Context(ctx).
 		Do()
 	if err != nil {
-		return generate.Cluster{}, fmt.Errorf("fetch range %s: %w", rangeStr, err)
+		return articles.Cluster{}, fmt.Errorf("fetch range %s: %w", rangeStr, err)
 	}
 
 	titleIdx := columnOffset(c.topicCol, c.titleCol)
 
 	seen := make(map[string]struct{})
-	var out generate.Cluster
+	var out articles.Cluster
 	for i, row := range resp.Values {
 		if c.headerRow && i == 0 {
 			continue

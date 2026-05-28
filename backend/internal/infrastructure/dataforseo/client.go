@@ -1,4 +1,4 @@
-// Package dataforseo adapts the DataForSEO SERP API to the generate.SERPProvider
+// Package dataforseo adapts the DataForSEO SERP API to the articles.SERPProvider
 // port, mapping the response onto domain value types.
 package dataforseo
 
@@ -11,7 +11,7 @@ import (
 	"net/http"
 	"time"
 
-	"multiagent-seo/internal/domain/generate"
+	"multiagent-seo/internal/domain/articles"
 )
 
 const apiBase = "https://api.dataforseo.com/v3"
@@ -22,7 +22,7 @@ type RealClient struct {
 	http     *http.Client
 }
 
-var _ generate.SERPProvider = (*RealClient)(nil)
+var _ articles.SERPProvider = (*RealClient)(nil)
 
 func New(login, password string) *RealClient {
 	return &RealClient{
@@ -61,7 +61,7 @@ type serpResponse struct {
 	} `json:"tasks"`
 }
 
-func (c *RealClient) GetSERP(ctx context.Context, keyword, languageCode string, limit int) (*generate.CompetitorData, error) {
+func (c *RealClient) GetSERP(ctx context.Context, keyword, languageCode string, limit int) (*articles.CompetitorData, error) {
 	if languageCode == "" {
 		languageCode = "en"
 	}
@@ -102,10 +102,10 @@ func (c *RealClient) GetSERP(ctx context.Context, keyword, languageCode string, 
 		return nil, fmt.Errorf("decode dataforseo response: %w", err)
 	}
 
-	data := &generate.CompetitorData{
+	data := &articles.CompetitorData{
 		Keyword:  keyword,
 		SerpDate: time.Now().Format("2006-01-02"),
-		Results:  []generate.SERPItem{},
+		Results:  []articles.SERPItem{},
 	}
 
 	if len(result.Tasks) == 0 || len(result.Tasks[0].Result) == 0 {
@@ -118,7 +118,7 @@ func (c *RealClient) GetSERP(ctx context.Context, keyword, languageCode string, 
 			if len(data.Results) >= limit {
 				continue
 			}
-			data.Results = append(data.Results, generate.SERPItem{
+			data.Results = append(data.Results, articles.SERPItem{
 				Rank:        item.RankAbsolute,
 				URL:         item.URL,
 				Title:       item.Title,
@@ -141,7 +141,7 @@ func (c *RealClient) GetSERP(ctx context.Context, keyword, languageCode string, 
 				if sub.Title == "" {
 					continue
 				}
-				data.FeaturedSnippet = &generate.FeaturedSnippet{
+				data.FeaturedSnippet = &articles.FeaturedSnippet{
 					Title:       sub.Title,
 					Description: sub.Description,
 				}
@@ -155,12 +155,12 @@ func (c *RealClient) GetSERP(ctx context.Context, keyword, languageCode string, 
 
 type MockClient struct{}
 
-var _ generate.SERPProvider = (*MockClient)(nil)
+var _ articles.SERPProvider = (*MockClient)(nil)
 
 func NewMock() *MockClient { return &MockClient{} }
 
-func (m *MockClient) GetSERP(_ context.Context, keyword, _ string, limit int) (*generate.CompetitorData, error) {
-	items := []generate.SERPItem{
+func (m *MockClient) GetSERP(_ context.Context, keyword, _ string, limit int) (*articles.CompetitorData, error) {
+	items := []articles.SERPItem{
 		{Rank: 1, URL: "https://example.com/1", Title: "Complete guide: " + keyword, Description: "Comprehensive guide about " + keyword + " with expert tips."},
 		{Rank: 2, URL: "https://example.com/2", Title: keyword + " — full overview 2026", Description: "Everything you need to know about " + keyword + "."},
 		{Rank: 3, URL: "https://example.com/3", Title: "How to " + keyword + " step by step", Description: "Step by step instructions for " + keyword + "."},
@@ -170,7 +170,7 @@ func (m *MockClient) GetSERP(_ context.Context, keyword, _ string, limit int) (*
 	if limit < len(items) {
 		items = items[:limit]
 	}
-	return &generate.CompetitorData{
+	return &articles.CompetitorData{
 		Keyword:  keyword,
 		SerpDate: time.Now().Format("2006-01-02"),
 		Results:  items,

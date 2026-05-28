@@ -10,8 +10,8 @@ import (
 
 	"github.com/google/uuid"
 
-	appgen "multiagent-seo/internal/application/generate"
-	"multiagent-seo/internal/domain/generate"
+	apparticles "multiagent-seo/internal/application/articles"
+	"multiagent-seo/internal/domain/articles"
 	"multiagent-seo/internal/infrastructure/http/problem"
 	"multiagent-seo/internal/infrastructure/http/response"
 	"multiagent-seo/internal/oapigen"
@@ -20,10 +20,10 @@ import (
 )
 
 type generateService interface {
-	Generate(ctx context.Context, req appgen.GenerateRequest) (appgen.GenerateResult, error)
-	Publish(ctx context.Context, id int64) (generate.Article, error)
-	List(ctx context.Context) ([]generate.Article, error)
-	Get(ctx context.Context, id int64) (generate.Article, error)
+	Generate(ctx context.Context, req apparticles.GenerateRequest) (apparticles.GenerateResult, error)
+	Publish(ctx context.Context, id int64) (articles.Article, error)
+	List(ctx context.Context) ([]articles.Article, error)
+	Get(ctx context.Context, id int64) (articles.Article, error)
 }
 
 type ArticlesHandler struct {
@@ -138,13 +138,13 @@ func (h *ArticlesHandler) unavailable(w http.ResponseWriter) bool {
 
 func (h *ArticlesHandler) writeError(ctx context.Context, w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, appgen.ErrNoCluster):
+	case errors.Is(err, apparticles.ErrNoCluster):
 		problem.Write(w, http.StatusNotFound, "no keyword cluster for topic")
-	case errors.Is(err, appgen.ErrArticleNotFound):
+	case errors.Is(err, apparticles.ErrArticleNotFound):
 		problem.Write(w, http.StatusNotFound, "article not found")
-	case errors.Is(err, appgen.ErrAlreadyPublished):
+	case errors.Is(err, apparticles.ErrAlreadyPublished):
 		problem.Write(w, http.StatusConflict, "article already published")
-	case errors.Is(err, appgen.ErrNoDraftToPublish):
+	case errors.Is(err, apparticles.ErrNoDraftToPublish):
 		problem.Write(w, http.StatusConflict, "article has no draft to publish")
 	default:
 		// Log the wrapped cause so 5xx origins are visible; client sees only "internal error".
@@ -154,8 +154,8 @@ func (h *ArticlesHandler) writeError(ctx context.Context, w http.ResponseWriter,
 	}
 }
 
-func toGenerateRequest(body oapigen.GenerateRequest) appgen.GenerateRequest {
-	req := appgen.GenerateRequest{
+func toGenerateRequest(body oapigen.GenerateRequest) apparticles.GenerateRequest {
+	req := apparticles.GenerateRequest{
 		Keyword:                 body.Keyword,
 		SiteID:                  body.SiteId,
 		AutoPublish:             deref(body.AutoPublish),
@@ -177,7 +177,7 @@ func toGenerateRequest(body oapigen.GenerateRequest) appgen.GenerateRequest {
 	return req
 }
 
-func toArticle(a generate.Article) oapigen.Article {
+func toArticle(a articles.Article) oapigen.Article {
 	out := oapigen.Article{
 		Id:        a.ID,
 		Keyword:   a.Keyword,

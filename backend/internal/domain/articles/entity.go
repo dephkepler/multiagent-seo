@@ -1,4 +1,4 @@
-package generate
+package articles
 
 import (
 	"encoding/json"

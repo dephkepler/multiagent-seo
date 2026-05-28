@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"strings"
 
-	"multiagent-seo/internal/domain/generate"
+	"multiagent-seo/internal/domain/articles"
 )
 
 // candidates is how many photos we ask Pexels for per query before scoring.
@@ -13,15 +13,15 @@ import (
 // low enough to stay inside the free tier's 200/hour cap.
 const candidates = 5
 
-// Resolver implements generate.ImageResolver against the Pexels search API.
+// Resolver implements articles.ImageResolver against the Pexels search API.
 // It fetches several candidates per query and delegates topical selection to
-// the domain's generate.PickRelevant so the scoring lives in one place.
+// the domain's articles.PickRelevant so the scoring lives in one place.
 type Resolver struct {
 	client *Client
 	log    *slog.Logger
 }
 
-var _ generate.ImageResolver = (*Resolver)(nil)
+var _ articles.ImageResolver = (*Resolver)(nil)
 
 // New returns a Resolver for the given Pexels API key.
 func New(apiKey string, log *slog.Logger) *Resolver {
@@ -31,32 +31,32 @@ func New(apiKey string, log *slog.Logger) *Resolver {
 	return &Resolver{client: newClient(apiKey), log: log}
 }
 
-func (r *Resolver) Resolve(ctx context.Context, keyword, description, alt string) (generate.ResolvedImage, error) {
+func (r *Resolver) Resolve(ctx context.Context, keyword, description, alt string) (articles.ResolvedImage, error) {
 	query := buildQuery(keyword, description, alt)
 	if query == "" {
-		return generate.ResolvedImage{}, nil
+		return articles.ResolvedImage{}, nil
 	}
 
 	photos, err := r.client.SearchN(ctx, query, candidates)
 	if err != nil {
 		// Log the cause here: the caller (RenderHTML) only counts the failure.
 		r.log.WarnContext(ctx, "pexels search failed", "query", query, "err", err)
-		return generate.ResolvedImage{}, err
+		return articles.ResolvedImage{}, err
 	}
 	if len(photos) == 0 {
-		return generate.ResolvedImage{}, nil
+		return articles.ResolvedImage{}, nil
 	}
 
-	// Relevance scoring is domain logic: map adapter photos to generate.Photo
-	// and let generate.PickRelevant choose.
-	picked := generate.PickRelevant(toDomainPhotos(photos), keyword, alt)
+	// Relevance scoring is domain logic: map adapter photos to articles.Photo
+	// and let articles.PickRelevant choose.
+	picked := articles.PickRelevant(toDomainPhotos(photos), keyword, alt)
 	if picked == nil {
 		// All candidates failed the topical filter — skip rather than insert
 		// an unrelated photo. RenderHTML strips the placeholder.
 		r.log.DebugContext(ctx, "pexels: no topical match, skipping image", "query", query, "candidates", len(photos))
-		return generate.ResolvedImage{}, nil
+		return articles.ResolvedImage{}, nil
 	}
-	return generate.ResolvedImage{
+	return articles.ResolvedImage{
 		URL:             picked.URL,
 		Photographer:    picked.Photographer,
 		PhotographerURL: picked.PhotographerURL,
@@ -64,10 +64,10 @@ func (r *Resolver) Resolve(ctx context.Context, keyword, description, alt string
 	}, nil
 }
 
-func toDomainPhotos(photos []Photo) []generate.Photo {
-	out := make([]generate.Photo, len(photos))
+func toDomainPhotos(photos []Photo) []articles.Photo {
+	out := make([]articles.Photo, len(photos))
 	for i, p := range photos {
-		out[i] = generate.Photo{
+		out[i] = articles.Photo{
 			URL:             p.URL,
 			Photographer:    p.Photographer,
 			PhotographerURL: p.PhotographerURL,

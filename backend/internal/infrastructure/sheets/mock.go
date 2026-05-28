@@ -4,13 +4,13 @@ import (
 	"context"
 	"strings"
 
-	"multiagent-seo/internal/domain/generate"
+	"multiagent-seo/internal/domain/articles"
 )
 
 // NewMock returns an in-memory TopicSource used when Google credentials are missing.
-func NewMock() generate.TopicSource {
+func NewMock() articles.TopicSource {
 	return &mockClient{
-		data: map[string]generate.Cluster{
+		data: map[string]articles.Cluster{
 			"android game development services": {
 				Keywords: []string{
 					"Android Game Development",
@@ -30,19 +30,19 @@ func NewMock() generate.TopicSource {
 }
 
 type mockClient struct {
-	data map[string]generate.Cluster
+	data map[string]articles.Cluster
 }
 
-var _ generate.TopicSource = (*mockClient)(nil)
+var _ articles.TopicSource = (*mockClient)(nil)
 
-func (m *mockClient) Lookup(_ context.Context, topic string) (generate.Cluster, error) {
+func (m *mockClient) Lookup(_ context.Context, topic string) (articles.Cluster, error) {
 	topic = strings.ToLower(strings.TrimSpace(topic))
 	r, ok := m.data[topic]
 	if !ok {
-		return generate.Cluster{}, nil
+		return articles.Cluster{}, nil
 	}
 	// Defensive copy so callers can't mutate the mock's state.
-	cp := generate.Cluster{Title: r.Title, Keywords: make([]string, len(r.Keywords))}
+	cp := articles.Cluster{Title: r.Title, Keywords: make([]string, len(r.Keywords))}
 	copy(cp.Keywords, r.Keywords)
 	return cp, nil
 }

@@ -11,11 +11,11 @@ import (
 
 	"github.com/rs/zerolog/log"
 
+	apparticles "multiagent-seo/internal/application/articles"
 	appauth "multiagent-seo/internal/application/auth"
-	appgenerate "multiagent-seo/internal/application/generate"
 	apphealth "multiagent-seo/internal/application/health"
 	appwordpress "multiagent-seo/internal/application/wordpress"
-	domaingenerate "multiagent-seo/internal/domain/generate"
+	domainarticles "multiagent-seo/internal/domain/articles"
 	domainhealth "multiagent-seo/internal/domain/health"
 	"multiagent-seo/internal/infrastructure/checker"
 	"multiagent-seo/internal/infrastructure/dataforseo"
@@ -63,8 +63,8 @@ func main() {
 	var healthRepo domainhealth.Repository
 	var wordpressSvc *appwordpress.Service
 	var authSvc *appauth.Service
-	var generateSvc *appgenerate.Service
-	var runner *appgenerate.AsyncRunner
+	var generateSvc *apparticles.Service
+	var runner *apparticles.AsyncRunner
 
 	pool, err := db.NewPool(ctx, cfg.Database)
 	if err != nil {
@@ -76,8 +76,8 @@ func main() {
 		wordpressSvc = appwordpress.NewService(wordpressRepo)
 		authSvc = appauth.NewService(postgres.NewUserRepository(pool), jwtSvc)
 
-		runner = appgenerate.NewAsyncRunner(cfg.Server.BackgroundJobTimeout, slogLog)
-		generateSvc = appgenerate.NewService(
+		runner = apparticles.NewAsyncRunner(cfg.Server.BackgroundJobTimeout, slogLog)
+		generateSvc = apparticles.NewService(
 			postgres.NewArticleRepository(pool),
 			infrallm.NewFactory(cfg.LLM, slogLog),
 			newSERP(cfg, slogLog),
@@ -133,8 +133,8 @@ func main() {
 	}
 }
 
-func generateDefaults(cfg config.Config) appgenerate.Defaults {
-	return appgenerate.Defaults{
+func generateDefaults(cfg config.Config) apparticles.Defaults {
+	return apparticles.Defaults{
 		MinWords:      cfg.Article.MinWords,
 		MaxWords:      cfg.Article.MaxWords,
 		Language:      cfg.Article.Language,
@@ -150,7 +150,7 @@ func generateDefaults(cfg config.Config) appgenerate.Defaults {
 }
 
 // newSERP falls back to a mock when DataForSEO is unconfigured.
-func newSERP(cfg config.Config, log *slog.Logger) domaingenerate.SERPProvider {
+func newSERP(cfg config.Config, log *slog.Logger) domainarticles.SERPProvider {
 	if cfg.DataForSEO.Login != "" && cfg.DataForSEO.Password != "" {
 		return dataforseo.New(cfg.DataForSEO.Login, cfg.DataForSEO.Password)
 	}
@@ -159,7 +159,7 @@ func newSERP(cfg config.Config, log *slog.Logger) domaingenerate.SERPProvider {
 }
 
 // newTopics falls back to a mock when Sheets is unconfigured or unreachable.
-func newTopics(ctx context.Context, cfg config.Config, log *slog.Logger) domaingenerate.TopicSource {
+func newTopics(ctx context.Context, cfg config.Config, log *slog.Logger) domainarticles.TopicSource {
 	if cfg.Sheets.SpreadsheetID == "" {
 		log.Warn("sheets unconfigured; using topic mock")
 		return sheets.NewMock()
@@ -175,7 +175,7 @@ func newTopics(ctx context.Context, cfg config.Config, log *slog.Logger) domaing
 
 // newChecker falls back to the mock checker when the configured provider can't
 // be built (e.g. missing key), matching the legacy degrade-to-mock behaviour.
-func newChecker(cfg config.Config, log *slog.Logger) domaingenerate.ContentChecker {
+func newChecker(cfg config.Config, log *slog.Logger) domainarticles.ContentChecker {
 	c, err := checker.New(cfg.Checker.Provider, cfg.Checker.APIKey, cfg.Checker.Model, cfg.Checker.AIThreshold, log)
 	if err != nil {
 		log.Warn("checker init failed; using mock", "provider", cfg.Checker.Provider, "err", err)
@@ -198,7 +198,7 @@ func nilableAuthService(svc *appauth.Service) handlers.AuthService {
 	return svc
 }
 
-func nilableArticlesHandler(svc *appgenerate.Service) *handlers.ArticlesHandler {
+func nilableArticlesHandler(svc *apparticles.Service) *handlers.ArticlesHandler {
 	if svc == nil {
 		return handlers.NewArticlesHandler(nil)
 	}

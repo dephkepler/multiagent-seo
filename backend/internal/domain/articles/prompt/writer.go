@@ -3,11 +3,11 @@ package prompt
 import (
 	"fmt"
 
-	"multiagent-seo/internal/domain/generate"
-	"multiagent-seo/internal/domain/generate/prompt/rules"
+	"multiagent-seo/internal/domain/articles"
+	"multiagent-seo/internal/domain/articles/prompt/rules"
 )
 
-func Writer(brief, keyword, language string, minWords, maxWords int, cluster generate.Cluster, competitors Competitors) string {
+func Writer(brief, keyword, language string, minWords, maxWords int, cluster articles.Cluster, competitors Competitors) string {
 	return fmt.Sprintf(`You are an experienced SEO copywriter. You write articles that rank in Google's top 3, read as genuine expert content written by a human, and pass AI detectors. Every article you write is built around a clear unique angle — a perspective or depth that goes beyond surface-level coverage of the topic.
 
 PRIMARY KEYWORD: "%s"

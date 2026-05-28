@@ -1,4 +1,4 @@
-// Package wordpress implements generate.Publisher against the WordPress REST API.
+// Package wordpress implements articles.Publisher against the WordPress REST API.
 package wordpress
 
 import (
@@ -11,7 +11,7 @@ import (
 	"net/http"
 	"time"
 
-	"multiagent-seo/internal/domain/generate"
+	"multiagent-seo/internal/domain/articles"
 )
 
 // maxResponseBytes guards against a misbehaving proxy or server; real WP
@@ -22,7 +22,7 @@ const maxResponseBytes = 1 << 20
 // error page can't flood the log lines.
 const maxLoggedBodyBytes = 4 << 10
 
-var _ generate.Publisher = (*Publisher)(nil)
+var _ articles.Publisher = (*Publisher)(nil)
 
 // Publisher targets one site: creds are bound at construction so each
 // generate job gets its own Publisher rather than a shared config map.
@@ -35,7 +35,7 @@ type Publisher struct {
 	log         *slog.Logger
 }
 
-func New(url, username, appPassword, siteID string, log *slog.Logger) generate.Publisher {
+func New(url, username, appPassword, siteID string, log *slog.Logger) articles.Publisher {
 	return &Publisher{
 		url:         url,
 		username:    username,
@@ -134,7 +134,7 @@ func (p *Publisher) do(ctx context.Context, method, url string, body any, wantSt
 	return nil
 }
 
-func (p *Publisher) CreateDraft(ctx context.Context, post generate.Post) (int64, string, error) {
+func (p *Publisher) CreateDraft(ctx context.Context, post articles.Post) (int64, string, error) {
 	status := post.Status
 	if status == "" {
 		status = "draft"
@@ -160,7 +160,7 @@ func (p *Publisher) CreateDraft(ctx context.Context, post generate.Post) (int64,
 // ignores meta keys the active SEO plugin doesn't register, so sending
 // both vendors is harmless if only one is installed (or neither — then
 // the meta block is a no-op).
-func seoMeta(post generate.Post) map[string]any {
+func seoMeta(post articles.Post) map[string]any {
 	if post.SEOTitle == "" && post.SEODesc == "" {
 		return nil
 	}

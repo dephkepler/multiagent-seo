@@ -9,9 +9,9 @@ be added later if the product is sold per-tenant).
 
 - `api/openapi.yaml` — source of truth for the HTTP contract
 - `internal/domain/<feature>/` — entities, ports (repository + service
-  interfaces), pure domain logic. Features: `auth`, `user`, `generate`,
+  interfaces), pure domain logic. Features: `auth`, `user`, `articles`,
   `health`, `wordpress`
-- `internal/application/<feature>/` — use-case orchestration. `generate` runs the
+- `internal/application/<feature>/` — use-case orchestration. `articles` runs the
   SERP→brief→write→edit→humanize→publish pipeline; long work is dispatched
   through a `JobRunner` (`AsyncRunner`) so `POST /generate` returns 202 and the
   pipeline finishes in the background

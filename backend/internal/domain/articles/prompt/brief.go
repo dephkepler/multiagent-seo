@@ -3,11 +3,11 @@ package prompt
 import (
 	"fmt"
 
-	"multiagent-seo/internal/domain/generate"
-	"multiagent-seo/internal/domain/generate/prompt/rules"
+	"multiagent-seo/internal/domain/articles"
+	"multiagent-seo/internal/domain/articles/prompt/rules"
 )
 
-func Brief(keyword, language string, cluster generate.Cluster, siteTopic, extraRules string, competitors Competitors) string {
+func Brief(keyword, language string, cluster articles.Cluster, siteTopic, extraRules string, competitors Competitors) string {
 	return fmt.Sprintf(`You are an SEO content strategist. Create a detailed article brief for the keyword: "%s".
 Language: %s.
 %s
@@ -46,7 +46,7 @@ Follow these rules:
 // clusterBriefInstruction tells the strategist to honour the sheet-supplied H1
 // and LSI set instead of inventing new ones that the writer would then have to
 // override.
-func clusterBriefInstruction(c generate.Cluster) string {
+func clusterBriefInstruction(c articles.Cluster) string {
 	rendered := renderCluster(c)
 	if rendered == "" {
 		return ""

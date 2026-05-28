@@ -11,9 +11,9 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	appauth "multiagent-seo/internal/application/auth"
-	domainuser "multiagent-seo/internal/domain/user"
 	apphealth "multiagent-seo/internal/application/health"
 	domainhealth "multiagent-seo/internal/domain/health"
+	domainuser "multiagent-seo/internal/domain/user"
 	apihttp "multiagent-seo/internal/infrastructure/http"
 	"multiagent-seo/internal/infrastructure/http/handlers"
 	"multiagent-seo/internal/infrastructure/jwtauth"

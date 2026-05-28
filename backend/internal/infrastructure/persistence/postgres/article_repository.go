@@ -11,10 +11,10 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"multiagent-seo/internal/domain/generate"
+	"multiagent-seo/internal/domain/articles"
 )
 
-var _ generate.ArticleRepository = (*ArticleRepository)(nil)
+var _ articles.ArticleRepository = (*ArticleRepository)(nil)
 
 // mapPGError classifies known PostgreSQL error codes into clearer errors.
 // Unclassified codes (and non-pg errors) are returned unchanged.
@@ -39,7 +39,7 @@ func NewArticleRepository(pool *pgxpool.Pool) *ArticleRepository {
 	return &ArticleRepository{db: pool}
 }
 
-func (r *ArticleRepository) Create(ctx context.Context, in generate.CreateArticle) (int64, error) {
+func (r *ArticleRepository) Create(ctx context.Context, in articles.CreateArticle) (int64, error) {
 	const q = `
 		INSERT INTO articles (keyword, site_id, site, status)
 		VALUES (@keyword, @site_id, @site, @status)
@@ -50,7 +50,7 @@ func (r *ArticleRepository) Create(ctx context.Context, in generate.CreateArticl
 		"keyword": in.Keyword,
 		"site_id": in.SiteID,
 		"site":    in.Site,
-		"status":  generate.StatusGenerating,
+		"status":  articles.StatusGenerating,
 	}).Scan(&id)
 	if err != nil {
 		// A bad/deleted site_id violates the articles.site_id FK (pg 23503).
@@ -59,7 +59,7 @@ func (r *ArticleRepository) Create(ctx context.Context, in generate.CreateArticl
 	return id, nil
 }
 
-func (r *ArticleRepository) Get(ctx context.Context, id int64) (*generate.Article, error) {
+func (r *ArticleRepository) Get(ctx context.Context, id int64) (*articles.Article, error) {
 	const q = `
 		SELECT id, keyword, site_id, site, status,
 		       COALESCE(wp_post_id, 0),
@@ -74,14 +74,14 @@ func (r *ArticleRepository) Get(ctx context.Context, id int64) (*generate.Articl
 	a, err := scanArticleFull(row)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, generate.ErrNotFound
+			return nil, articles.ErrNotFound
 		}
 		return nil, fmt.Errorf("get article: %w", err)
 	}
 	return &a, nil
 }
 
-func (r *ArticleRepository) List(ctx context.Context) ([]generate.Article, error) {
+func (r *ArticleRepository) List(ctx context.Context) ([]articles.Article, error) {
 	// List omits the heavy JSONB columns; only Get loads them.
 	const q = `
 		SELECT id, keyword, site_id, site, status,
@@ -98,7 +98,7 @@ func (r *ArticleRepository) List(ctx context.Context) ([]generate.Article, error
 	}
 	defer rows.Close()
 
-	list := make([]generate.Article, 0)
+	list := make([]articles.Article, 0)
 	for rows.Next() {
 		a, err := scanArticle(rows)
 		if err != nil {
@@ -119,7 +119,7 @@ func (r *ArticleRepository) UpdateDraft(ctx context.Context, id, wpPostID int64,
 		WHERE id = @id`
 
 	return r.exec(ctx, "update draft", q, pgx.NamedArgs{
-		"status":      generate.StatusDraft,
+		"status":      articles.StatusDraft,
 		"wp_post_id":  wpPostID,
 		"wp_edit_url": editURL,
 		"id":          id,
@@ -129,7 +129,7 @@ func (r *ArticleRepository) UpdateDraft(ctx context.Context, id, wpPostID int64,
 func (r *ArticleRepository) MarkFailed(ctx context.Context, id int64) error {
 	const q = `UPDATE articles SET status = @status, updated_at = NOW() WHERE id = @id`
 	return r.exec(ctx, "mark failed", q, pgx.NamedArgs{
-		"status": generate.StatusFailed,
+		"status": articles.StatusFailed,
 		"id":     id,
 	})
 }
@@ -141,7 +141,7 @@ func (r *ArticleRepository) MarkPublished(ctx context.Context, id int64, postURL
 		WHERE id = @id`
 
 	return r.exec(ctx, "mark published", q, pgx.NamedArgs{
-		"status":      generate.StatusPublished,
+		"status":      articles.StatusPublished,
 		"wp_post_url": postURL,
 		"id":          id,
 	})
@@ -187,15 +187,15 @@ func (r *ArticleRepository) exec(ctx context.Context, op, q string, args pgx.Nam
 		return fmt.Errorf("%s: %w", op, err)
 	}
 	if tag.RowsAffected() == 0 {
-		return generate.ErrNotFound
+		return articles.ErrNotFound
 	}
 	return nil
 }
 
 // scanArticle reads a list row (without the heavy JSONB columns).
-func scanArticle(row pgx.Row) (generate.Article, error) {
+func scanArticle(row pgx.Row) (articles.Article, error) {
 	var (
-		a      generate.Article
+		a      articles.Article
 		siteID uuid.NullUUID
 	)
 	err := row.Scan(
@@ -218,9 +218,9 @@ func scanArticle(row pgx.Row) (generate.Article, error) {
 }
 
 // scanArticleFull also reads the JSONB columns.
-func scanArticleFull(row pgx.Row) (generate.Article, error) {
+func scanArticleFull(row pgx.Row) (articles.Article, error) {
 	var (
-		a      generate.Article
+		a      articles.Article
 		siteID uuid.NullUUID
 	)
 	err := row.Scan(

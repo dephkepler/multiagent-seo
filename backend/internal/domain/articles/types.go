@@ -1,4 +1,4 @@
-package generate
+package articles
 
 // Usage reports token consumption from a single LLM completion.
 type Usage struct {

@@ -2,7 +2,7 @@
 // generation pipeline over the generate domain ports. It owns no infrastructure:
 // every dependency is a domain port injected via the constructor, and request
 // defaults arrive as a config-agnostic Defaults struct.
-package generate
+package articles
 
 import (
 	"context"
@@ -13,8 +13,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"multiagent-seo/internal/domain/generate"
-	"multiagent-seo/internal/domain/generate/prompt"
+	"multiagent-seo/internal/domain/articles"
+	"multiagent-seo/internal/domain/articles/prompt"
 )
 
 // ErrNoCluster signals the TopicSource returned no keywords for the topic; a
@@ -72,26 +72,26 @@ type GenerateRequest struct {
 }
 
 type Service struct {
-	repo      generate.ArticleRepository
-	llm       generate.LLMFactory
-	serp      generate.SERPProvider
-	topics    generate.TopicSource
-	checker   generate.ContentChecker
-	images    generate.ImageResolver
-	publisher generate.PublisherProvider
+	repo      articles.ArticleRepository
+	llm       articles.LLMFactory
+	serp      articles.SERPProvider
+	topics    articles.TopicSource
+	checker   articles.ContentChecker
+	images    articles.ImageResolver
+	publisher articles.PublisherProvider
 	runner    JobRunner
 	defaults  Defaults
 	log       *slog.Logger
 }
 
 func NewService(
-	repo generate.ArticleRepository,
-	llm generate.LLMFactory,
-	serp generate.SERPProvider,
-	topics generate.TopicSource,
-	checker generate.ContentChecker,
-	images generate.ImageResolver,
-	publisher generate.PublisherProvider,
+	repo articles.ArticleRepository,
+	llm articles.LLMFactory,
+	serp articles.SERPProvider,
+	topics articles.TopicSource,
+	checker articles.ContentChecker,
+	images articles.ImageResolver,
+	publisher articles.PublisherProvider,
 	runner JobRunner,
 	defaults Defaults,
 	log *slog.Logger,
@@ -124,8 +124,8 @@ type spec struct {
 	language         string
 	siteTopic        string
 	extraRules       string
-	cluster          generate.Cluster
-	client           generate.LLMClient
+	cluster          articles.Cluster
+	client           articles.LLMClient
 	provider         string
 	model            string
 	maxCycles        int
@@ -139,7 +139,7 @@ type spec struct {
 // article plus the resolved cluster and model info, so the caller learns the
 // targeted keywords/title and which model is running before it starts polling.
 type GenerateResult struct {
-	Article        generate.Article
+	Article        articles.Article
 	TargetKeywords []string
 	SuggestedTitle string
 	Provider       string
@@ -155,7 +155,7 @@ func (s *Service) Generate(ctx context.Context, req GenerateRequest) (GenerateRe
 		return GenerateResult{}, err
 	}
 
-	id, err := s.repo.Create(ctx, generate.CreateArticle{
+	id, err := s.repo.Create(ctx, articles.CreateArticle{
 		Keyword: sp.keyword,
 		SiteID:  sp.siteID,
 	})
@@ -275,7 +275,7 @@ func (s *Service) pipeline(ctx context.Context, log *slog.Logger, articleID int6
 	serpData, err := s.serp.GetSERP(ctx, sp.keyword, sp.language, s.defaults.SERPLimit)
 	if err != nil {
 		log.WarnContext(ctx, "serp lookup failed, continuing without competitor data", "err", err)
-		serpData = &generate.CompetitorData{Keyword: sp.keyword}
+		serpData = &articles.CompetitorData{Keyword: sp.keyword}
 	} else {
 		log.DebugContext(ctx, "serp competitors loaded", "count", len(serpData.Results))
 		if saveErr := s.repo.SaveCompetitorData(ctx, articleID, serpData); saveErr != nil {
@@ -315,11 +315,11 @@ func (s *Service) pipeline(ctx context.Context, log *slog.Logger, articleID int6
 
 	// A nil resolver makes RenderHTML strip [IMG] placeholders, mirroring the
 	// legacy pexels-nil behaviour.
-	var resolver generate.ImageResolver
+	var resolver articles.ImageResolver
 	if sp.includeImages {
 		resolver = s.images
 	}
-	body, renderStats := generate.RenderHTML(ctx, cleaned, generate.RenderOptions{
+	body, renderStats := articles.RenderHTML(ctx, cleaned, articles.RenderOptions{
 		Keyword:     sp.keyword,
 		Resolver:    resolver,
 		Attribution: sp.imageAttribution,
@@ -336,7 +336,7 @@ func (s *Service) pipeline(ctx context.Context, log *slog.Logger, articleID int6
 		return false, fmt.Errorf("resolve publisher: %w", err)
 	}
 
-	postID, editURL, err := pub.CreateDraft(ctx, generate.Post{
+	postID, editURL, err := pub.CreateDraft(ctx, articles.Post{
 		Title:    sp.keyword,
 		Content:  body,
 		SEOTitle: seoTitle,
@@ -366,7 +366,7 @@ func (s *Service) pipeline(ctx context.Context, log *slog.Logger, articleID int6
 
 // checkAndHumanize runs the check→humanize loop up to maxCycles, persisting each
 // CheckResult. Returns the (possibly rewritten) content and the last check.
-func (s *Service) checkAndHumanize(ctx context.Context, log *slog.Logger, articleID int64, sp spec, content string) (string, *generate.CheckResult) {
+func (s *Service) checkAndHumanize(ctx context.Context, log *slog.Logger, articleID int64, sp spec, content string) (string, *articles.CheckResult) {
 	maxCycles := sp.maxCycles
 	if maxCycles <= 0 {
 		maxCycles = 3
@@ -376,7 +376,7 @@ func (s *Service) checkAndHumanize(ctx context.Context, log *slog.Logger, articl
 		threshold = s.defaults.AIThreshold
 	}
 
-	var last *generate.CheckResult
+	var last *articles.CheckResult
 
 	for cycle := 1; cycle <= maxCycles; cycle++ {
 		checkRes, err := s.checker.Check(ctx, content)
@@ -417,51 +417,51 @@ func (s *Service) checkAndHumanize(ctx context.Context, log *slog.Logger, articl
 
 // Publish promotes an existing draft live. Mirrors the legacy publishArticle
 // status guards and maps domain errors to the use-case sentinels.
-func (s *Service) Publish(ctx context.Context, articleID int64) (generate.Article, error) {
+func (s *Service) Publish(ctx context.Context, articleID int64) (articles.Article, error) {
 	article, err := s.repo.Get(ctx, articleID)
 	if err != nil {
-		if errors.Is(err, generate.ErrNotFound) {
-			return generate.Article{}, ErrArticleNotFound
+		if errors.Is(err, articles.ErrNotFound) {
+			return articles.Article{}, ErrArticleNotFound
 		}
-		return generate.Article{}, fmt.Errorf("fetch article: %w", err)
+		return articles.Article{}, fmt.Errorf("fetch article: %w", err)
 	}
 
 	switch article.Status {
-	case generate.StatusPublished:
-		return generate.Article{}, ErrAlreadyPublished
-	case generate.StatusGenerating, generate.StatusFailed:
-		return generate.Article{}, ErrNoDraftToPublish
+	case articles.StatusPublished:
+		return articles.Article{}, ErrAlreadyPublished
+	case articles.StatusGenerating, articles.StatusFailed:
+		return articles.Article{}, ErrNoDraftToPublish
 	}
 	if article.WPPostID == 0 {
-		return generate.Article{}, ErrNoDraftToPublish
+		return articles.Article{}, ErrNoDraftToPublish
 	}
 
 	pub, err := s.publisher.ForSite(ctx, article.SiteID)
 	if err != nil {
 		s.log.ErrorContext(ctx, "publish failed", "article_id", articleID, "stage", "resolve publisher", "err", err)
-		return generate.Article{}, fmt.Errorf("resolve publisher: %w", err)
+		return articles.Article{}, fmt.Errorf("resolve publisher: %w", err)
 	}
 
 	postURL, err := pub.Publish(ctx, article.WPPostID)
 	if err != nil {
 		s.log.ErrorContext(ctx, "publish failed", "article_id", articleID, "wp_post_id", article.WPPostID, "stage", "publish", "err", err)
-		return generate.Article{}, fmt.Errorf("publish: %w", err)
+		return articles.Article{}, fmt.Errorf("publish: %w", err)
 	}
 
 	if err := s.repo.MarkPublished(ctx, articleID, postURL); err != nil {
 		s.log.ErrorContext(ctx, "publish failed", "article_id", articleID, "stage", "mark published", "err", err)
-		return generate.Article{}, fmt.Errorf("mark published: %w", err)
+		return articles.Article{}, fmt.Errorf("mark published: %w", err)
 	}
 
 	updated, err := s.repo.Get(ctx, articleID)
 	if err != nil {
-		return generate.Article{}, fmt.Errorf("fetch article after publish: %w", err)
+		return articles.Article{}, fmt.Errorf("fetch article after publish: %w", err)
 	}
 	s.log.InfoContext(ctx, "article published", "article_id", articleID, "wp_post_id", updated.WPPostID, "wp_post_url", updated.WPPostURL)
 	return *updated, nil
 }
 
-func (s *Service) List(ctx context.Context) ([]generate.Article, error) {
+func (s *Service) List(ctx context.Context) ([]articles.Article, error) {
 	arts, err := s.repo.List(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list articles: %w", err)
@@ -470,13 +470,13 @@ func (s *Service) List(ctx context.Context) ([]generate.Article, error) {
 }
 
 // Get fetches one article, mapping the domain not-found to the use-case sentinel.
-func (s *Service) Get(ctx context.Context, id int64) (generate.Article, error) {
+func (s *Service) Get(ctx context.Context, id int64) (articles.Article, error) {
 	article, err := s.repo.Get(ctx, id)
 	if err != nil {
-		if errors.Is(err, generate.ErrNotFound) {
-			return generate.Article{}, ErrArticleNotFound
+		if errors.Is(err, articles.ErrNotFound) {
+			return articles.Article{}, ErrArticleNotFound
 		}
-		return generate.Article{}, fmt.Errorf("fetch article: %w", err)
+		return articles.Article{}, fmt.Errorf("fetch article: %w", err)
 	}
 	return *article, nil
 }

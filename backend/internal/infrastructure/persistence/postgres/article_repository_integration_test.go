@@ -10,7 +10,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"multiagent-seo/internal/domain/generate"
+	"multiagent-seo/internal/domain/articles"
 	"multiagent-seo/internal/infrastructure/persistence/postgres"
 	"multiagent-seo/internal/testsupport"
 )
@@ -20,7 +20,7 @@ func TestArticleRepository_CreateAndGet(t *testing.T) {
 	repo := postgres.NewArticleRepository(testsupport.NewTestDB(t, baseConnStr))
 
 	siteID := uuid.New()
-	id, err := repo.Create(ctx, generate.CreateArticle{
+	id, err := repo.Create(ctx, articles.CreateArticle{
 		Keyword: "best running shoes",
 		SiteID:  siteID,
 		Site:    "example.com",
@@ -42,8 +42,8 @@ func TestArticleRepository_CreateAndGet(t *testing.T) {
 	if got.SiteID != siteID {
 		t.Errorf("SiteID = %v, want %v", got.SiteID, siteID)
 	}
-	if got.Status != generate.StatusGenerating {
-		t.Errorf("Status = %q, want %q", got.Status, generate.StatusGenerating)
+	if got.Status != articles.StatusGenerating {
+		t.Errorf("Status = %q, want %q", got.Status, articles.StatusGenerating)
 	}
 }
 
@@ -52,7 +52,7 @@ func TestArticleRepository_GetNotFound(t *testing.T) {
 	repo := postgres.NewArticleRepository(testsupport.NewTestDB(t, baseConnStr))
 
 	_, err := repo.Get(ctx, 999999)
-	if !errors.Is(err, generate.ErrNotFound) {
+	if !errors.Is(err, articles.ErrNotFound) {
 		t.Fatalf("Get missing id err = %v, want ErrNotFound", err)
 	}
 }
@@ -61,11 +61,11 @@ func TestArticleRepository_List(t *testing.T) {
 	ctx := context.Background()
 	repo := postgres.NewArticleRepository(testsupport.NewTestDB(t, baseConnStr))
 
-	first, err := repo.Create(ctx, generate.CreateArticle{Keyword: "alpha", SiteID: uuid.New(), Site: "a.com"})
+	first, err := repo.Create(ctx, articles.CreateArticle{Keyword: "alpha", SiteID: uuid.New(), Site: "a.com"})
 	if err != nil {
 		t.Fatalf("Create first: %v", err)
 	}
-	second, err := repo.Create(ctx, generate.CreateArticle{Keyword: "beta", SiteID: uuid.New(), Site: "b.com"})
+	second, err := repo.Create(ctx, articles.CreateArticle{Keyword: "beta", SiteID: uuid.New(), Site: "b.com"})
 	if err != nil {
 		t.Fatalf("Create second: %v", err)
 	}
@@ -94,7 +94,7 @@ func TestArticleRepository_UpdateDraft(t *testing.T) {
 	ctx := context.Background()
 	repo := postgres.NewArticleRepository(testsupport.NewTestDB(t, baseConnStr))
 
-	id, err := repo.Create(ctx, generate.CreateArticle{Keyword: "draft me", SiteID: uuid.New(), Site: "d.com"})
+	id, err := repo.Create(ctx, articles.CreateArticle{Keyword: "draft me", SiteID: uuid.New(), Site: "d.com"})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -109,8 +109,8 @@ func TestArticleRepository_UpdateDraft(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
-	if got.Status != generate.StatusDraft {
-		t.Errorf("Status = %q, want %q", got.Status, generate.StatusDraft)
+	if got.Status != articles.StatusDraft {
+		t.Errorf("Status = %q, want %q", got.Status, articles.StatusDraft)
 	}
 	if got.WPPostID != wpPostID {
 		t.Errorf("WPPostID = %d, want %d", got.WPPostID, wpPostID)
@@ -124,7 +124,7 @@ func TestArticleRepository_MarkPublished(t *testing.T) {
 	ctx := context.Background()
 	repo := postgres.NewArticleRepository(testsupport.NewTestDB(t, baseConnStr))
 
-	id, err := repo.Create(ctx, generate.CreateArticle{Keyword: "publish me", SiteID: uuid.New(), Site: "p.com"})
+	id, err := repo.Create(ctx, articles.CreateArticle{Keyword: "publish me", SiteID: uuid.New(), Site: "p.com"})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -138,8 +138,8 @@ func TestArticleRepository_MarkPublished(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
-	if got.Status != generate.StatusPublished {
-		t.Errorf("Status = %q, want %q", got.Status, generate.StatusPublished)
+	if got.Status != articles.StatusPublished {
+		t.Errorf("Status = %q, want %q", got.Status, articles.StatusPublished)
 	}
 	if got.WPPostURL != postURL {
 		t.Errorf("WPPostURL = %q, want %q", got.WPPostURL, postURL)
@@ -150,7 +150,7 @@ func TestArticleRepository_MarkFailed(t *testing.T) {
 	ctx := context.Background()
 	repo := postgres.NewArticleRepository(testsupport.NewTestDB(t, baseConnStr))
 
-	id, err := repo.Create(ctx, generate.CreateArticle{Keyword: "fail me", SiteID: uuid.New(), Site: "f.com"})
+	id, err := repo.Create(ctx, articles.CreateArticle{Keyword: "fail me", SiteID: uuid.New(), Site: "f.com"})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -163,8 +163,8 @@ func TestArticleRepository_MarkFailed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
-	if got.Status != generate.StatusFailed {
-		t.Errorf("Status = %q, want %q", got.Status, generate.StatusFailed)
+	if got.Status != articles.StatusFailed {
+		t.Errorf("Status = %q, want %q", got.Status, articles.StatusFailed)
 	}
 }
 
@@ -172,15 +172,15 @@ func TestArticleRepository_SaveCompetitorData(t *testing.T) {
 	ctx := context.Background()
 	repo := postgres.NewArticleRepository(testsupport.NewTestDB(t, baseConnStr))
 
-	id, err := repo.Create(ctx, generate.CreateArticle{Keyword: "serp", SiteID: uuid.New(), Site: "s.com"})
+	id, err := repo.Create(ctx, articles.CreateArticle{Keyword: "serp", SiteID: uuid.New(), Site: "s.com"})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
-	data := generate.CompetitorData{
+	data := articles.CompetitorData{
 		Keyword:  "serp",
 		SerpDate: "2026-05-28",
-		Results:  []generate.SERPItem{{Rank: 1, URL: "https://rival.com", Title: "Rival"}},
+		Results:  []articles.SERPItem{{Rank: 1, URL: "https://rival.com", Title: "Rival"}},
 	}
 	if err := repo.SaveCompetitorData(ctx, id, data); err != nil {
 		t.Fatalf("SaveCompetitorData: %v", err)
@@ -194,7 +194,7 @@ func TestArticleRepository_SaveCompetitorData(t *testing.T) {
 		t.Fatalf("CompetitorData empty after save")
 	}
 
-	var roundTrip generate.CompetitorData
+	var roundTrip articles.CompetitorData
 	if err := json.Unmarshal(got.CompetitorData, &roundTrip); err != nil {
 		t.Fatalf("unmarshal CompetitorData: %v", err)
 	}
@@ -207,12 +207,12 @@ func TestArticleRepository_SaveCheckResult(t *testing.T) {
 	ctx := context.Background()
 	repo := postgres.NewArticleRepository(testsupport.NewTestDB(t, baseConnStr))
 
-	id, err := repo.Create(ctx, generate.CreateArticle{Keyword: "check", SiteID: uuid.New(), Site: "c.com"})
+	id, err := repo.Create(ctx, articles.CreateArticle{Keyword: "check", SiteID: uuid.New(), Site: "c.com"})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
-	result := generate.CheckResult{AIScore: 0.12, PlagiarismScore: 0.03, Original: true, Provider: "test"}
+	result := articles.CheckResult{AIScore: 0.12, PlagiarismScore: 0.03, Original: true, Provider: "test"}
 	if err := repo.SaveCheckResult(ctx, id, result); err != nil {
 		t.Fatalf("SaveCheckResult: %v", err)
 	}
@@ -225,7 +225,7 @@ func TestArticleRepository_SaveCheckResult(t *testing.T) {
 		t.Fatalf("CheckResult empty after save")
 	}
 
-	var roundTrip generate.CheckResult
+	var roundTrip articles.CheckResult
 	if err := json.Unmarshal(got.CheckResult, &roundTrip); err != nil {
 		t.Fatalf("unmarshal CheckResult: %v", err)
 	}
@@ -238,7 +238,7 @@ func TestArticleRepository_SaveImageStats(t *testing.T) {
 	ctx := context.Background()
 	repo := postgres.NewArticleRepository(testsupport.NewTestDB(t, baseConnStr))
 
-	id, err := repo.Create(ctx, generate.CreateArticle{Keyword: "images", SiteID: uuid.New(), Site: "i.com"})
+	id, err := repo.Create(ctx, articles.CreateArticle{Keyword: "images", SiteID: uuid.New(), Site: "i.com"})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}

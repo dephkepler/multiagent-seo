@@ -3,11 +3,11 @@ package llm
 import (
 	"log/slog"
 
-	"multiagent-seo/internal/domain/generate"
+	"multiagent-seo/internal/domain/articles"
 	"multiagent-seo/pkg/config"
 )
 
-var _ generate.LLMFactory = (*Factory)(nil)
+var _ articles.LLMFactory = (*Factory)(nil)
 
 // Factory resolves an LLMClient per provider/model, supplying the API key from
 // config (KeyFor handles the groq/claude/anthropic fallback).
@@ -20,6 +20,6 @@ func NewFactory(cfg config.LLMConfig, log *slog.Logger) *Factory {
 	return &Factory{cfg: cfg, log: log}
 }
 
-func (f *Factory) ForModel(provider, model string) (generate.LLMClient, error) {
+func (f *Factory) ForModel(provider, model string) (articles.LLMClient, error) {
 	return New(provider, f.cfg.KeyFor(provider), model, f.log)
 }
