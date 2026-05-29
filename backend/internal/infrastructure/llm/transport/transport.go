@@ -10,6 +10,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"time"
 
 	"multiagent-seo/internal/infrastructure/llm/retry"
@@ -56,9 +57,10 @@ func New(codec Codec, model string, log *slog.Logger) *Client {
 
 // Implements retry.HTTPStatusError; status 0 means transport-level failure.
 type httpError struct {
-	provider string
-	status   int
-	body     string
+	provider   string
+	status     int
+	body       string
+	retryAfter time.Duration
 }
 
 func (e *httpError) Error() string {
@@ -69,6 +71,21 @@ func (e *httpError) Error() string {
 }
 
 func (e *httpError) HTTPStatus() int { return e.status }
+
+func (e *httpError) RetryAfter() (time.Duration, bool) { return e.retryAfter, e.retryAfter > 0 }
+
+// parseRetryAfter reads a Retry-After header. Providers like Groq send it as
+// (possibly fractional) seconds on a 429; an HTTP-date form is ignored.
+func parseRetryAfter(h http.Header) time.Duration {
+	v := h.Get("Retry-After")
+	if v == "" {
+		return 0
+	}
+	if secs, err := strconv.ParseFloat(v, 64); err == nil && secs > 0 {
+		return time.Duration(secs * float64(time.Second))
+	}
+	return 0
+}
 
 // truncateBody caps an error-response snippet at maxErrorBodyBytes.
 func truncateBody(body []byte) string {
@@ -119,7 +136,7 @@ func (c *Client) Complete(ctx context.Context, prompt string, maxTokens int) (st
 		}
 
 		if resp.StatusCode != http.StatusOK {
-			return &httpError{provider: provider, status: resp.StatusCode, body: truncateBody(body)}
+			return &httpError{provider: provider, status: resp.StatusCode, body: truncateBody(body), retryAfter: parseRetryAfter(resp.Header)}
 		}
 
 		parsedContent, parsedUsage, parseErr := c.codec.ParseResponse(body)
