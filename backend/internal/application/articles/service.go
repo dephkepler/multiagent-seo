@@ -15,6 +15,7 @@ import (
 
 	"multiagent-seo/internal/domain/articles"
 	"multiagent-seo/internal/domain/articles/prompt"
+	"multiagent-seo/pkg/jobrunner"
 )
 
 // ErrNoCluster signals the TopicSource returned no keywords for the topic; a
@@ -79,7 +80,7 @@ type Service struct {
 	checker   articles.ContentChecker
 	images    articles.ImageResolver
 	publisher articles.PublisherProvider
-	runner    JobRunner
+	runner    jobrunner.JobRunner
 	defaults  Defaults
 	log       *slog.Logger
 }
@@ -92,7 +93,7 @@ func NewService(
 	checker articles.ContentChecker,
 	images articles.ImageResolver,
 	publisher articles.PublisherProvider,
-	runner JobRunner,
+	runner jobrunner.JobRunner,
 	defaults Defaults,
 	log *slog.Logger,
 ) *Service {

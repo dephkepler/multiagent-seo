@@ -23,6 +23,7 @@ import (
 	"multiagent-seo/internal/oapigen"
 	"multiagent-seo/internal/testsupport"
 	"multiagent-seo/pkg/config"
+	"multiagent-seo/pkg/jobrunner"
 )
 
 // itArtKnownKeyword is a topic the sheets mock knows (see sheets/mock.go), so
@@ -56,7 +57,7 @@ func itArtBuild(t *testing.T) http.Handler {
 	}
 	images := pexels.New("", nil)
 	publisher := wordpress.NewProvider(postgres.NewWordpressSiteRepository(pool, "k"), nil)
-	runner := apparticles.NewSyncRunner()
+	runner := jobrunner.NewSyncRunner()
 
 	svc := apparticles.NewService(
 		articleRepo, itArtFakeFactory{}, serp, topics, check, images, publisher, runner,

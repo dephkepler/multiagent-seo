@@ -8,6 +8,7 @@ import (
 
 	apparticles "multiagent-seo/internal/application/articles"
 	"multiagent-seo/internal/domain/articles"
+	"multiagent-seo/pkg/jobrunner"
 )
 
 type fakeRepo struct {
@@ -97,7 +98,7 @@ func TestGenerate_HappyPath(t *testing.T) {
 	repo := &fakeRepo{arts: map[int64]*articles.Article{}}
 	svc := apparticles.NewService(
 		repo, fakeLLMFactory{}, fakeSERP{}, fakeTopics{}, fakeChecker{}, fakeImages{}, fakePubProvider{},
-		apparticles.NewSyncRunner(),
+		jobrunner.NewSyncRunner(),
 		apparticles.Defaults{MinWords: 500, MaxWords: 1000, Language: "en", Provider: "groq", Model: "m", AIThreshold: 0.8, MaxCycles: 2, SERPLimit: 5},
 		nil,
 	)
@@ -124,7 +125,7 @@ func TestGenerate_NoClusterAborts(t *testing.T) {
 	repo := &fakeRepo{arts: map[int64]*articles.Article{}}
 	svc := apparticles.NewService(
 		repo, fakeLLMFactory{}, fakeSERP{}, emptyTopics{}, fakeChecker{}, fakeImages{}, fakePubProvider{},
-		apparticles.NewSyncRunner(), apparticles.Defaults{Language: "en", Provider: "groq", Model: "m"}, nil,
+		jobrunner.NewSyncRunner(), apparticles.Defaults{Language: "en", Provider: "groq", Model: "m"}, nil,
 	)
 	if _, err := svc.Generate(context.Background(), apparticles.GenerateRequest{Keyword: "unknown", SiteID: uuid.New()}); err == nil {
 		t.Fatal("expected error when no cluster found")

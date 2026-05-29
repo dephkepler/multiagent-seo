@@ -30,6 +30,7 @@ import (
 	"multiagent-seo/internal/infrastructure/sheets"
 	infrawp "multiagent-seo/internal/infrastructure/wordpress"
 	"multiagent-seo/pkg/config"
+	"multiagent-seo/pkg/jobrunner"
 	"multiagent-seo/pkg/logger"
 	"multiagent-seo/pkg/sentry"
 )
@@ -64,7 +65,7 @@ func main() {
 	var wordpressSvc *appwordpress.Service
 	var authSvc *appauth.Service
 	var articlesSvc *apparticles.Service
-	var runner *apparticles.AsyncRunner
+	var runner *jobrunner.AsyncRunner
 
 	pool, err := db.NewPool(ctx, cfg.Database)
 	if err != nil {
@@ -76,7 +77,7 @@ func main() {
 		wordpressSvc = appwordpress.NewService(wordpressRepo)
 		authSvc = appauth.NewService(postgres.NewUserRepository(pool), jwtSvc)
 
-		runner = apparticles.NewAsyncRunner(cfg.Server.BackgroundJobTimeout, slogLog)
+		runner = jobrunner.NewAsyncRunner(cfg.Server.BackgroundJobTimeout, slogLog)
 		articlesSvc = apparticles.NewService(
 			postgres.NewArticleRepository(pool),
 			infrallm.NewFactory(cfg.LLM, slogLog),
