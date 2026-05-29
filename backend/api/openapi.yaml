@@ -19,6 +19,8 @@ tags:
     description: WordPress publishing targets
   - name: Articles
     description: SEO article generation and publishing
+  - name: Link Building
+    description: Donor-website qualification
 
 paths:
   /healthz:
@@ -253,6 +255,29 @@ paths:
         "409":
           $ref: "#/components/responses/Conflict"
 
+  /linkbuilding/qualify:
+    post:
+      operationId: qualifyWebsites
+      security:
+        - bearerAuth: [ ]
+      tags: [ Link Building ]
+      summary: Qualify donor websites listed in a sheet
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/QualifyRequest"
+      responses:
+        "202":
+          description: Qualification accepted; results are written back to the sheet
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QualifyAccepted"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
 components:
   securitySchemes:
     bearerAuth:
@@ -287,6 +312,34 @@ components:
             $ref: "#/components/schemas/ErrorResponse"
 
   schemas:
+    QualifyRequest:
+      type: object
+      required: [ sheet, accepted_topics ]
+      properties:
+        sheet:
+          type: string
+          x-oapi-codegen-extra-tags:
+            validate: "required,min=1"
+        accepted_topics:
+          type: array
+          items:
+            type: string
+          x-oapi-codegen-extra-tags:
+            validate: "required,min=1"
+        candidate_topics:
+          type: array
+          items:
+            type: string
+
+    QualifyAccepted:
+      type: object
+      required: [ sheet, websites_queued ]
+      properties:
+        sheet:
+          type: string
+        websites_queued:
+          type: integer
+
     GenerateRequest:
       type: object
       required: [ keyword, site_id ]

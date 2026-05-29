@@ -56,6 +56,7 @@ func itAuthServer(t *testing.T, pool *pgxpool.Pool) *httptest.Server {
 		handlers.NewWordpressSitesHandler(nil),
 		handlers.NewLoginHandler(authSvc),
 		handlers.NewArticlesHandler(nil),
+		handlers.NewLinkbuildingHandler(nil),
 	)
 	router := apihttp.NewRouter(config.ServerConfig{
 		BasePath:           "/",

@@ -36,6 +36,7 @@ func itWPServer(t *testing.T, pool *pgxpool.Pool) *httptest.Server {
 		handlers.NewWordpressSitesHandler(svc),
 		handlers.NewLoginHandler(nil),
 		handlers.NewArticlesHandler(nil),
+		handlers.NewLinkbuildingHandler(nil),
 	)
 	router := apihttp.NewRouter(config.ServerConfig{
 		BasePath:           "/",

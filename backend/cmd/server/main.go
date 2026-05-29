@@ -14,6 +14,7 @@ import (
 	apparticles "multiagent-seo/internal/application/articles"
 	appauth "multiagent-seo/internal/application/auth"
 	apphealth "multiagent-seo/internal/application/health"
+	applinkbuilding "multiagent-seo/internal/application/linkbuilding"
 	appwordpress "multiagent-seo/internal/application/wordpress"
 	domainarticles "multiagent-seo/internal/domain/articles"
 	domainhealth "multiagent-seo/internal/domain/health"
@@ -28,6 +29,8 @@ import (
 	"multiagent-seo/internal/infrastructure/persistence/postgres"
 	"multiagent-seo/internal/infrastructure/pexels"
 	"multiagent-seo/internal/infrastructure/sheets"
+	"multiagent-seo/internal/infrastructure/topicclassifier"
+	"multiagent-seo/internal/infrastructure/webfetch"
 	infrawp "multiagent-seo/internal/infrastructure/wordpress"
 	"multiagent-seo/pkg/config"
 	"multiagent-seo/pkg/jobrunner"
@@ -92,12 +95,16 @@ func main() {
 		)
 	}
 
+	// Link-building is Sheets-only (no DB), so it's built independently of the pool.
+	linkbuildingSvc, lbRunner := buildLinkbuilding(ctx, cfg, slogLog)
+
 	healthSvc := apphealth.NewService(domainhealth.NewService(healthRepo))
 	server := handlers.NewServer(
 		handlers.NewHealthHandler(healthSvc),
 		handlers.NewWordpressSitesHandler(nilableWordpressService(wordpressSvc)),
 		handlers.NewLoginHandler(nilableAuthService(authSvc)),
 		nilableArticlesHandler(articlesSvc),
+		nilableLinkbuildingHandler(linkbuildingSvc),
 	)
 	router := apihttp.NewRouter(cfg.Server, server, httpMiddleware.BearerAuth(jwtSvc))
 
@@ -127,9 +134,12 @@ func main() {
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Error().Err(err).Msg("graceful shutdown failed")
 	}
-	if runner != nil {
-		if err := runner.Wait(shutdownCtx); err != nil {
-			log.Warn().Err(err).Msg("background jobs did not drain before timeout")
+	for name, rn := range map[string]*jobrunner.AsyncRunner{"articles": runner, "linkbuilding": lbRunner} {
+		if rn == nil {
+			continue
+		}
+		if err := rn.Wait(shutdownCtx); err != nil {
+			log.Warn().Str("runner", name).Err(err).Msg("background jobs did not drain before timeout")
 		}
 	}
 }
@@ -204,4 +214,45 @@ func nilableArticlesHandler(svc *apparticles.Service) *handlers.ArticlesHandler 
 		return handlers.NewArticlesHandler(nil)
 	}
 	return handlers.NewArticlesHandler(svc)
+}
+
+func nilableLinkbuildingHandler(svc *applinkbuilding.Service) *handlers.LinkbuildingHandler {
+	if svc == nil {
+		return handlers.NewLinkbuildingHandler(nil)
+	}
+	return handlers.NewLinkbuildingHandler(svc)
+}
+
+// buildLinkbuilding wires the Sheets-only link-building feature. It returns nil
+// when its prerequisites (a writable Sheets website-source, an LLM for the topic
+// classifier) are absent, so the endpoint reports 503 instead of failing boot.
+func buildLinkbuilding(ctx context.Context, cfg config.Config, log *slog.Logger) (*applinkbuilding.Service, *jobrunner.AsyncRunner) {
+	src, err := sheets.NewWebsiteSource(ctx, cfg.Sheets.CredentialsFile, cfg.Sheets.SpreadsheetID, log)
+	if err != nil {
+		log.Warn("link-building disabled: website source unavailable", "err", err)
+		return nil, nil
+	}
+	client, err := infrallm.NewFactory(cfg.LLM, log).ForModel(cfg.LLM.Provider, cfg.LLM.Model)
+	if err != nil {
+		log.Warn("link-building disabled: llm classifier unavailable", "err", err)
+		return nil, nil
+	}
+	runner := jobrunner.NewAsyncRunner(cfg.Server.BackgroundJobTimeout, log)
+	svc := applinkbuilding.NewService(
+		src,
+		webfetch.New(log),
+		topicclassifier.New(classifierLLM{client}, log),
+		runner,
+		log,
+	)
+	return svc, runner
+}
+
+// classifierLLM adapts the articles LLM client (whose Complete also returns token
+// usage) to the topic classifier's minimal LLM interface.
+type classifierLLM struct{ c domainarticles.LLMClient }
+
+func (a classifierLLM) Complete(ctx context.Context, prompt string, maxTokens int) (string, error) {
+	out, _, err := a.c.Complete(ctx, prompt, maxTokens)
+	return out, err
 }
