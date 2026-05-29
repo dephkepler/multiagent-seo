@@ -23,6 +23,11 @@ func NewService(users user.Repository, issuer auth.TokenIssuer) *Service {
 	return &Service{users: users, issuer: issuer}
 }
 
+// ListUsers returns all users for the admin list endpoint.
+func (s *Service) ListUsers(ctx context.Context) ([]user.User, error) {
+	return s.users.List(ctx)
+}
+
 func (s *Service) Login(ctx context.Context, email, password string) (string, time.Time, error) {
 	u, err := s.users.FindByEmail(ctx, email)
 	if err != nil {

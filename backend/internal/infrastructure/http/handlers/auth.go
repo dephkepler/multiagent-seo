@@ -9,6 +9,7 @@ import (
 	"time"
 
 	appauth "multiagent-seo/internal/application/auth"
+	"multiagent-seo/internal/domain/user"
 	"multiagent-seo/internal/infrastructure/http/problem"
 	"multiagent-seo/internal/infrastructure/http/response"
 	"multiagent-seo/internal/oapigen"
@@ -18,6 +19,7 @@ import (
 
 type AuthService interface {
 	Login(ctx context.Context, email, password string) (string, time.Time, error)
+	ListUsers(ctx context.Context) ([]user.User, error)
 }
 
 type LoginHandler struct {
@@ -58,4 +60,23 @@ func (h *LoginHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	response.WriteJSON(r.Context(), w, http.StatusOK, oapigen.LoginResponse{Token: token, ExpiresAt: expiresAt})
+}
+
+func (h *LoginHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
+	if h.auth == nil {
+		problem.Write(w, http.StatusServiceUnavailable, "database unavailable")
+		return
+	}
+	users, err := h.auth.ListUsers(r.Context())
+	if err != nil {
+		log := logger.New(r.Context(), "handlers.auth")
+		log.Error().Err(err).Msg("list users")
+		problem.Write(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	out := make([]oapigen.User, len(users))
+	for i, u := range users {
+		out[i] = oapigen.User{Id: u.ID, Email: u.Email, CreatedAt: u.CreatedAt}
+	}
+	response.WriteJSON(r.Context(), w, http.StatusOK, out)
 }

@@ -38,6 +38,25 @@ func (r *UserRepository) FindByEmail(ctx context.Context, email string) (user.Us
 	return u, nil
 }
 
+func (r *UserRepository) List(ctx context.Context) ([]user.User, error) {
+	const q = `SELECT id, email, password_hash, created_at, updated_at FROM users ORDER BY created_at`
+	rows, err := r.db.Query(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("list users: %w", err)
+	}
+	defer rows.Close()
+
+	var out []user.User
+	for rows.Next() {
+		u, err := scanUser(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan user: %w", err)
+		}
+		out = append(out, u)
+	}
+	return out, rows.Err()
+}
+
 func scanUser(row pgx.Row) (user.User, error) {
 	var u user.User
 	err := row.Scan(&u.ID, &u.Email, &u.PasswordHash, &u.CreatedAt, &u.UpdatedAt)

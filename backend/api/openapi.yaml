@@ -65,6 +65,23 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
 
+  /users:
+    get:
+      operationId: listUsers
+      security:
+        - bearerAuth: [ ]
+      tags: [ Auth ]
+      summary: List users
+      responses:
+        "200":
+          description: All users
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/User"
+
   /wordpress-sites:
     get:
       operationId: listWordpressSites
@@ -483,6 +500,18 @@ components:
           type: string
           format: date-time
 
+    User:
+      type: object
+      required: [ id, email, createdAt ]
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
 
     HealthResponse:
       type: object

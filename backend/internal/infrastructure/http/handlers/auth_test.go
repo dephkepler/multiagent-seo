@@ -33,6 +33,14 @@ func (r fakeUserRepo) FindByEmail(_ context.Context, email string) (domainuser.U
 	return u, nil
 }
 
+func (r fakeUserRepo) List(context.Context) ([]domainuser.User, error) {
+	out := make([]domainuser.User, 0, len(r.users))
+	for _, u := range r.users {
+		out = append(out, u)
+	}
+	return out, nil
+}
+
 func newAuthRouter(t *testing.T) http.Handler {
 	t.Helper()
 	hash, err := bcrypt.GenerateFromPassword([]byte("correct-horse"), bcrypt.MinCost)
