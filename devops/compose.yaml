@@ -49,6 +49,7 @@ services:
       CF_CHECKER_API_KEY: ${CF_CHECKER_API_KEY:-}
       CF_CHECKER_MODEL: ${CF_CHECKER_MODEL:-}
       CF_PEXELS_API_KEY: ${CF_PEXELS_API_KEY:-}
+      CF_JWT_TTL: ${CF_JWT_TTL:-24h}
     volumes:
       # Google service-account creds for the Sheets adapters (read-only mount).
       - ../backend/credentials.json:/app/credentials.json:ro
