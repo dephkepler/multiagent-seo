@@ -1,5 +1,5 @@
-// Package generate is the application-layer use-case orchestrating the article
-// generation pipeline over the generate domain ports. It owns no infrastructure:
+// Package articles is the application-layer use-case orchestrating the article
+// generation pipeline over the articles domain ports. It owns no infrastructure:
 // every dependency is a domain port injected via the constructor, and request
 // defaults arrive as a config-agnostic Defaults struct.
 package articles
@@ -374,6 +374,12 @@ func (s *Service) checkAndHumanize(ctx context.Context, log *slog.Logger, articl
 	threshold := sp.aiThreshold
 	if threshold == 0 {
 		threshold = s.defaults.AIThreshold
+	}
+	if threshold <= 0 {
+		// A zero threshold makes the AIScore<threshold check always false, so the
+		// loop would humanize to maxCycles and publish as-is. Fall back to the
+		// conventional 0.8 when config left it unset.
+		threshold = 0.8
 	}
 
 	var last *articles.CheckResult

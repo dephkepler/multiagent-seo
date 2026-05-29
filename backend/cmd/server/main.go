@@ -63,7 +63,7 @@ func main() {
 	var healthRepo domainhealth.Repository
 	var wordpressSvc *appwordpress.Service
 	var authSvc *appauth.Service
-	var generateSvc *apparticles.Service
+	var articlesSvc *apparticles.Service
 	var runner *apparticles.AsyncRunner
 
 	pool, err := db.NewPool(ctx, cfg.Database)
@@ -77,7 +77,7 @@ func main() {
 		authSvc = appauth.NewService(postgres.NewUserRepository(pool), jwtSvc)
 
 		runner = apparticles.NewAsyncRunner(cfg.Server.BackgroundJobTimeout, slogLog)
-		generateSvc = apparticles.NewService(
+		articlesSvc = apparticles.NewService(
 			postgres.NewArticleRepository(pool),
 			infrallm.NewFactory(cfg.LLM, slogLog),
 			newSERP(cfg, slogLog),
@@ -86,7 +86,7 @@ func main() {
 			pexels.New(cfg.Pexels.APIKey, slogLog),
 			infrawp.NewProvider(wordpressRepo, slogLog),
 			runner,
-			generateDefaults(cfg),
+			articleDefaults(cfg),
 			slogLog,
 		)
 	}
@@ -96,7 +96,7 @@ func main() {
 		handlers.NewHealthHandler(healthSvc),
 		handlers.NewWordpressSitesHandler(nilableWordpressService(wordpressSvc)),
 		handlers.NewLoginHandler(nilableAuthService(authSvc)),
-		nilableArticlesHandler(generateSvc),
+		nilableArticlesHandler(articlesSvc),
 	)
 	router := apihttp.NewRouter(cfg.Server, server, httpMiddleware.BearerAuth(jwtSvc))
 
@@ -133,7 +133,7 @@ func main() {
 	}
 }
 
-func generateDefaults(cfg config.Config) apparticles.Defaults {
+func articleDefaults(cfg config.Config) apparticles.Defaults {
 	return apparticles.Defaults{
 		MinWords:      cfg.Article.MinWords,
 		MaxWords:      cfg.Article.MaxWords,
