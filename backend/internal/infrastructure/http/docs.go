@@ -69,6 +69,8 @@ const swaggerUIHTML = `<!DOCTYPE html>
       dom_id: "#swagger-ui",
       deepLinking: true,
       tryItOutEnabled: true,
+      // Keep the Authorize token in localStorage so a page reload doesn't drop it.
+      persistAuthorization: true,
     });
   </script>
 </body>
