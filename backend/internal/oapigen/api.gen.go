@@ -44,6 +44,23 @@ func (e HealthResponseStatus) Valid() bool {
 	}
 }
 
+// ApiToken defines model for ApiToken.
+type ApiToken struct {
+	CreatedAt time.Time          `json:"createdAt"`
+	Id        openapi_types.UUID `json:"id"`
+	Name      string             `json:"name"`
+	Prefix    string             `json:"prefix"`
+}
+
+// ApiTokenCreated defines model for ApiTokenCreated.
+type ApiTokenCreated struct {
+	CreatedAt time.Time          `json:"createdAt"`
+	Id        openapi_types.UUID `json:"id"`
+	Name      string             `json:"name"`
+	Prefix    string             `json:"prefix"`
+	Token     string             `json:"token"`
+}
+
 // Article defines model for Article.
 type Article struct {
 	CheckResult     *json.RawMessage    `json:"check_result,omitempty"`
@@ -61,6 +78,11 @@ type Article struct {
 	WpEditUrl       *string             `json:"wp_edit_url,omitempty"`
 	WpPostId        *int64              `json:"wp_post_id,omitempty"`
 	WpPostUrl       *string             `json:"wp_post_url,omitempty"`
+}
+
+// CreateApiTokenRequest defines model for CreateApiTokenRequest.
+type CreateApiTokenRequest struct {
+	Name string `json:"name" validate:"required,min=1,max=100"`
 }
 
 // CreateWordpressSiteRequest defines model for CreateWordpressSiteRequest.
@@ -190,6 +212,9 @@ type Unauthorized = ErrorResponse
 // bearerAuthContextKey is the context key for bearerAuth security scheme
 type bearerAuthContextKey string
 
+// CreateApiTokenJSONRequestBody defines body for CreateApiToken for application/json ContentType.
+type CreateApiTokenJSONRequestBody = CreateApiTokenRequest
+
 // LoginJSONRequestBody defines body for Login for application/json ContentType.
 type LoginJSONRequestBody = LoginRequest
 
@@ -207,6 +232,15 @@ type UpdateWordpressSiteJSONRequestBody = UpdateWordpressSiteRequest
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
+	// List your API tokens (metadata only)
+	// (GET /api-tokens)
+	ListApiTokens(w http.ResponseWriter, r *http.Request)
+	// Create an API token (the secret is returned only once)
+	// (POST /api-tokens)
+	CreateApiToken(w http.ResponseWriter, r *http.Request)
+	// Revoke an API token
+	// (DELETE /api-tokens/{id})
+	DeleteApiToken(w http.ResponseWriter, r *http.Request, id openapi_types.UUID)
 	// List articles
 	// (GET /articles)
 	ListArticles(w http.ResponseWriter, r *http.Request)
@@ -251,6 +285,24 @@ type ServerInterface interface {
 // Unimplemented server implementation that returns http.StatusNotImplemented for each endpoint.
 
 type Unimplemented struct{}
+
+// List your API tokens (metadata only)
+// (GET /api-tokens)
+func (_ Unimplemented) ListApiTokens(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Create an API token (the secret is returned only once)
+// (POST /api-tokens)
+func (_ Unimplemented) CreateApiToken(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Revoke an API token
+// (DELETE /api-tokens/{id})
+func (_ Unimplemented) DeleteApiToken(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
 
 // List articles
 // (GET /articles)
@@ -338,6 +390,78 @@ type ServerInterfaceWrapper struct {
 }
 
 type MiddlewareFunc func(http.Handler) http.Handler
+
+// ListApiTokens operation middleware
+func (siw *ServerInterfaceWrapper) ListApiTokens(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListApiTokens(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateApiToken operation middleware
+func (siw *ServerInterfaceWrapper) CreateApiToken(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateApiToken(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteApiToken operation middleware
+func (siw *ServerInterfaceWrapper) DeleteApiToken(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid"})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteApiToken(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
 
 // ListArticles operation middleware
 func (siw *ServerInterfaceWrapper) ListArticles(w http.ResponseWriter, r *http.Request) {
@@ -761,6 +885,15 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	}
 
 	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api-tokens", wrapper.ListApiTokens)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api-tokens", wrapper.CreateApiToken)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/api-tokens/{id}", wrapper.DeleteApiToken)
+	})
+	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/articles", wrapper.ListArticles)
 	})
 	r.Group(func(r chi.Router) {
@@ -810,6 +943,97 @@ type ConflictApplicationProblemPlusJSONResponse ErrorResponse
 type NotFoundApplicationProblemPlusJSONResponse ErrorResponse
 
 type UnauthorizedApplicationProblemPlusJSONResponse ErrorResponse
+
+type ListApiTokensRequestObject struct {
+}
+
+type ListApiTokensResponseObject interface {
+	VisitListApiTokensResponse(w http.ResponseWriter) error
+}
+
+type ListApiTokens200JSONResponse []ApiToken
+
+func (response ListApiTokens200JSONResponse) VisitListApiTokensResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateApiTokenRequestObject struct {
+	Body *CreateApiTokenJSONRequestBody
+}
+
+type CreateApiTokenResponseObject interface {
+	VisitCreateApiTokenResponse(w http.ResponseWriter) error
+}
+
+type CreateApiToken201JSONResponse ApiTokenCreated
+
+func (response CreateApiToken201JSONResponse) VisitCreateApiTokenResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateApiToken400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response CreateApiToken400ApplicationProblemPlusJSONResponse) VisitCreateApiTokenResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteApiTokenRequestObject struct {
+	Id openapi_types.UUID `json:"id"`
+}
+
+type DeleteApiTokenResponseObject interface {
+	VisitDeleteApiTokenResponse(w http.ResponseWriter) error
+}
+
+type DeleteApiToken204Response struct {
+}
+
+func (response DeleteApiToken204Response) VisitDeleteApiTokenResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeleteApiToken404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response DeleteApiToken404ApplicationProblemPlusJSONResponse) VisitDeleteApiTokenResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
 
 type ListArticlesRequestObject struct {
 }
@@ -1328,6 +1552,15 @@ func (response UpdateWordpressSite404ApplicationProblemPlusJSONResponse) VisitUp
 
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
+	// List your API tokens (metadata only)
+	// (GET /api-tokens)
+	ListApiTokens(ctx context.Context, request ListApiTokensRequestObject) (ListApiTokensResponseObject, error)
+	// Create an API token (the secret is returned only once)
+	// (POST /api-tokens)
+	CreateApiToken(ctx context.Context, request CreateApiTokenRequestObject) (CreateApiTokenResponseObject, error)
+	// Revoke an API token
+	// (DELETE /api-tokens/{id})
+	DeleteApiToken(ctx context.Context, request DeleteApiTokenRequestObject) (DeleteApiTokenResponseObject, error)
 	// List articles
 	// (GET /articles)
 	ListArticles(ctx context.Context, request ListArticlesRequestObject) (ListArticlesResponseObject, error)
@@ -1396,6 +1629,87 @@ type strictHandler struct {
 	ssi         StrictServerInterface
 	middlewares []StrictMiddlewareFunc
 	options     StrictHTTPServerOptions
+}
+
+// ListApiTokens operation middleware
+func (sh *strictHandler) ListApiTokens(w http.ResponseWriter, r *http.Request) {
+	var request ListApiTokensRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListApiTokens(ctx, request.(ListApiTokensRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListApiTokens")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListApiTokensResponseObject); ok {
+		if err := validResponse.VisitListApiTokensResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateApiToken operation middleware
+func (sh *strictHandler) CreateApiToken(w http.ResponseWriter, r *http.Request) {
+	var request CreateApiTokenRequestObject
+
+	var body CreateApiTokenJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateApiToken(ctx, request.(CreateApiTokenRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateApiToken")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateApiTokenResponseObject); ok {
+		if err := validResponse.VisitCreateApiTokenResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteApiToken operation middleware
+func (sh *strictHandler) DeleteApiToken(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
+	var request DeleteApiTokenRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteApiToken(ctx, request.(DeleteApiTokenRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteApiToken")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteApiTokenResponseObject); ok {
+		if err := validResponse.VisitDeleteApiTokenResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
 }
 
 // ListArticles operation middleware
@@ -1760,42 +2074,47 @@ func (sh *strictHandler) UpdateWordpressSite(w http.ResponseWriter, r *http.Requ
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"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",
+	"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",
+	"AAD//w==",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

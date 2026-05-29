@@ -11,12 +11,14 @@ import (
 
 	"github.com/rs/zerolog/log"
 
+	appapitoken "multiagent-seo/internal/application/apitoken"
 	apparticles "multiagent-seo/internal/application/articles"
 	appauth "multiagent-seo/internal/application/auth"
 	apphealth "multiagent-seo/internal/application/health"
 	applinkbuilding "multiagent-seo/internal/application/linkbuilding"
 	appwordpress "multiagent-seo/internal/application/wordpress"
 	domainarticles "multiagent-seo/internal/domain/articles"
+	domainauth "multiagent-seo/internal/domain/auth"
 	domainhealth "multiagent-seo/internal/domain/health"
 	"multiagent-seo/internal/infrastructure/checker"
 	"multiagent-seo/internal/infrastructure/dataforseo"
@@ -68,6 +70,7 @@ func main() {
 	var wordpressSvc *appwordpress.Service
 	var authSvc *appauth.Service
 	var articlesSvc *apparticles.Service
+	var apiTokenSvc *appapitoken.Service
 	var runner *jobrunner.AsyncRunner
 
 	pool, err := db.NewPool(ctx, cfg.Database)
@@ -79,6 +82,7 @@ func main() {
 		wordpressRepo := postgres.NewWordpressSiteRepository(pool, cfg.WordPress.EncryptionKey)
 		wordpressSvc = appwordpress.NewService(wordpressRepo)
 		authSvc = appauth.NewService(postgres.NewUserRepository(pool), jwtSvc)
+		apiTokenSvc = appapitoken.NewService(postgres.NewApiTokenRepository(pool))
 
 		runner = jobrunner.NewAsyncRunner(cfg.Server.BackgroundJobTimeout, slogLog)
 		articlesSvc = apparticles.NewService(
@@ -105,8 +109,15 @@ func main() {
 		handlers.NewLoginHandler(nilableAuthService(authSvc)),
 		nilableArticlesHandler(articlesSvc),
 		nilableLinkbuildingHandler(linkbuildingSvc),
+		nilableApiTokensHandler(apiTokenSvc),
 	)
-	router := apihttp.NewRouter(cfg.Server, server, httpMiddleware.BearerAuth(jwtSvc))
+
+	// API keys authenticate alongside JWTs once the DB (their store) is up.
+	var verifier domainauth.TokenVerifier = jwtSvc
+	if apiTokenSvc != nil {
+		verifier = compositeVerifier{jwt: jwtSvc, keys: apiTokenSvc}
+	}
+	router := apihttp.NewRouter(cfg.Server, server, httpMiddleware.BearerAuth(verifier))
 
 	srv := &http.Server{
 		Addr:         net.JoinHostPort(cfg.Server.Host, cfg.Server.Port),
@@ -255,4 +266,29 @@ type classifierLLM struct{ c domainarticles.LLMClient }
 func (a classifierLLM) Complete(ctx context.Context, prompt string, maxTokens int) (string, error) {
 	out, _, err := a.c.Complete(ctx, prompt, maxTokens)
 	return out, err
+}
+
+func nilableApiTokensHandler(svc *appapitoken.Service) *handlers.ApiTokensHandler {
+	if svc == nil {
+		return handlers.NewApiTokensHandler(nil)
+	}
+	return handlers.NewApiTokensHandler(svc)
+}
+
+// compositeVerifier authenticates a bearer value as either one of our API keys
+// (recognised by prefix) or a JWT.
+type compositeVerifier struct {
+	jwt  domainauth.TokenVerifier
+	keys *appapitoken.Service
+}
+
+func (c compositeVerifier) Verify(ctx context.Context, token string) (string, error) {
+	if appapitoken.HasKeyPrefix(token) {
+		uid, err := c.keys.Authenticate(ctx, token)
+		if err != nil {
+			return "", err
+		}
+		return uid.String(), nil
+	}
+	return c.jwt.Verify(ctx, token)
 }

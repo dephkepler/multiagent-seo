@@ -21,6 +21,8 @@ tags:
     description: SEO article generation and publishing
   - name: Link Building
     description: Donor-website qualification
+  - name: API Tokens
+    description: Long-lived per-user API keys
 
 paths:
   /healthz:
@@ -81,6 +83,64 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/User"
+
+  /api-tokens:
+    post:
+      operationId: createApiToken
+      security:
+        - bearerAuth: [ ]
+      tags: [ API Tokens ]
+      summary: Create an API token (the secret is returned only once)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateApiTokenRequest"
+      responses:
+        "201":
+          description: Created — save the token now, it can't be retrieved later
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiTokenCreated"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+    get:
+      operationId: listApiTokens
+      security:
+        - bearerAuth: [ ]
+      tags: [ API Tokens ]
+      summary: List your API tokens (metadata only)
+      responses:
+        "200":
+          description: Your active tokens
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ApiToken"
+
+  /api-tokens/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    delete:
+      operationId: deleteApiToken
+      security:
+        - bearerAuth: [ ]
+      tags: [ API Tokens ]
+      summary: Revoke an API token
+      responses:
+        "204":
+          description: Revoked
+        "404":
+          $ref: "#/components/responses/NotFound"
 
   /wordpress-sites:
     get:
@@ -508,6 +568,47 @@ components:
           type: string
           format: uuid
         email:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    CreateApiTokenRequest:
+      type: object
+      required: [ name ]
+      properties:
+        name:
+          type: string
+          x-oapi-codegen-extra-tags:
+            validate: "required,min=1,max=100"
+
+    ApiToken:
+      type: object
+      required: [ id, name, prefix, createdAt ]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        prefix:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    ApiTokenCreated:
+      type: object
+      required: [ id, name, prefix, token, createdAt ]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        prefix:
+          type: string
+        token:
           type: string
         createdAt:
           type: string
