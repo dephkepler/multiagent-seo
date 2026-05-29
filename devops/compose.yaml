@@ -44,10 +44,14 @@ services:
       CF_DATAFORSEO_LOGIN: ${CF_DATAFORSEO_LOGIN:-}
       CF_DATAFORSEO_PASSWORD: ${CF_DATAFORSEO_PASSWORD:-}
       CF_SHEETS_SPREADSHEET_ID: ${CF_SHEETS_SPREADSHEET_ID:-}
+      CF_SHEETS_CREDENTIALS_FILE: /app/credentials.json
       CF_CHECKER_PROVIDER: ${CF_CHECKER_PROVIDER:-mock}
       CF_CHECKER_API_KEY: ${CF_CHECKER_API_KEY:-}
       CF_CHECKER_MODEL: ${CF_CHECKER_MODEL:-}
       CF_PEXELS_API_KEY: ${CF_PEXELS_API_KEY:-}
+    volumes:
+      # Google service-account creds for the Sheets adapters (read-only mount).
+      - ../backend/credentials.json:/app/credentials.json:ro
     depends_on:
       postgres:
         condition: service_healthy
