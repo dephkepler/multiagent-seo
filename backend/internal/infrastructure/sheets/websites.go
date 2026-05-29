@@ -64,14 +64,14 @@ func (s *websiteSource) List(ctx context.Context, sheet string) ([]linkbuilding.
 
 	var out []linkbuilding.Website
 	for i, row := range resp.Values {
-		if i == 0 {
-			continue
-		}
 		if len(row) == 0 {
 			continue
 		}
 		url := strings.TrimSpace(fmt.Sprint(row[0]))
-		if url == "" {
+		// Only rows whose first cell is a URL count — this skips blanks and a
+		// header row like "URL"/"Website" without assuming row 1 is a header
+		// (the donor list often starts at row 1 with no header).
+		if !strings.HasPrefix(strings.ToLower(url), "http") {
 			continue
 		}
 		out = append(out, linkbuilding.Website{
