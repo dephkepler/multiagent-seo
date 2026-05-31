@@ -1,0 +1,198 @@
+// Package wplogin is an infrastructure adapter that logs into a WordPress site
+// by POSTing credentials to wp-login.php, implementing the domain
+// linkbuilding.SiteAuthenticator port. A login is treated as successful only
+// when WordPress sets the wordpress_logged_in_* auth cookie.
+package wplogin
+
+import (
+	"bytes"
+	"context"
+	"crypto/tls"
+	"fmt"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/http/cookiejar"
+	"net/url"
+	"strconv"
+	"strings"
+	"time"
+
+	"multiagent-seo/internal/domain/linkbuilding"
+)
+
+const userAgent = "Mozilla/5.0 (compatible; multiagent-seo-bot/1.0)"
+
+type Authenticator struct {
+	timeout   time.Duration
+	log       *slog.Logger
+	transport *http.Transport
+}
+
+func New(log *slog.Logger) *Authenticator {
+	if log == nil {
+		log = slog.Default()
+	}
+	return &Authenticator{
+		timeout: 20 * time.Second,
+		log:     log,
+		// Sites in the network often run self-signed or incomplete-chain certs;
+		// we own them and only need to log in, so don't let TLS verification
+		// turn a reachable site into a false "unreachable".
+		transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // G402: own-network login tool
+		},
+	}
+}
+
+func (a *Authenticator) Login(ctx context.Context, cred linkbuilding.SiteCredential) (linkbuilding.LoginResult, error) {
+	res := linkbuilding.LoginResult{Row: cred.Row, BaseURL: cred.BaseURL}
+
+	base := strings.TrimRight(strings.TrimSpace(cred.BaseURL), "/")
+	u, err := url.Parse(base)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		res.Status = "invalid site URL"
+		return res, nil
+	}
+	origin, err := url.Parse(u.Scheme + "://" + u.Host)
+	if err != nil {
+		res.Status = "invalid site URL"
+		return res, nil
+	}
+
+	// If the credential carries a path (a custom slug or …/something.php) it's a
+	// renamed/hidden login — use it as-is; a bare site URL gets the standard
+	// wp-login.php under its origin.
+	loginURL := origin.String() + "/wp-login.php"
+	if strings.Trim(u.Path, "/") != "" {
+		loginURL = base
+	}
+	adminURL := origin.String() + "/wp-admin/"
+
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		return res, fmt.Errorf("wplogin cookiejar: %w", err)
+	}
+	// WordPress rejects the login unless it sees its own cookie-check cookie.
+	jar.SetCookies(origin, []*http.Cookie{{Name: "wordpress_test_cookie", Value: "WP Cookie check"}})
+	client := &http.Client{Jar: jar, Timeout: a.timeout, Transport: a.transport}
+
+	// GET the form first: it seeds cookies/nonces and lets us spot a captcha
+	// before posting — a math captcha we can solve, a real one we can't.
+	form, status, err := a.fetchLoginForm(ctx, client, loginURL)
+	if err != nil {
+		if ctx.Err() != nil {
+			return res, ctx.Err()
+		}
+		a.log.WarnContext(ctx, "wplogin unreachable", "url", base, "err", err)
+		res.Status = "unreachable"
+		return res, nil
+	}
+	if status == http.StatusNotFound {
+		res.Status = "wp-login.php not found (404)"
+		a.log.WarnContext(ctx, "login failed", "url", base, "reason", "wp-login.php returns 404 — hidden/renamed login path or not WordPress; put the full login URL in the sheet")
+		return res, nil
+	}
+	if form.recaptcha {
+		res.Status = "captcha (manual: recaptcha)"
+		a.log.WarnContext(ctx, "captcha not bypassed", "url", base, "reason", "reCAPTCHA/hCaptcha needs a browser")
+		return res, nil
+	}
+
+	// An extra, unrecognized input in the login form is a challenge we couldn't
+	// solve (e.g. a worded riddle or unsupported math) — flag it if login fails.
+	unsolvedChallenge := !form.hasMath && form.answerField != ""
+	if unsolvedChallenge {
+		a.log.WarnContext(ctx, "captcha not bypassed", "url", base, "reason", "unrecognized challenge field", "field", form.answerField)
+	}
+
+	values := url.Values{}
+	for k, v := range form.hidden {
+		values.Set(k, v)
+	}
+	values.Set("log", cred.Login)
+	values.Set("pwd", cred.Password)
+	values.Set("wp-submit", "Log In")
+	values.Set("redirect_to", adminURL)
+	values.Set("testcookie", "1")
+	if form.hasMath && form.answerField != "" {
+		values.Set(form.answerField, strconv.Itoa(form.mathAnswer))
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, loginURL, strings.NewReader(values.Encode()))
+	if err != nil {
+		res.Status = "invalid login request"
+		return res, nil
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("User-Agent", userAgent)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		// A cancelled/expired job context aborts the whole run; an ordinary
+		// network failure is just this site's verdict, not a reason to stop.
+		if ctx.Err() != nil {
+			return res, ctx.Err()
+		}
+		a.log.WarnContext(ctx, "wplogin unreachable", "url", base, "err", err)
+		res.Status = "unreachable"
+		return res, nil
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+
+	switch {
+	case hasLoggedInCookie(jar, origin):
+		res.OK = true
+		if form.hasMath {
+			res.Status = "login ok (captcha solved)"
+			a.log.InfoContext(ctx, "captcha solved", "url", base, "answer", form.mathAnswer)
+		} else {
+			res.Status = "login ok"
+		}
+	case resp.StatusCode == http.StatusNotFound:
+		res.Status = "wp-login.php not found (404)"
+		a.log.WarnContext(ctx, "login failed", "url", base, "reason", "wp-login.php returns 404 — hidden/renamed login path or not WordPress")
+	case form.hasMath:
+		res.Status = "login failed (captcha)"
+		a.log.WarnContext(ctx, "login failed", "url", base, "reason", "math captcha answer rejected or bad credentials")
+	case unsolvedChallenge:
+		res.Status = "captcha (unsolved)"
+		a.log.WarnContext(ctx, "login failed", "url", base, "reason", "unsolved challenge field "+form.answerField)
+	default:
+		// Surface WordPress's own error text so the log says why it failed.
+		res.Status = "login failed"
+		reason := loginError(bytes.NewReader(body))
+		if reason == "" {
+			reason = "credentials rejected (no error message returned)"
+		}
+		a.log.WarnContext(ctx, "login failed", "url", base, "reason", reason)
+	}
+	return res, nil
+}
+
+func (a *Authenticator) fetchLoginForm(ctx context.Context, client *http.Client, loginURL string) (loginForm, int, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, loginURL, nil)
+	if err != nil {
+		return loginForm{}, 0, err
+	}
+	req.Header.Set("User-Agent", userAgent)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return loginForm{}, 0, err
+	}
+	defer resp.Body.Close()
+
+	form, perr := parseLoginForm(io.LimitReader(resp.Body, 1<<20))
+	return form, resp.StatusCode, perr
+}
+
+func hasLoggedInCookie(jar http.CookieJar, u *url.URL) bool {
+	for _, c := range jar.Cookies(u) {
+		if strings.HasPrefix(c.Name, "wordpress_logged_in_") {
+			return true
+		}
+	}
+	return false
+}

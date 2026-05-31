@@ -1,0 +1,749 @@
+openapi: 3.0.3
+info:
+  title: ContentFlow API
+  description: AI SEO content generation platform.
+  version: 0.1.0
+
+servers:
+  - url: /
+    description: Same origin as the docs (works on any host/port)
+  - url: https://multiagent-seo.8cell.tech
+    description: Staging
+
+tags:
+  - name: Health
+    description: Liveness and readiness checks
+  - name: Auth
+    description: Authentication
+  - name: WordPress Sites
+    description: WordPress publishing targets
+  - name: Articles
+    description: SEO article generation and publishing
+  - name: Link Building
+    description: Donor-website qualification
+  - name: API Tokens
+    description: Long-lived per-user API keys
+
+paths:
+  /healthz:
+    get:
+      operationId: getHealthz
+      tags: [ Health ]
+      summary: Health check
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+        "503":
+          description: Service is degraded (e.g. database unreachable)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+
+  /auth/login:
+    post:
+      operationId: login
+      tags: [ Auth ]
+      summary: Authenticate and receive a JWT
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /users:
+    get:
+      operationId: listUsers
+      security:
+        - bearerAuth: [ ]
+      tags: [ Auth ]
+      summary: List users
+      responses:
+        "200":
+          description: All users
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/User"
+
+  /api-tokens:
+    post:
+      operationId: createApiToken
+      security:
+        - bearerAuth: [ ]
+      tags: [ API Tokens ]
+      summary: Create an API token (the secret is returned only once)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateApiTokenRequest"
+      responses:
+        "201":
+          description: Created — save the token now, it can't be retrieved later
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiTokenCreated"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+    get:
+      operationId: listApiTokens
+      security:
+        - bearerAuth: [ ]
+      tags: [ API Tokens ]
+      summary: List your API tokens (metadata only)
+      responses:
+        "200":
+          description: Your active tokens
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ApiToken"
+
+  /api-tokens/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    delete:
+      operationId: deleteApiToken
+      security:
+        - bearerAuth: [ ]
+      tags: [ API Tokens ]
+      summary: Revoke an API token
+      responses:
+        "204":
+          description: Revoked
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /wordpress-sites:
+    get:
+      operationId: listWordpressSites
+      security:
+        - bearerAuth: [ ]
+      tags: [ WordPress Sites ]
+      summary: List WordPress sites
+      responses:
+        "200":
+          description: All non-deleted sites
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/WordpressSite"
+    post:
+      operationId: createWordpressSite
+      security:
+        - bearerAuth: [ ]
+      tags: [ WordPress Sites ]
+      summary: Add a WordPress site
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateWordpressSiteRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WordpressSite"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /wordpress-sites/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      operationId: getWordpressSite
+      security:
+        - bearerAuth: [ ]
+      tags: [ WordPress Sites ]
+      summary: Get a WordPress site
+      responses:
+        "200":
+          description: Site
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WordpressSite"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      operationId: updateWordpressSite
+      security:
+        - bearerAuth: [ ]
+      tags: [ WordPress Sites ]
+      summary: Update a WordPress site
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateWordpressSiteRequest"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WordpressSite"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      operationId: deleteWordpressSite
+      security:
+        - bearerAuth: [ ]
+      tags: [ WordPress Sites ]
+      summary: Soft-delete a WordPress site
+      responses:
+        "204":
+          description: Deleted
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /generate:
+    post:
+      operationId: generateArticle
+      security:
+        - bearerAuth: [ ]
+      tags: [ Articles ]
+      summary: Queue an article for generation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GenerateRequest"
+      responses:
+        "202":
+          description: Generation accepted; poll GET /articles/{id} for status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenerateAccepted"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /articles:
+    get:
+      operationId: listArticles
+      security:
+        - bearerAuth: [ ]
+      tags: [ Articles ]
+      summary: List articles
+      responses:
+        "200":
+          description: All articles, newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Article"
+
+  /articles/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+    get:
+      operationId: getArticle
+      security:
+        - bearerAuth: [ ]
+      tags: [ Articles ]
+      summary: Get an article
+      responses:
+        "200":
+          description: Article
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Article"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /articles/{id}/publish:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+    post:
+      operationId: publishArticle
+      security:
+        - bearerAuth: [ ]
+      tags: [ Articles ]
+      summary: Publish a draft article
+      responses:
+        "200":
+          description: Published
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Article"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /linkbuilding/qualify:
+    post:
+      operationId: qualifyWebsites
+      security:
+        - bearerAuth: [ ]
+      tags: [ Link Building ]
+      summary: Qualify donor websites listed in a sheet
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/QualifyRequest"
+      responses:
+        "202":
+          description: Qualification accepted; results are written back to the sheet
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QualifyAccepted"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /linkbuilding/login:
+    post:
+      operationId: loginToSites
+      security:
+        - bearerAuth: [ ]
+      tags: [ Link Building ]
+      summary: Log into the WordPress sites listed in a sheet's credential columns
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SiteLoginRequest"
+      responses:
+        "202":
+          description: Login accepted; per-site status is written back to the sheet
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SiteLoginAccepted"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  responses:
+    BadRequest:
+      description: Invalid request
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Unauthorized:
+      description: Missing or invalid bearer token
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    NotFound:
+      description: Resource not found
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Conflict:
+      description: Conflict with existing resource
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+  schemas:
+    QualifyRequest:
+      type: object
+      required: [ sheet, accepted_topics ]
+      properties:
+        sheet:
+          type: string
+          x-oapi-codegen-extra-tags:
+            validate: "required,min=1"
+        accepted_topics:
+          type: array
+          items:
+            type: string
+          x-oapi-codegen-extra-tags:
+            validate: "required,min=1"
+        candidate_topics:
+          type: array
+          items:
+            type: string
+
+    QualifyAccepted:
+      type: object
+      required: [ sheet, websites_queued ]
+      properties:
+        sheet:
+          type: string
+        websites_queued:
+          type: integer
+
+    SiteLoginRequest:
+      type: object
+      required: [ sheet ]
+      properties:
+        sheet:
+          type: string
+          x-oapi-codegen-extra-tags:
+            validate: "required,min=1"
+
+    SiteLoginAccepted:
+      type: object
+      required: [ sheet, sites_queued ]
+      properties:
+        sheet:
+          type: string
+        sites_queued:
+          type: integer
+
+    GenerateRequest:
+      type: object
+      required: [ keyword, site_id ]
+      properties:
+        keyword:
+          type: string
+          x-oapi-codegen-extra-tags:
+            validate: "required,min=1,max=200"
+        site_id:
+          type: string
+          format: uuid
+          x-oapi-codegen-extra-tags:
+            validate: "required"
+        min_words:
+          type: integer
+        max_words:
+          type: integer
+        max_tokens:
+          type: integer
+        language:
+          type: string
+        site_topic:
+          type: string
+        extra_rules:
+          type: string
+        provider:
+          type: string
+        model:
+          type: string
+        auto_publish:
+          type: boolean
+        max_cycles:
+          type: integer
+        ai_threshold:
+          type: number
+        include_images:
+          type: boolean
+          nullable: true
+        include_image_attribution:
+          type: boolean
+          nullable: true
+
+    GenerateAccepted:
+      type: object
+      required: [ id, keyword, status, created_at ]
+      properties:
+        id:
+          type: integer
+          format: int64
+        keyword:
+          type: string
+        status:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        target_keywords:
+          type: array
+          items:
+            type: string
+        suggested_title:
+          type: string
+        site:
+          type: string
+        site_id:
+          type: string
+          format: uuid
+          nullable: true
+        provider:
+          type: string
+        model:
+          type: string
+        status_url:
+          type: string
+
+    Article:
+      type: object
+      required: [ id, keyword, status, created_at, updated_at ]
+      properties:
+        id:
+          type: integer
+          format: int64
+        keyword:
+          type: string
+        site:
+          type: string
+        site_id:
+          type: string
+          format: uuid
+          nullable: true
+        status:
+          type: string
+        wp_post_id:
+          type: integer
+          format: int64
+        wp_edit_url:
+          type: string
+        wp_post_url:
+          type: string
+        images_requested:
+          type: integer
+        images_resolved:
+          type: integer
+        images_skipped:
+          type: integer
+        competitor_data:
+          type: object
+          nullable: true
+          x-go-type: json.RawMessage
+        check_result:
+          type: object
+          nullable: true
+          x-go-type: json.RawMessage
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    LoginRequest:
+      type: object
+      required: [ email, password ]
+      properties:
+        email:
+          type: string
+          x-oapi-codegen-extra-tags:
+            validate: "required,email"
+        password:
+          type: string
+          x-oapi-codegen-extra-tags:
+            validate: "required,min=1"
+
+    LoginResponse:
+      type: object
+      required: [ token, expiresAt ]
+      properties:
+        token:
+          type: string
+        expiresAt:
+          type: string
+          format: date-time
+
+    User:
+      type: object
+      required: [ id, email, createdAt ]
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    CreateApiTokenRequest:
+      type: object
+      required: [ name ]
+      properties:
+        name:
+          type: string
+          x-oapi-codegen-extra-tags:
+            validate: "required,min=1,max=100"
+
+    ApiToken:
+      type: object
+      required: [ id, name, prefix, createdAt ]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        prefix:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    ApiTokenCreated:
+      type: object
+      required: [ id, name, prefix, token, createdAt ]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        prefix:
+          type: string
+        token:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    HealthResponse:
+      type: object
+      required: [ status, time ]
+      properties:
+        status:
+          type: string
+          enum: [ ok, degraded ]
+        time:
+          type: string
+          format: date-time
+
+    ErrorResponse:
+      type: object
+      description: RFC 7807 problem details
+      required: [ title, status ]
+      properties:
+        type:
+          type: string
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        instance:
+          type: string
+
+    WordpressSite:
+      type: object
+      required: [ id, alias, url, username, enabled, createdAt, updatedAt ]
+      properties:
+        id:
+          type: string
+          format: uuid
+        alias:
+          type: string
+        url:
+          type: string
+          format: uri
+        username:
+          type: string
+        enabled:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    CreateWordpressSiteRequest:
+      type: object
+      required: [ alias, url, username, appPassword ]
+      properties:
+        alias:
+          type: string
+          x-oapi-codegen-extra-tags:
+            validate: "required,min=1,max=100"
+        url:
+          type: string
+          x-oapi-codegen-extra-tags:
+            validate: "required,url"
+        username:
+          type: string
+          x-oapi-codegen-extra-tags:
+            validate: "required,min=1,max=255"
+        appPassword:
+          type: string
+          x-oapi-codegen-extra-tags:
+            validate: "required,min=1"
+
+    UpdateWordpressSiteRequest:
+      type: object
+      properties:
+        alias:
+          type: string
+          x-oapi-codegen-extra-tags:
+            validate: "omitempty,min=1,max=100"
+        url:
+          type: string
+          x-oapi-codegen-extra-tags:
+            validate: "omitempty,url"
+        username:
+          type: string
+          x-oapi-codegen-extra-tags:
+            validate: "omitempty,min=1,max=255"
+        appPassword:
+          type: string
+          x-oapi-codegen-extra-tags:
+            validate: "omitempty,min=1"
+        enabled:
+          type: boolean

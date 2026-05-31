@@ -1,0 +1,33 @@
+# secrets
+internal/config/config.yaml
+credentials.json
+.env
+.envrc.local
+
+# local notes / workspaces
+seo.txt
+docs/kreya/
+
+# go build output
+contentflow
+*.exe
+*.test
+*.out
+bin/
+tmp/
+
+# go tooling
+coverage.out
+coverage.html
+*.prof
+*.pprof
+
+# macOS
+.DS_Store
+
+# IDE (if not already ignored globally)
+.idea/
+.vscode/
+
+# claude code local state
+.claude/
