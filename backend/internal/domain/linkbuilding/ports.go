@@ -22,3 +22,24 @@ type PageFetcher interface {
 type TopicClassifier interface {
 	Classify(ctx context.Context, page Page, candidates []string) (string, error)
 }
+
+// CredentialSource reads the site-login inventory from a named sheet/tab and
+// writes the per-site login status back to the same rows. Like WebsiteSource
+// the tab is chosen per run, so the source stays stateless about which list it
+// processes.
+type CredentialSource interface {
+	ListCredentials(ctx context.Context, sheet string) ([]SiteCredential, error)
+	WriteLoginStatus(ctx context.Context, sheet string, results []LoginResult) error
+	// ClearStaleStatuses blanks the status column of rows that are no longer
+	// suitable, so a leftover verdict from an earlier run doesn't linger on a
+	// site we no longer log into.
+	ClearStaleStatuses(ctx context.Context, sheet string) error
+}
+
+// SiteAuthenticator performs a fresh login to a site and reports whether a
+// session was established. A non-nil error is reserved for context
+// cancellation; ordinary outcomes (bad credentials, unreachable) are reported
+// as LoginResult.OK=false so the caller records a status instead of aborting.
+type SiteAuthenticator interface {
+	Login(ctx context.Context, cred SiteCredential) (LoginResult, error)
+}

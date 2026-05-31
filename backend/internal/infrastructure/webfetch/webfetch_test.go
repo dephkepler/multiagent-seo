@@ -1,9 +1,14 @@
 package webfetch
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"net/netip"
 	"slices"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 const sampleHTML = `<!DOCTYPE html>
@@ -78,5 +83,136 @@ func TestParsePageTextSampleCap(t *testing.T) {
 	}
 	if len(page.TextSample) > maxTextSample {
 		t.Errorf("TextSample length = %d, want <= %d", len(page.TextSample), maxTextSample)
+	}
+}
+
+func TestTruncateRunesBoundary(t *testing.T) {
+	// Each "é" is 2 bytes; cap at an odd length lands mid-rune.
+	s := strings.Repeat("é", 50) // 100 bytes
+	out := truncateRunes(s, 51)
+	if !utf8.ValidString(out) {
+		t.Fatalf("truncateRunes produced invalid UTF-8: %q", out)
+	}
+	if len(out) > 51 {
+		t.Errorf("len(out) = %d, want <= 51", len(out))
+	}
+	// ASCII-only and under-cap inputs must pass through unchanged.
+	if got := truncateRunes("hello", 100); got != "hello" {
+		t.Errorf("truncateRunes(short) = %q", got)
+	}
+}
+
+func TestDisallowedIP(t *testing.T) {
+	cases := []struct {
+		ip   string
+		want bool
+	}{
+		{"127.0.0.1", true},
+		{"169.254.169.254", true},
+		{"10.0.0.1", true},
+		{"192.168.1.1", true},
+		{"172.16.0.1", true},
+		{"100.64.0.1", true},
+		{"::1", true},
+		{"fe80::1", true},
+		{"fc00::1", true},
+		{"8.8.8.8", false},
+		{"1.1.1.1", false},
+	}
+	for _, c := range cases {
+		got := disallowedIP(netip.MustParseAddr(c.ip))
+		if got != c.want {
+			t.Errorf("disallowedIP(%s) = %v, want %v", c.ip, got, c.want)
+		}
+	}
+}
+
+// testFetcher builds a Fetcher whose dial guard allows loopback so it can reach
+// an httptest server, while keeping all other SSRF guards active.
+func testFetcher() *Fetcher {
+	f := New(nil)
+	f.allowLoopback = true
+	f.http.Transport = f.transport()
+	return f
+}
+
+func TestFetchRedirectToBlockedTarget(t *testing.T) {
+	// 302 to a private/link-local target: even with loopback allowed, the dial
+	// guard must reject the redirect hop.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "http://169.254.169.254/latest/meta-data/", http.StatusFound)
+	}))
+	defer srv.Close()
+
+	if _, err := testFetcher().Fetch(context.Background(), srv.URL); err == nil {
+		t.Fatal("expected error fetching redirect to blocked target, got nil")
+	}
+}
+
+func TestFetchOversizedBodyCapped(t *testing.T) {
+	// Body far larger than maxBody must be capped, not OOM, and still parse.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = w.Write([]byte("<html><body><p>start</p>"))
+		junk := strings.Repeat("x", 4<<20) // 4 MiB > maxBody (2 MiB)
+		_, _ = w.Write([]byte("<p>" + junk + "</p></body></html>"))
+	}))
+	defer srv.Close()
+
+	page, err := testFetcher().Fetch(context.Background(), srv.URL)
+	if err != nil {
+		t.Fatalf("Fetch oversized body: %v", err)
+	}
+	if len(page.TextSample) > maxTextSample {
+		t.Errorf("TextSample length = %d, want <= %d", len(page.TextSample), maxTextSample)
+	}
+}
+
+func TestFetchNon2xx(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	if _, err := testFetcher().Fetch(context.Background(), srv.URL); err == nil {
+		t.Fatal("expected error for non-2xx status, got nil")
+	}
+}
+
+func TestFetchUnsupportedContentType(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/pdf")
+		_, _ = w.Write([]byte("%PDF-1.4 not html"))
+	}))
+	defer srv.Close()
+
+	_, err := testFetcher().Fetch(context.Background(), srv.URL)
+	if err == nil {
+		t.Fatal("expected error for application/pdf content type, got nil")
+	}
+	if !strings.Contains(err.Error(), "unsupported content type") {
+		t.Errorf("error = %v, want unsupported content type", err)
+	}
+}
+
+func TestFetchUnsupportedScheme(t *testing.T) {
+	if _, err := testFetcher().Fetch(context.Background(), "file:///etc/passwd"); err == nil {
+		t.Fatal("expected error for file:// scheme, got nil")
+	}
+}
+
+func TestFetchTextHTMLAllowed(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(sampleHTML))
+	}))
+	defer srv.Close()
+
+	page, err := testFetcher().Fetch(context.Background(), srv.URL)
+	if err != nil {
+		t.Fatalf("Fetch text/html: %v", err)
+	}
+	if page.Title != "Acme Widgets — Home" {
+		t.Errorf("Title = %q", page.Title)
 	}
 }

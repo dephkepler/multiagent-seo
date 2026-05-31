@@ -10,8 +10,6 @@ import (
 	"multiagent-seo/internal/infrastructure/llm/transport"
 )
 
-var _ articles.LLMClient = (*client)(nil)
-
 type client struct {
 	transport *transport.Client
 }

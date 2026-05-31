@@ -34,6 +34,7 @@ import (
 	"multiagent-seo/internal/infrastructure/topicclassifier"
 	"multiagent-seo/internal/infrastructure/webfetch"
 	infrawp "multiagent-seo/internal/infrastructure/wordpress"
+	"multiagent-seo/internal/infrastructure/wplogin"
 	"multiagent-seo/pkg/config"
 	"multiagent-seo/pkg/jobrunner"
 	"multiagent-seo/pkg/logger"
@@ -100,7 +101,7 @@ func main() {
 	}
 
 	// Link-building is Sheets-only (no DB), so it's built independently of the pool.
-	linkbuildingSvc, lbRunner := buildLinkbuilding(ctx, cfg, slogLog)
+	linkbuildingSvc, linkbuildingLoginSvc, lbRunner := buildLinkbuilding(ctx, cfg, slogLog)
 
 	healthSvc := apphealth.NewService(domainhealth.NewService(healthRepo))
 	server := handlers.NewServer(
@@ -108,7 +109,7 @@ func main() {
 		handlers.NewWordpressSitesHandler(nilableWordpressService(wordpressSvc)),
 		handlers.NewLoginHandler(nilableAuthService(authSvc)),
 		nilableArticlesHandler(articlesSvc),
-		nilableLinkbuildingHandler(linkbuildingSvc),
+		nilableLinkbuildingHandler(linkbuildingSvc, linkbuildingLoginSvc),
 		nilableApiTokensHandler(apiTokenSvc),
 	)
 
@@ -227,36 +228,56 @@ func nilableArticlesHandler(svc *apparticles.Service) *handlers.ArticlesHandler 
 	return handlers.NewArticlesHandler(svc)
 }
 
-func nilableLinkbuildingHandler(svc *applinkbuilding.Service) *handlers.LinkbuildingHandler {
-	if svc == nil {
-		return handlers.NewLinkbuildingHandler(nil)
+// nilableLinkbuildingHandler passes untyped nil for whichever service is
+// absent, so the handler's nil checks (which return 503) work — a typed-nil
+// pointer stored in an interface would not compare equal to nil.
+func nilableLinkbuildingHandler(svc *applinkbuilding.Service, loginSvc *applinkbuilding.LoginService) *handlers.LinkbuildingHandler {
+	switch {
+	case svc != nil && loginSvc != nil:
+		return handlers.NewLinkbuildingHandler(svc, loginSvc)
+	case svc != nil:
+		return handlers.NewLinkbuildingHandler(svc, nil)
+	case loginSvc != nil:
+		return handlers.NewLinkbuildingHandler(nil, loginSvc)
+	default:
+		return handlers.NewLinkbuildingHandler(nil, nil)
 	}
-	return handlers.NewLinkbuildingHandler(svc)
 }
 
 // buildLinkbuilding wires the Sheets-only link-building feature. It returns nil
 // when its prerequisites (a writable Sheets website-source, an LLM for the topic
 // classifier) are absent, so the endpoint reports 503 instead of failing boot.
-func buildLinkbuilding(ctx context.Context, cfg config.Config, log *slog.Logger) (*applinkbuilding.Service, *jobrunner.AsyncRunner) {
+func buildLinkbuilding(ctx context.Context, cfg config.Config, log *slog.Logger) (*applinkbuilding.Service, *applinkbuilding.LoginService, *jobrunner.AsyncRunner) {
 	src, err := sheets.NewWebsiteSource(ctx, cfg.Sheets.CredentialsFile, cfg.Sheets.SpreadsheetID, log)
 	if err != nil {
 		log.Warn("link-building disabled: website source unavailable", "err", err)
-		return nil, nil
-	}
-	client, err := infrallm.NewFactory(cfg.LLM, log).ForModel(cfg.LLM.Provider, cfg.LLM.Model)
-	if err != nil {
-		log.Warn("link-building disabled: llm classifier unavailable", "err", err)
-		return nil, nil
+		return nil, nil, nil
 	}
 	runner := jobrunner.NewAsyncRunner(cfg.Server.BackgroundJobTimeout, log)
-	svc := applinkbuilding.NewService(
-		src,
-		webfetch.New(log),
-		topicclassifier.New(classifierLLM{client}, log),
-		runner,
-		log,
-	)
-	return svc, runner
+
+	// Qualification (Flow 1) needs the LLM topic classifier.
+	var qualifySvc *applinkbuilding.Service
+	if client, err := infrallm.NewFactory(cfg.LLM, log).ForModel(cfg.LLM.Provider, cfg.LLM.Model); err != nil {
+		log.Warn("link-building qualify disabled: llm classifier unavailable", "err", err)
+	} else {
+		qualifySvc = applinkbuilding.NewService(
+			src,
+			webfetch.New(log),
+			topicclassifier.New(classifierLLM{client}, log),
+			runner,
+			log,
+		)
+	}
+
+	// Login (Flow 2) needs the credential source; it does not use the LLM.
+	var loginSvc *applinkbuilding.LoginService
+	if creds, err := sheets.NewCredentialSource(ctx, cfg.Sheets.CredentialsFile, cfg.Sheets.SpreadsheetID, log); err != nil {
+		log.Warn("link-building login disabled: credential source unavailable", "err", err)
+	} else {
+		loginSvc = applinkbuilding.NewLoginService(creds, wplogin.New(log), runner, log)
+	}
+
+	return qualifySvc, loginSvc, runner
 }
 
 // classifierLLM adapts the articles LLM client (whose Complete also returns token

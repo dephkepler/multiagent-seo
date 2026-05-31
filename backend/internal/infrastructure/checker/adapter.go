@@ -17,8 +17,6 @@ type adapter struct {
 	check checkFunc
 }
 
-var _ articles.ContentChecker = (*adapter)(nil)
-
 // New builds a articles.ContentChecker for the given provider: "mock" (or ""),
 // or "huggingface". "originality" errors explicitly rather than silently falling
 // back to the mock — it was advertised in legacy config but never implemented.

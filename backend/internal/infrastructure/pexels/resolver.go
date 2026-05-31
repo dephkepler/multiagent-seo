@@ -21,8 +21,6 @@ type Resolver struct {
 	log    *slog.Logger
 }
 
-var _ articles.ImageResolver = (*Resolver)(nil)
-
 // New returns a Resolver for the given Pexels API key.
 func New(apiKey string, log *slog.Logger) *Resolver {
 	if log == nil {

@@ -29,3 +29,22 @@ type Result struct {
 	OutboundDomains int
 	Suitable        bool
 }
+
+// SiteCredential is one site we have login access to, read from the credential
+// columns. Row lets the login status be written back to the same line; the
+// login endpoint is derived from BaseURL by the adapter.
+type SiteCredential struct {
+	Row      int
+	BaseURL  string
+	Login    string
+	Password string
+}
+
+// LoginResult is the outcome written back to the sheet. OK is true only on a
+// confirmed authenticated session.
+type LoginResult struct {
+	Row     int
+	BaseURL string
+	OK      bool
+	Status  string
+}

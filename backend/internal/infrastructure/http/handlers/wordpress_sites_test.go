@@ -134,7 +134,7 @@ func (r *fakeWordpressRepo) Delete(_ context.Context, id uuid.UUID) error {
 func newWordpressRouter(repo domainwp.Repository) http.Handler {
 	healthHandler := handlers.NewHealthHandler(apphealth.NewService(domainhealth.NewService(stubRepo{})))
 	wpSvc := appwordpress.NewService(repo)
-	server := handlers.NewServer(healthHandler, handlers.NewWordpressSitesHandler(wpSvc), handlers.NewLoginHandler(nil), handlers.NewArticlesHandler(nil), handlers.NewLinkbuildingHandler(nil), handlers.NewApiTokensHandler(nil))
+	server := handlers.NewServer(healthHandler, handlers.NewWordpressSitesHandler(wpSvc), handlers.NewLoginHandler(nil), handlers.NewArticlesHandler(nil), handlers.NewLinkbuildingHandler(nil, nil), handlers.NewApiTokensHandler(nil))
 	return apihttp.NewRouter(config.ServerConfig{
 		Host:               "localhost",
 		Port:               "0",

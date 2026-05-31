@@ -33,8 +33,6 @@ type mockClient struct {
 	data map[string]articles.Cluster
 }
 
-var _ articles.TopicSource = (*mockClient)(nil)
-
 func (m *mockClient) Lookup(_ context.Context, topic string) (articles.Cluster, error) {
 	topic = strings.ToLower(strings.TrimSpace(topic))
 	r, ok := m.data[topic]

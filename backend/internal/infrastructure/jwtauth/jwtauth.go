@@ -4,13 +4,7 @@ import (
 	"context"
 	"time"
 
-	"multiagent-seo/internal/domain/auth"
 	"multiagent-seo/pkg/jwt"
-)
-
-var (
-	_ auth.TokenIssuer   = (*Service)(nil)
-	_ auth.TokenVerifier = (*Service)(nil)
 )
 
 type Service struct {

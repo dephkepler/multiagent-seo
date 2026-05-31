@@ -30,8 +30,6 @@ type client struct {
 	log           *slog.Logger
 }
 
-var _ articles.TopicSource = (*client)(nil)
-
 // New returns an error when credentials or spreadsheet ID are missing so
 // callers can fall back to the mock.
 func New(ctx context.Context, credentialsFile, spreadsheetID, sheet, topicCol, keywordCol, titleCol string, headerRow bool, log *slog.Logger) (articles.TopicSource, error) {

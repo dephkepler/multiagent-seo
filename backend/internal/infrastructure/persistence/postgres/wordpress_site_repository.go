@@ -13,8 +13,6 @@ import (
 	"multiagent-seo/internal/domain/wordpress"
 )
 
-var _ wordpress.Repository = (*WordpressSiteRepository)(nil)
-
 type WordpressSiteRepository struct {
 	db     *pgxpool.Pool
 	encKey string

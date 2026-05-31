@@ -45,6 +45,13 @@ services:
       CF_DATAFORSEO_PASSWORD: ${CF_DATAFORSEO_PASSWORD:-}
       CF_SHEETS_SPREADSHEET_ID: ${CF_SHEETS_SPREADSHEET_ID:-}
       CF_SHEETS_CREDENTIALS_FILE: /app/credentials.json
+      # Keyword-cluster tab layout — defaults match the prod sheet ("casino2"
+      # tab, topic in A, keywords in B, title in C, with a header row).
+      CF_SHEETS_SHEET: ${CF_SHEETS_SHEET:-casino2}
+      CF_SHEETS_TOPIC_COLUMN: ${CF_SHEETS_TOPIC_COLUMN:-A}
+      CF_SHEETS_KEYWORD_COLUMN: ${CF_SHEETS_KEYWORD_COLUMN:-B}
+      CF_SHEETS_TITLE_COLUMN: ${CF_SHEETS_TITLE_COLUMN:-C}
+      CF_SHEETS_HEADER_ROW: ${CF_SHEETS_HEADER_ROW:-true}
       CF_CHECKER_PROVIDER: ${CF_CHECKER_PROVIDER:-mock}
       CF_CHECKER_API_KEY: ${CF_CHECKER_API_KEY:-}
       CF_CHECKER_MODEL: ${CF_CHECKER_MODEL:-}
@@ -56,6 +63,19 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: ../devops/docker/frontend.Dockerfile
+      args:
+        # Browser-bound: the URL the user's browser uses to hit the backend, not
+        # the in-cluster Docker hostname. Override per environment.
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:${APP_HOST_PORT}}
+    ports:
+      - "${FRONTEND_HOST_PORT:-3000}:3000"
+    depends_on:
+      - app
 
 volumes:
   postgres_data:

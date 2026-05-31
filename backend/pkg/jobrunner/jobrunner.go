@@ -8,10 +8,9 @@ import (
 	"time"
 )
 
-// JobRunner dispatches background generation jobs. Each job runs in its own
-// goroutine with panic recovery and a fresh, request-decoupled context bounded
-// by Timeout; a WaitGroup tracks in-flight jobs so Wait can drain them on
-// shutdown (mirrors the legacy extraction-worker drain).
+// JobRunner dispatches background jobs. Each job runs in its own goroutine with
+// panic recovery and a fresh, request-decoupled context bounded by Timeout; a
+// WaitGroup tracks in-flight jobs so Wait can drain them on shutdown.
 type JobRunner interface {
 	// Go runs fn in the background. The context fn receives is derived from
 	// parent via WithoutCancel (so request cancellation doesn't abort the job)
@@ -75,9 +74,9 @@ func (r *AsyncRunner) Wait(ctx context.Context) error {
 	}
 }
 
-// SyncRunner runs jobs inline on the calling goroutine. It is the test seam:
-// Generate dispatches through JobRunner, so a test using SyncRunner observes
-// the full pipeline run before Generate returns.
+// SyncRunner runs jobs inline on the calling goroutine. It is the test seam: a
+// use-case dispatches through JobRunner, so a test using SyncRunner observes the
+// full pipeline run before the call returns.
 type SyncRunner struct{}
 
 func NewSyncRunner() SyncRunner { return SyncRunner{} }

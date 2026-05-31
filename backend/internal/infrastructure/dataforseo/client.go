@@ -22,8 +22,6 @@ type RealClient struct {
 	http     *http.Client
 }
 
-var _ articles.SERPProvider = (*RealClient)(nil)
-
 func New(login, password string) *RealClient {
 	return &RealClient{
 		login:    login,
@@ -193,8 +191,6 @@ func parseSERPResponse(body []byte, keyword string, limit int) (*articles.Compet
 }
 
 type MockClient struct{}
-
-var _ articles.SERPProvider = (*MockClient)(nil)
 
 func NewMock() *MockClient { return &MockClient{} }
 

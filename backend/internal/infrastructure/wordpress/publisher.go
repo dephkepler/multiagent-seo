@@ -22,8 +22,6 @@ const maxResponseBytes = 1 << 20
 // error page can't flood the log lines.
 const maxLoggedBodyBytes = 4 << 10
 
-var _ articles.Publisher = (*Publisher)(nil)
-
 // Publisher targets one site: creds are bound at construction so each
 // generate job gets its own Publisher rather than a shared config map.
 type Publisher struct {

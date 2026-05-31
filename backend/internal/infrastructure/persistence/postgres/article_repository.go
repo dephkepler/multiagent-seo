@@ -14,8 +14,6 @@ import (
 	"multiagent-seo/internal/domain/articles"
 )
 
-var _ articles.ArticleRepository = (*ArticleRepository)(nil)
-
 // mapPGError classifies known PostgreSQL error codes into clearer errors.
 // Unclassified codes (and non-pg errors) are returned unchanged.
 func mapPGError(err error) error {

@@ -7,8 +7,6 @@ import (
 	"multiagent-seo/pkg/config"
 )
 
-var _ articles.LLMFactory = (*Factory)(nil)
-
 // Factory resolves an LLMClient per provider/model, supplying the API key from
 // config (KeyFor handles the groq/claude/anthropic fallback).
 type Factory struct {

@@ -151,14 +151,14 @@ type GenerateResult struct {
 // dispatches the pipeline through the JobRunner and returns immediately
 // (202-style). A test using SyncRunner sees runGeneration complete first.
 func (s *Service) Generate(ctx context.Context, req GenerateRequest) (GenerateResult, error) {
-	sp, err := s.resolve(ctx, req)
+	settings, err := s.resolve(ctx, req)
 	if err != nil {
 		return GenerateResult{}, err
 	}
 
 	id, err := s.repo.Create(ctx, articles.CreateArticle{
-		Keyword: sp.keyword,
-		SiteID:  sp.siteID,
+		Keyword: settings.keyword,
+		SiteID:  settings.siteID,
 	})
 	if err != nil {
 		return GenerateResult{}, fmt.Errorf("create article: %w", err)
@@ -171,23 +171,23 @@ func (s *Service) Generate(ctx context.Context, req GenerateRequest) (GenerateRe
 
 	jobLog := s.log.With(
 		"article_id", id,
-		"keyword", sp.keyword,
-		"site_id", sp.siteID,
-		"provider", sp.provider,
-		"model", sp.model,
+		"keyword", settings.keyword,
+		"site_id", settings.siteID,
+		"provider", settings.provider,
+		"model", settings.model,
 	)
 
 	s.runner.Go(ctx, func(bg context.Context) {
-		s.runGeneration(bg, jobLog, id, sp)
+		s.runGeneration(bg, jobLog, id, settings)
 	})
 
-	jobLog.InfoContext(ctx, "generation accepted", "target_keywords", len(sp.cluster.Keywords))
+	jobLog.InfoContext(ctx, "generation accepted", "target_keywords", len(settings.cluster.Keywords))
 	return GenerateResult{
 		Article:        *article,
-		TargetKeywords: sp.cluster.Keywords,
-		SuggestedTitle: sp.cluster.Title,
-		Provider:       sp.provider,
-		Model:          sp.model,
+		TargetKeywords: settings.cluster.Keywords,
+		SuggestedTitle: settings.cluster.Title,
+		Provider:       settings.provider,
+		Model:          settings.model,
 	}, nil
 }
 
@@ -201,7 +201,7 @@ func (s *Service) resolve(ctx context.Context, req GenerateRequest) (spec, error
 		attribution = *req.IncludeImageAttribution
 	}
 
-	sp := spec{
+	settings := spec{
 		keyword:          req.Keyword,
 		siteID:           req.SiteID,
 		minWords:         pickInt(req.MinWords, s.defaults.MinWords),
@@ -226,28 +226,28 @@ func (s *Service) resolve(ctx context.Context, req GenerateRequest) (spec, error
 		s.log.WarnContext(ctx, "no keyword cluster for topic", "keyword", req.Keyword)
 		return spec{}, ErrNoCluster
 	}
-	sp.cluster = cluster
+	settings.cluster = cluster
 
 	// ~3 tokens/word + 200 overhead. 0 means "no cap" (Groq) / provider default.
 	if req.MaxTokens > 0 {
-		sp.maxTokens = req.MaxTokens
-	} else if sp.maxWords > 0 {
-		sp.maxTokens = sp.maxWords*3 + 200
+		settings.maxTokens = req.MaxTokens
+	} else if settings.maxWords > 0 {
+		settings.maxTokens = settings.maxWords*3 + 200
 	}
 
-	client, err := s.llm.ForModel(sp.provider, sp.model)
+	client, err := s.llm.ForModel(settings.provider, settings.model)
 	if err != nil {
 		return spec{}, fmt.Errorf("build llm client: %w", err)
 	}
-	sp.client = client
-	return sp, nil
+	settings.client = client
+	return settings, nil
 }
 
 // runGeneration runs the 5-step pipeline. Unexported and synchronous so a test
 // can drive it through a SyncRunner. On any fatal step it marks the article
 // failed via a fresh context, since the job context may already be cancelled.
-func (s *Service) runGeneration(ctx context.Context, log *slog.Logger, articleID int64, sp spec) {
-	checkPassed, err := s.pipeline(ctx, log, articleID, sp)
+func (s *Service) runGeneration(ctx context.Context, log *slog.Logger, articleID int64, settings spec) {
+	checkPassed, err := s.pipeline(ctx, log, articleID, settings)
 	if err != nil {
 		log.ErrorContext(ctx, "generation failed", "err", err)
 		markCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
@@ -258,7 +258,7 @@ func (s *Service) runGeneration(ctx context.Context, log *slog.Logger, articleID
 		return
 	}
 
-	if sp.autoPublish {
+	if settings.autoPublish {
 		if !checkPassed {
 			log.WarnContext(ctx, "auto-publish blocked: originality check failed")
 		} else {
@@ -269,14 +269,14 @@ func (s *Service) runGeneration(ctx context.Context, log *slog.Logger, articleID
 }
 
 // pipeline is the 5 steps; returns whether the originality check passed.
-func (s *Service) pipeline(ctx context.Context, log *slog.Logger, articleID int64, sp spec) (bool, error) {
+func (s *Service) pipeline(ctx context.Context, log *slog.Logger, articleID int64, settings spec) (bool, error) {
 	// Step 1/5: SERP competitors. Non-fatal: a lookup error falls back to empty
 	// competitor data and the article still generates.
 	log.DebugContext(ctx, "step 1/5: serp competitors", "limit", s.defaults.SERPLimit)
-	serpData, err := s.serp.GetSERP(ctx, sp.keyword, sp.language, s.defaults.SERPLimit)
+	serpData, err := s.serp.GetSERP(ctx, settings.keyword, settings.language, s.defaults.SERPLimit)
 	if err != nil {
 		log.WarnContext(ctx, "serp lookup failed, continuing without competitor data", "err", err)
-		serpData = &articles.CompetitorData{Keyword: sp.keyword}
+		serpData = &articles.CompetitorData{Keyword: settings.keyword}
 	} else {
 		log.DebugContext(ctx, "serp competitors loaded", "count", len(serpData.Results))
 		if saveErr := s.repo.SaveCompetitorData(ctx, articleID, serpData); saveErr != nil {
@@ -285,26 +285,26 @@ func (s *Service) pipeline(ctx context.Context, log *slog.Logger, articleID int6
 	}
 	competitors := prompt.CompetitorsFrom(serpData)
 
-	log.DebugContext(ctx, "step 2/5: brief", "competitors", len(competitors.Items), "target_keywords", len(sp.cluster.Keywords))
-	brief, _, err := sp.client.Complete(ctx, prompt.Brief(sp.keyword, sp.language, sp.cluster, sp.siteTopic, sp.extraRules, competitors), sp.maxTokens)
+	log.DebugContext(ctx, "step 2/5: brief", "competitors", len(competitors.Items), "target_keywords", len(settings.cluster.Keywords))
+	brief, _, err := settings.client.Complete(ctx, prompt.Brief(settings.keyword, settings.language, settings.cluster, settings.siteTopic, settings.extraRules, competitors), settings.maxTokens)
 	if err != nil {
 		return false, fmt.Errorf("brief: %w", err)
 	}
 
-	log.DebugContext(ctx, "step 3/5: writing", "min_words", sp.minWords, "max_words", sp.maxWords)
-	article, _, err := sp.client.Complete(ctx, prompt.Writer(brief, sp.keyword, sp.language, sp.minWords, sp.maxWords, sp.cluster, competitors), sp.maxTokens)
+	log.DebugContext(ctx, "step 3/5: writing", "min_words", settings.minWords, "max_words", settings.maxWords)
+	article, _, err := settings.client.Complete(ctx, prompt.Writer(brief, settings.keyword, settings.language, settings.minWords, settings.maxWords, settings.cluster, competitors), settings.maxTokens)
 	if err != nil {
 		return false, fmt.Errorf("writer: %w", err)
 	}
 
 	log.DebugContext(ctx, "step 4/5: editing")
-	edited, _, err := sp.client.Complete(ctx, prompt.Editor(article, sp.keyword, sp.minWords, sp.maxWords, sp.cluster, competitors), sp.maxTokens)
+	edited, _, err := settings.client.Complete(ctx, prompt.Editor(article, settings.keyword, settings.minWords, settings.maxWords, settings.cluster, competitors), settings.maxTokens)
 	if err != nil {
 		return false, fmt.Errorf("editor: %w", err)
 	}
 
 	log.DebugContext(ctx, "step 5/5: originality check")
-	edited, lastCheck := s.checkAndHumanize(ctx, log, articleID, sp, edited)
+	edited, lastCheck := s.checkAndHumanize(ctx, log, articleID, settings, edited)
 
 	cleaned, seoTitle, seoDesc := extractSEOFields(edited)
 	if seoTitle != "" || seoDesc != "" {
@@ -317,13 +317,13 @@ func (s *Service) pipeline(ctx context.Context, log *slog.Logger, articleID int6
 	// A nil resolver makes RenderHTML strip [IMG] placeholders, mirroring the
 	// legacy pexels-nil behaviour.
 	var resolver articles.ImageResolver
-	if sp.includeImages {
+	if settings.includeImages {
 		resolver = s.images
 	}
 	body, renderStats := articles.RenderHTML(ctx, cleaned, articles.RenderOptions{
-		Keyword:     sp.keyword,
+		Keyword:     settings.keyword,
 		Resolver:    resolver,
-		Attribution: sp.imageAttribution,
+		Attribution: settings.imageAttribution,
 	})
 	if renderStats.ImagesFailed > 0 {
 		log.WarnContext(ctx, "image resolution failed for some placeholders",
@@ -332,13 +332,13 @@ func (s *Service) pipeline(ctx context.Context, log *slog.Logger, articleID int6
 		)
 	}
 
-	pub, err := s.publisher.ForSite(ctx, sp.siteID)
+	pub, err := s.publisher.ForSite(ctx, settings.siteID)
 	if err != nil {
 		return false, fmt.Errorf("resolve publisher: %w", err)
 	}
 
 	postID, editURL, err := pub.CreateDraft(ctx, articles.Post{
-		Title:    sp.keyword,
+		Title:    settings.keyword,
 		Content:  body,
 		SEOTitle: seoTitle,
 		SEODesc:  seoDesc,
@@ -367,12 +367,12 @@ func (s *Service) pipeline(ctx context.Context, log *slog.Logger, articleID int6
 
 // checkAndHumanize runs the check→humanize loop up to maxCycles, persisting each
 // CheckResult. Returns the (possibly rewritten) content and the last check.
-func (s *Service) checkAndHumanize(ctx context.Context, log *slog.Logger, articleID int64, sp spec, content string) (string, *articles.CheckResult) {
-	maxCycles := sp.maxCycles
+func (s *Service) checkAndHumanize(ctx context.Context, log *slog.Logger, articleID int64, settings spec, content string) (string, *articles.CheckResult) {
+	maxCycles := settings.maxCycles
 	if maxCycles <= 0 {
 		maxCycles = 3
 	}
-	threshold := sp.aiThreshold
+	threshold := settings.aiThreshold
 	if threshold == 0 {
 		threshold = s.defaults.AIThreshold
 	}
@@ -411,7 +411,7 @@ func (s *Service) checkAndHumanize(ctx context.Context, log *slog.Logger, articl
 		}
 
 		log.DebugContext(ctx, "content flagged — humanize rewrite", "cycle", cycle, "sentences_flagged", len(checkRes.SentencesFlagged))
-		rewritten, _, err := sp.client.Complete(ctx, prompt.Humanize(content, sp.keyword, checkRes.Issues, checkRes.SentencesFlagged), sp.maxTokens)
+		rewritten, _, err := settings.client.Complete(ctx, prompt.Humanize(content, settings.keyword, checkRes.Issues, checkRes.SentencesFlagged), settings.maxTokens)
 		if err != nil {
 			log.WarnContext(ctx, "humanize step failed, using current content", "cycle", cycle, "err", err)
 			break

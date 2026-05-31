@@ -11,8 +11,6 @@ import (
 	domainwp "multiagent-seo/internal/domain/wordpress"
 )
 
-var _ articles.PublisherProvider = (*Provider)(nil)
-
 // Provider builds a per-site Publisher by fetching and decrypting that site's
 // stored WordPress credentials from the wordpress-sites repository.
 type Provider struct {

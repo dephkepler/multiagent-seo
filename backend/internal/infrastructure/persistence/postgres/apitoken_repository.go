@@ -12,8 +12,6 @@ import (
 	"multiagent-seo/internal/domain/apitoken"
 )
 
-var _ apitoken.Repository = (*ApiTokenRepository)(nil)
-
 type ApiTokenRepository struct {
 	db *pgxpool.Pool
 }

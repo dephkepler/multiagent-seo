@@ -170,6 +170,17 @@ type QualifyRequest struct {
 	Sheet           string   `json:"sheet" validate:"required,min=1"`
 }
 
+// SiteLoginAccepted defines model for SiteLoginAccepted.
+type SiteLoginAccepted struct {
+	Sheet       string `json:"sheet"`
+	SitesQueued int    `json:"sites_queued"`
+}
+
+// SiteLoginRequest defines model for SiteLoginRequest.
+type SiteLoginRequest struct {
+	Sheet string `json:"sheet" validate:"required,min=1"`
+}
+
 // UpdateWordpressSiteRequest defines model for UpdateWordpressSiteRequest.
 type UpdateWordpressSiteRequest struct {
 	Alias       *string `json:"alias,omitempty" validate:"omitempty,min=1,max=100"`
@@ -221,6 +232,9 @@ type LoginJSONRequestBody = LoginRequest
 // GenerateArticleJSONRequestBody defines body for GenerateArticle for application/json ContentType.
 type GenerateArticleJSONRequestBody = GenerateRequest
 
+// LoginToSitesJSONRequestBody defines body for LoginToSites for application/json ContentType.
+type LoginToSitesJSONRequestBody = SiteLoginRequest
+
 // QualifyWebsitesJSONRequestBody defines body for QualifyWebsites for application/json ContentType.
 type QualifyWebsitesJSONRequestBody = QualifyRequest
 
@@ -259,6 +273,9 @@ type ServerInterface interface {
 	// Health check
 	// (GET /healthz)
 	GetHealthz(w http.ResponseWriter, r *http.Request)
+	// Log into the WordPress sites listed in a sheet's credential columns
+	// (POST /linkbuilding/login)
+	LoginToSites(w http.ResponseWriter, r *http.Request)
 	// Qualify donor websites listed in a sheet
 	// (POST /linkbuilding/qualify)
 	QualifyWebsites(w http.ResponseWriter, r *http.Request)
@@ -337,6 +354,12 @@ func (_ Unimplemented) GenerateArticle(w http.ResponseWriter, r *http.Request) {
 // Health check
 // (GET /healthz)
 func (_ Unimplemented) GetHealthz(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Log into the WordPress sites listed in a sheet's credential columns
+// (POST /linkbuilding/login)
+func (_ Unimplemented) LoginToSites(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -586,6 +609,26 @@ func (siw *ServerInterfaceWrapper) GetHealthz(w http.ResponseWriter, r *http.Req
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetHealthz(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// LoginToSites operation middleware
+func (siw *ServerInterfaceWrapper) LoginToSites(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.LoginToSites(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -910,6 +953,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/healthz", wrapper.GetHealthz)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/linkbuilding/login", wrapper.LoginToSites)
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/linkbuilding/qualify", wrapper.QualifyWebsites)
@@ -1291,6 +1337,44 @@ func (response GetHealthz503JSONResponse) VisitGetHealthzResponse(w http.Respons
 	return err
 }
 
+type LoginToSitesRequestObject struct {
+	Body *LoginToSitesJSONRequestBody
+}
+
+type LoginToSitesResponseObject interface {
+	VisitLoginToSitesResponse(w http.ResponseWriter) error
+}
+
+type LoginToSites202JSONResponse SiteLoginAccepted
+
+func (response LoginToSites202JSONResponse) VisitLoginToSitesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(202)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type LoginToSites400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response LoginToSites400ApplicationProblemPlusJSONResponse) VisitLoginToSitesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type QualifyWebsitesRequestObject struct {
 	Body *QualifyWebsitesJSONRequestBody
 }
@@ -1579,6 +1663,9 @@ type StrictServerInterface interface {
 	// Health check
 	// (GET /healthz)
 	GetHealthz(ctx context.Context, request GetHealthzRequestObject) (GetHealthzResponseObject, error)
+	// Log into the WordPress sites listed in a sheet's credential columns
+	// (POST /linkbuilding/login)
+	LoginToSites(ctx context.Context, request LoginToSitesRequestObject) (LoginToSitesResponseObject, error)
 	// Qualify donor websites listed in a sheet
 	// (POST /linkbuilding/qualify)
 	QualifyWebsites(ctx context.Context, request QualifyWebsitesRequestObject) (QualifyWebsitesResponseObject, error)
@@ -1874,6 +1961,37 @@ func (sh *strictHandler) GetHealthz(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// LoginToSites operation middleware
+func (sh *strictHandler) LoginToSites(w http.ResponseWriter, r *http.Request) {
+	var request LoginToSitesRequestObject
+
+	var body LoginToSitesJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.LoginToSites(ctx, request.(LoginToSitesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "LoginToSites")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(LoginToSitesResponseObject); ok {
+		if err := validResponse.VisitLoginToSitesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // QualifyWebsites operation middleware
 func (sh *strictHandler) QualifyWebsites(w http.ResponseWriter, r *http.Request) {
 	var request QualifyWebsitesRequestObject
@@ -2074,47 +2192,48 @@ func (sh *strictHandler) UpdateWordpressSite(w http.ResponseWriter, r *http.Requ
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"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",
-	"AAD//w==",
+	"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",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

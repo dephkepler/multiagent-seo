@@ -94,12 +94,12 @@ func (m *MockClient) Check(_ context.Context, content string) (*Result, error) {
 	}, nil
 }
 
-func clamp(v, min, max float64) float64 {
-	if v < min {
-		return min
+func clamp(v, lo, hi float64) float64 {
+	if v < lo {
+		return lo
 	}
-	if v > max {
-		return max
+	if v > hi {
+		return hi
 	}
 	return v
 }

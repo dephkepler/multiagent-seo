@@ -11,8 +11,6 @@ import (
 	"multiagent-seo/internal/domain/user"
 )
 
-var _ user.Repository = (*UserRepository)(nil)
-
 type UserRepository struct {
 	db *pgxpool.Pool
 }
