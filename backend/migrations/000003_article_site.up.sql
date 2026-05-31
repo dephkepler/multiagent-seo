@@ -1,0 +1,2 @@
+ALTER TABLE articles
+    ADD COLUMN IF NOT EXISTS site TEXT NOT NULL DEFAULT 'default';

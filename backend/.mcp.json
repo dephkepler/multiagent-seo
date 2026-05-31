@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "postgres": {
+      "command": "docker",
+      "args": [
+        "exec",
+        "-i",
+        "contentflow-mcp-postgres-1",
+        "postgres-mcp",
+        "--access-mode=unrestricted"
+      ]
+    }
+  }
+}

@@ -1,0 +1,51 @@
+package auth
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"time"
+
+	"golang.org/x/crypto/bcrypt"
+
+	"multiagent-seo/internal/domain/auth"
+	"multiagent-seo/internal/domain/user"
+)
+
+var ErrInvalidCredentials = errors.New("invalid credentials")
+
+type Service struct {
+	users  user.Repository
+	issuer auth.TokenIssuer
+}
+
+func NewService(users user.Repository, issuer auth.TokenIssuer) *Service {
+	return &Service{users: users, issuer: issuer}
+}
+
+// ListUsers returns all users for the admin list endpoint.
+func (s *Service) ListUsers(ctx context.Context) ([]user.User, error) {
+	return s.users.List(ctx)
+}
+
+func (s *Service) Login(ctx context.Context, email, password string) (string, time.Time, error) {
+	u, err := s.users.FindByEmail(ctx, email)
+	if err != nil {
+		// A missing user and a wrong password are reported identically so the
+		// response can't be used to enumerate which emails are registered.
+		if errors.Is(err, user.ErrNotFound) {
+			return "", time.Time{}, ErrInvalidCredentials
+		}
+		return "", time.Time{}, fmt.Errorf("login: %w", err)
+	}
+
+	if err := bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(password)); err != nil {
+		return "", time.Time{}, ErrInvalidCredentials
+	}
+
+	token, expiresAt, err := s.issuer.Issue(ctx, u.ID.String())
+	if err != nil {
+		return "", time.Time{}, fmt.Errorf("login: %w", err)
+	}
+	return token, expiresAt, nil
+}

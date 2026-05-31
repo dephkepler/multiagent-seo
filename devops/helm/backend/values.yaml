@@ -1,0 +1,69 @@
+name: contentflow
+labels: contentflow
+namespace: seo
+
+deployment:
+  replicas: 1
+  revisionHistoryLimit: 0
+  annotations:
+    sidecar.istio.io/holdApplicationUntilProxyStarts: "true"
+
+image: rg.fr-par.scw.cloud/your-org/contentflow
+version: latest
+
+registry:
+  secret: scaleway-registry-secret
+
+configuration:
+  server:
+    port: 8080
+
+  llm:
+    provider: groq
+    model: llama-3.3-70b-versatile
+
+  sheets:
+    sheet: "casino2"    # tab name in the spreadsheet
+    topicColumn: A      # article title (lookup key)
+    keywordColumn: B    # comma-separated target keywords
+    titleColumn: C      # article H1
+    headerRow: "true"
+    spreadsheetId: ""  # set per-env
+
+  worker:
+    pollInterval: 60s
+
+  article:
+    language: ru
+    minWords: "1500"
+    maxWords: "3000"
+    siteTopic: ""
+    extraRules: ""
+
+  checker:
+    provider: mock
+    aiThreshold: "0.8"
+    maxCycles: "3"
+
+connections:
+  wordpress:
+    url: https://your-site.com
+    user: your-wp-username
+
+  dataforseo:
+    login: your-dataforseo-login
+    serpLimit: "5"
+
+  telegram:
+    allowedUsers: ""  # comma-separated user IDs, e.g. "123456789,987654321"
+
+# K8s Secret names — must exist in the cluster before deploying.
+# See deploy/secrets.example.yaml for the expected keys.
+secrets:
+  db: contentflow-db              # key: url  (full DSN: postgres://user:pass@host:5432/dbname)
+  llm: contentflow-llm            # keys: apiKey, groqApiKey (opt), claudeApiKey (opt)
+  wordpress: contentflow-wp       # key: appPassword
+  telegram: contentflow-telegram  # key: botToken
+  dataforseo: contentflow-dfs     # key: password
+  checker: contentflow-checker    # key: apiKey (optional — leave empty if provider=mock)
+  sheets: contentflow-sheets      # key: credentials.json  (Google service account JSON file)
