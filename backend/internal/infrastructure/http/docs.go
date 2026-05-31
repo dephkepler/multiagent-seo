@@ -490,7 +490,10 @@ const landingPageHTML = `<!DOCTYPE html>
         max_cycles: num(data.get("cycles")),
         ai_threshold: isNaN(threshold) ? 0 : threshold,
         auto_publish: data.get("autopublish") === "true",
-        include_images: data.get("images") === "true"
+        include_images: data.get("images") === "true",
+        // Pexels attribution keeps creeping back into published posts; the
+        // dashboard always opts out so we don't have to remember.
+        include_image_attribution: false
       };
       btn.disabled = true; btn.textContent = "Creating…";
       authFetch("/generate", {
