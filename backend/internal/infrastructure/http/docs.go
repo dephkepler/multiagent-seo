@@ -92,17 +92,23 @@ const landingPageHTML = `<!DOCTYPE html>
     .wrap { max-width: 1100px; margin: 0 auto; }
     .card { background: white; padding: 24px; border-radius: 4px; margin-bottom: 16px; }
     h1 { margin: 0; font-size: 18px; font-weight: 600; }
-    .auth-bar {
-      display: flex; gap: 8px; align-items: center;
-      padding: 12px 16px; margin-bottom: 16px;
-      background: #fffbe6; border: 1px solid #ffe58f; border-radius: 4px;
+    .top-bar {
+      display: flex; gap: 12px; align-items: center; justify-content: space-between;
+      padding: 8px 12px; margin-bottom: 16px;
+      background: #f0f5ff; border: 1px solid #adc6ff; border-radius: 4px;
+      font-size: 12px; color: #595959;
     }
-    .auth-bar label { font-size: 13px; color: #595959; white-space: nowrap; }
-    .auth-bar input { flex: 1; padding: 6px 8px; border: 1px solid #d9d9d9; border-radius: 3px; font-size: 13px; font-family: ui-monospace, Menlo, monospace; }
-    .auth-bar button { padding: 6px 14px; background: #1677ff; color: white; border: none; border-radius: 3px; cursor: pointer; font-size: 13px; }
-    .auth-bar button:hover { background: #4096ff; }
-    .auth-bar .ok { color: #389e0d; font-weight: 600; }
-    .auth-bar .err { color: #cf1322; font-weight: 600; }
+    .top-bar .links a { margin-left: 12px; }
+    .add-site {
+      display: grid; grid-template-columns: 1fr 1.5fr 1fr 1.5fr auto; gap: 12px; align-items: end;
+    }
+    .add-site input { padding: 6px 8px; border: 1px solid #d9d9d9; border-radius: 3px; font-size: 13px; }
+    .add-site button {
+      padding: 7px 16px; background: #1677ff; color: white; border: none;
+      border-radius: 3px; font-size: 13px; cursor: pointer;
+    }
+    .add-site button:hover { background: #4096ff; }
+    .add-site button:disabled { background: #d9d9d9; cursor: wait; }
     form .row {
       display: grid;
       grid-template-columns: 1.5fr 1fr 1fr 1fr 1.2fr;
@@ -160,12 +166,35 @@ const landingPageHTML = `<!DOCTYPE html>
 </head>
 <body>
   <div class="wrap">
-    <div class="auth-bar">
-      <label>Bearer token:</label>
-      <input id="token-input" type="password" placeholder="paste JWT from POST /auth/login" autocomplete="off" />
-      <button id="save-token" type="button">Save</button>
-      <span id="auth-status"></span>
-      <a href="/docs" style="font-size:12px">Swagger ↗</a>
+    <div class="top-bar">
+      <span id="auth-status">signing in…</span>
+      <span class="links">
+        <a href="/docs">Swagger ↗</a>
+      </span>
+    </div>
+
+    <div class="card">
+      <h1 style="margin-bottom:12px">Add WordPress Site</h1>
+      <form id="add-site-form" class="add-site">
+        <div>
+          <label>Alias</label>
+          <input name="alias" placeholder="playpulse" required />
+        </div>
+        <div>
+          <label>URL</label>
+          <input name="url" type="url" placeholder="https://example.com" required />
+        </div>
+        <div>
+          <label>Username</label>
+          <input name="username" placeholder="admin" required />
+        </div>
+        <div>
+          <label>App password</label>
+          <input name="appPassword" type="password" placeholder="xxxx xxxx xxxx xxxx" required />
+        </div>
+        <button type="submit">Add</button>
+      </form>
+      <div id="add-site-msg" class="msg"></div>
     </div>
 
     <div class="card">
@@ -260,8 +289,9 @@ const landingPageHTML = `<!DOCTYPE html>
 
   <script>
     var TOKEN_KEY = "mas_token";
-    var tokenInput = document.getElementById("token-input");
-    var saveBtn = document.getElementById("save-token");
+    var AUTO_EMAIL = "verify@local.test";
+    var AUTO_PASSWORD = "verify123";
+
     var authStatus = document.getElementById("auth-status");
     var siteSelect = document.getElementById("site-select");
     var form = document.getElementById("gen-form");
@@ -270,6 +300,9 @@ const landingPageHTML = `<!DOCTYPE html>
     var btn = form.querySelector("button.create-btn");
     var refreshBtn = document.getElementById("refresh");
     var refreshInfo = document.getElementById("refresh-info");
+    var addSiteForm = document.getElementById("add-site-form");
+    var addSiteMsg = document.getElementById("add-site-msg");
+    var addSiteBtn = addSiteForm.querySelector("button");
 
     var sitesById = {};
     var lastFetchAt = null;
@@ -281,33 +314,36 @@ const landingPageHTML = `<!DOCTYPE html>
     function setToken(t) {
       if (t) localStorage.setItem(TOKEN_KEY, t);
       else localStorage.removeItem(TOKEN_KEY);
-      updateAuthUI();
     }
     function authHeaders() {
       var t = getToken();
       return t ? { "Authorization": "Bearer " + t } : {};
     }
-    function updateAuthUI() {
-      var t = getToken();
-      if (t) {
-        authStatus.innerHTML = '<span class="ok">✓ token set</span>';
-        tokenInput.value = "";
-        tokenInput.placeholder = "(token saved; paste a new one to replace)";
-      } else {
-        authStatus.innerHTML = '<span class="err">no token</span>';
-        tokenInput.placeholder = "paste JWT from POST /auth/login";
-      }
+
+    // Silent auto-login: dashboard does POST /auth/login with the shared service
+    // account when no valid token is on file. Users never see a login prompt.
+    function autoLogin() {
+      return fetch("/auth/login", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({email: AUTO_EMAIL, password: AUTO_PASSWORD})
+      }).then(function(r) {
+        if (!r.ok) throw new Error("auto-login HTTP " + r.status);
+        return r.json();
+      }).then(function(j) {
+        setToken(j.token);
+        authStatus.textContent = "signed in";
+      });
     }
-    saveBtn.addEventListener("click", function() {
-      var t = tokenInput.value.trim();
-      if (!t) { setToken(""); return; }
-      setToken(t);
-      loadSites();
-      loadArticles();
-    });
-    tokenInput.addEventListener("keydown", function(e) {
-      if (e.key === "Enter") { e.preventDefault(); saveBtn.click(); }
-    });
+
+    function ensureAuth() {
+      if (getToken()) {
+        authStatus.textContent = "signed in";
+        return Promise.resolve();
+      }
+      authStatus.textContent = "signing in…";
+      return autoLogin();
+    }
 
     function showMsg(text, ok) {
       msg.textContent = text;
@@ -390,6 +426,47 @@ const landingPageHTML = `<!DOCTYPE html>
         e.preventDefault();
         publishArticle(parseInt(t.dataset.publish, 10));
       }
+    });
+
+    addSiteForm.addEventListener("submit", function(e) {
+      e.preventDefault();
+      var data = new FormData(addSiteForm);
+      var body = {
+        alias: (data.get("alias") || "").trim(),
+        url: (data.get("url") || "").trim(),
+        username: (data.get("username") || "").trim(),
+        appPassword: data.get("appPassword") || ""
+      };
+      addSiteBtn.disabled = true;
+      addSiteMsg.style.display = "none";
+      authFetch("/wordpress-sites", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify(body)
+      }).then(function(r) {
+        return r.text().then(function(t) {
+          var j; try { j = JSON.parse(t); } catch (_) { j = { message: t }; }
+          return [r.ok, r.status, j];
+        });
+      }).then(function(tpl) {
+        if (tpl[0]) {
+          addSiteMsg.className = "msg ok";
+          addSiteMsg.textContent = "Added site " + tpl[2].alias;
+          addSiteMsg.style.display = "block";
+          addSiteForm.reset();
+          loadSites();
+        } else {
+          addSiteMsg.className = "msg err";
+          addSiteMsg.textContent = "Error (" + tpl[1] + "): " + (tpl[2].title || tpl[2].detail || tpl[2].message || "unknown");
+          addSiteMsg.style.display = "block";
+        }
+      }).catch(function(err) {
+        addSiteMsg.className = "msg err";
+        addSiteMsg.textContent = "Network error: " + err;
+        addSiteMsg.style.display = "block";
+      }).finally(function() {
+        addSiteBtn.disabled = false;
+      });
     });
 
     form.addEventListener("submit", function(e) {
@@ -546,10 +623,51 @@ const landingPageHTML = `<!DOCTYPE html>
 
     refreshBtn.addEventListener("click", loadArticles);
 
-    updateAuthUI();
-    loadSites();
-    loadArticles();
-    setInterval(tick, 1000);
+    function loadArticlesWithRefresh() {
+      if (!getToken()) {
+        rows.innerHTML = '<tr><td colspan="7" class="muted">No token — refresh the page.</td></tr>';
+        return;
+      }
+      isFetching = true;
+      refreshBtn.disabled = true;
+      updateRefreshInfo();
+      authFetch("/articles").then(function(r) {
+        if (r.status === 401) {
+          // Token expired — re-auth silently and retry once.
+          setToken("");
+          return autoLogin().then(function() { return authFetch("/articles"); });
+        }
+        return r;
+      }).then(function(r) {
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        return r.json();
+      }).then(function(list) {
+        if (!Array.isArray(list)) list = [];
+        list.sort(function(a, b) { return (b.id || 0) - (a.id || 0); });
+        latestArticles = list;
+        lastFetchAt = Date.now();
+        renderTable();
+        reschedulePolling();
+      }).catch(function(e) {
+        rows.innerHTML = '<tr><td colspan="7" style="color:#cf1322" class="muted">Load failed: ' + esc(String(e.message || e)) + '</td></tr>';
+      }).finally(function() {
+        isFetching = false;
+        refreshBtn.disabled = false;
+        updateRefreshInfo();
+      });
+    }
+
+    // Override the simpler loadArticles with the retry-on-401 version.
+    loadArticles = loadArticlesWithRefresh;
+
+    ensureAuth().then(function() {
+      loadSites();
+      loadArticles();
+      setInterval(tick, 1000);
+    }).catch(function(e) {
+      authStatus.innerHTML = '<span style="color:#cf1322">auto-login failed: ' + esc(String(e.message || e)) + '</span>';
+      rows.innerHTML = '<tr><td colspan="7" style="color:#cf1322" class="muted">Auto-login failed. Check that user ' + AUTO_EMAIL + ' exists.</td></tr>';
+    });
   </script>
 </body>
 </html>`
