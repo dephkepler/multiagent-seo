@@ -28,8 +28,6 @@ func NewWebsiteSource(ctx context.Context, credentialsFile, spreadsheetID string
 	return src, nil
 }
 
-// NewCredentialSource builds the same Google Sheets adapter for the Flow 2
-// login inventory: it reads the credential columns and writes the login status.
 func NewCredentialSource(ctx context.Context, credentialsFile, spreadsheetID string, log *slog.Logger) (linkbuilding.CredentialSource, error) {
 	src, err := newSource(ctx, credentialsFile, spreadsheetID, log)
 	if err != nil {
@@ -38,8 +36,6 @@ func NewCredentialSource(ctx context.Context, credentialsFile, spreadsheetID str
 	return src, nil
 }
 
-// NewPlacementSink builds the same Google Sheets adapter as a Flow 3 placement
-// sink — it writes per-donor "placed / failed" rows back to the I column.
 func NewPlacementSink(ctx context.Context, credentialsFile, spreadsheetID string, log *slog.Logger) (linkbuilding.PlacementSink, error) {
 	src, err := newSource(ctx, credentialsFile, spreadsheetID, log)
 	if err != nil {
@@ -58,8 +54,6 @@ func newSource(ctx context.Context, credentialsFile, spreadsheetID string, log *
 		return nil, fmt.Errorf("read credentials: %w", err)
 	}
 
-	// Read-write scope so the result/status writes can update the sheet;
-	// the keyword client (client.go) stays read-only.
 	creds, err := google.CredentialsFromJSON(ctx, data, sheets.SpreadsheetsScope)
 	if err != nil {
 		return nil, fmt.Errorf("parse credentials: %w", err)
@@ -94,9 +88,6 @@ func (s *websiteSource) List(ctx context.Context, sheet string) ([]linkbuilding.
 			continue
 		}
 		url := strings.TrimSpace(fmt.Sprint(row[0]))
-		// Only rows whose first cell is a URL count — this skips blanks and a
-		// header row like "URL"/"Website" without assuming row 1 is a header
-		// (the donor list often starts at row 1 with no header).
 		if !strings.HasPrefix(strings.ToLower(url), "http") {
 			continue
 		}
@@ -129,12 +120,6 @@ func (s *websiteSource) WriteResults(ctx context.Context, sheet string, results 
 				suitableCell(r.Suitable),
 			}},
 		})
-		// On a fresh "not suitable" verdict, blank only H — Flow 2's old
-		// "login ok / failed" status is operational state that loses meaning
-		// once the row is out of scope. Column I is the audit trail of what
-		// Flow 3 wrote into a live donor article and must NOT be wiped: even
-		// if the donor falls out of scope tomorrow, we still want a record of
-		// the backlink we already placed.
 		if !r.Suitable {
 			data = append(data, &sheets.ValueRange{
 				Range:  fmt.Sprintf("%s!H%d", sheet, r.Row),
@@ -163,7 +148,6 @@ func (s *websiteSource) WriteResults(ctx context.Context, sheet string, results 
 	return nil
 }
 
-// resultRange is the A1 range for a single result's qualification columns (B:D).
 func resultRange(sheet string, row int) string {
 	return fmt.Sprintf("%s!B%d:D%d", sheet, row, row)
 }
@@ -176,34 +160,31 @@ func suitableCell(suitable bool) string {
 }
 
 func (s *websiteSource) ListCredentials(ctx context.Context, sheet string) ([]linkbuilding.SiteCredential, error) {
-	// B:I covers the Flow 1 topic (B), suitability (D), credentials (E/F/G),
-	// the prior Flow 2 login status (H), and the prior Flow 3 placement
-	// status (I) — used by BacklinkService to skip donors where a backlink is
-	// already in place, so a repeat run doesn't add a second <a> tag to the
-	// same article. Column C (outbound count) is read but discarded.
-	rangeStr := fmt.Sprintf("%s!B:I", sheet)
-
-	resp, err := s.svc.Spreadsheets.Values.
-		Get(s.spreadsheetID, rangeStr).
-		Context(ctx).
-		Do()
+	aRange := fmt.Sprintf("%s!A:D", sheet)
+	aResp, err := s.svc.Spreadsheets.Values.Get(s.spreadsheetID, aRange).Context(ctx).Do()
 	if err != nil {
-		return nil, fmt.Errorf("fetch range %s: %w", rangeStr, err)
+		return nil, fmt.Errorf("fetch range %s: %w", aRange, err)
 	}
+	aVerdicts := parseAVerdicts(aResp.Values)
 
-	out := parseCredentialRows(resp.Values)
-	// Emit row+topic+base_url for every included row so a stale D=yes that
-	// snuck through (or a mismatch between Flow-1's column A and Flow-2's
-	// column E) is visible in a single log line — no need to cross-reference
-	// against the sheet by hand.
+	eRange := fmt.Sprintf("%s!E:I", sheet)
+	eResp, err := s.svc.Spreadsheets.Values.Get(s.spreadsheetID, eRange).Context(ctx).Do()
+	if err != nil {
+		return nil, fmt.Errorf("fetch range %s: %w", eRange, err)
+	}
+	out, rejectedUnknown, rejectedNotSuitable := parseECredentialsJoin(eResp.Values, aVerdicts)
+
 	included := make([]string, 0, len(out))
 	for _, c := range out {
 		included = append(included, fmt.Sprintf("row=%d topic=%q base=%s", c.Row, c.Topic, c.BaseURL))
 	}
 	s.log.InfoContext(ctx, "sheets credentials list",
 		"sheet", sheet,
-		"rows_scanned", len(resp.Values),
+		"a_qualified", len(aVerdicts),
+		"e_rows_scanned", len(eResp.Values),
 		"credentials", len(out),
+		"rejected_url_not_in_a", rejectedUnknown,
+		"rejected_not_suitable", rejectedNotSuitable,
 		"included", included,
 	)
 	return out, nil
@@ -271,17 +252,17 @@ func (s *websiteSource) WritePlacementStatus(ctx context.Context, sheet string, 
 }
 
 func (s *websiteSource) ClearStaleStatuses(ctx context.Context, sheet string) error {
-	rangeStr := fmt.Sprintf("%s!D:H", sheet)
-
-	resp, err := s.svc.Spreadsheets.Values.
-		Get(s.spreadsheetID, rangeStr).
-		Context(ctx).
-		Do()
+	aResp, err := s.svc.Spreadsheets.Values.Get(s.spreadsheetID, fmt.Sprintf("%s!A:D", sheet)).Context(ctx).Do()
 	if err != nil {
-		return fmt.Errorf("fetch range %s: %w", rangeStr, err)
+		return fmt.Errorf("fetch range %s!A:D: %w", sheet, err)
 	}
+	aVerdicts := parseAVerdicts(aResp.Values)
 
-	rows := staleStatusRows(resp.Values)
+	eResp, err := s.svc.Spreadsheets.Values.Get(s.spreadsheetID, fmt.Sprintf("%s!E:H", sheet)).Context(ctx).Do()
+	if err != nil {
+		return fmt.Errorf("fetch range %s!E:H: %w", sheet, err)
+	}
+	rows := staleEStatusRows(eResp.Values, aVerdicts)
 	if len(rows) == 0 {
 		return nil
 	}
@@ -306,35 +287,55 @@ func (s *websiteSource) ClearStaleStatuses(ctx context.Context, sheet string) er
 	return nil
 }
 
-// parseCredentialRows turns rows from the B:I range into credentials. Column
-// offsets: 0=topic (B), 1=outbound (C, unused), 2=suitable (D), 3=base URL (E),
-// 4=login (F), 5=password (G), 6=prior login status (H), 7=prior placement
-// status (I). Only rows the qualification marked suitable ("yes") and that
-// carry a URL + login + password are kept; the header row and
-// unsuitable/incomplete rows are skipped. Row is the 1-based sheet line so the
-// status can be written back.
-func parseCredentialRows(values [][]any) []linkbuilding.SiteCredential {
-	var out []linkbuilding.SiteCredential
+type qualVerdict struct {
+	Topic    string
+	Suitable bool
+}
+
+func parseAVerdicts(values [][]any) map[string]qualVerdict {
+	out := make(map[string]qualVerdict, len(values))
+	for _, row := range values {
+		url := cell(row, 0)
+		if !strings.HasPrefix(strings.ToLower(url), "http") {
+			continue
+		}
+		topic := cell(row, 1)
+		suitable := strings.ToLower(cell(row, 3))
+		out[normalizeURL(url)] = qualVerdict{
+			Topic:    topic,
+			Suitable: suitable == "yes",
+		}
+	}
+	return out
+}
+
+// parseECredentialsJoin walks the E:I range and emits credentials only for
+// rows whose E URL also lives in aVerdicts as suitable + classified. The Row
+// stored on each SiteCredential points back at the E-side row (so H/I writes
+// land on the credentials line, not on whatever unrelated URL happens to sit
+// at the same row in A).
+func parseECredentialsJoin(values [][]any, aVerdicts map[string]qualVerdict) (out []linkbuilding.SiteCredential, rejectedUnknown, rejectedNotSuitable int) {
 	for i, row := range values {
-		topic := cell(row, 0)
-		suitable := strings.ToLower(cell(row, 2))
-		base := cell(row, 3)
-		login := cell(row, 4)
-		password := cell(row, 5)
-		loginStatus := cell(row, 6)
-		placementStatus := cell(row, 7)
-		if suitable != "yes" {
-			continue
-		}
-		// Flow 1 never writes D=yes with an empty topic — IsSuitable can't
-		// return true on an empty classification. If we see that pair, the
-		// row carries stale yes from an earlier campaign whose Flow 1 didn't
-		// re-process this line (e.g., column A blank, so qualify skipped it),
-		// and we should not act on it.
-		if topic == "" {
-			continue
-		}
+		base := cell(row, 0)
+		login := cell(row, 1)
+		password := cell(row, 2)
+		loginStatus := cell(row, 3)
+		placementStatus := cell(row, 4)
 		if !strings.HasPrefix(strings.ToLower(base), "http") || login == "" || password == "" {
+			continue
+		}
+		v, ok := aVerdicts[normalizeURL(base)]
+		if !ok {
+			// URL has credentials but was never classified by Flow 1 — most
+			// likely the operator pasted it only into E and forgot column A.
+			rejectedUnknown++
+			continue
+		}
+		// Flow 1 never writes Suitable=true with an empty topic; treating
+		// "missing topic" the same as "not suitable" guards against stale
+		// D=yes from an earlier campaign that Flow 1 didn't re-process.
+		if !v.Suitable || v.Topic == "" {
+			rejectedNotSuitable++
 			continue
 		}
 		out = append(out, linkbuilding.SiteCredential{
@@ -342,12 +343,12 @@ func parseCredentialRows(values [][]any) []linkbuilding.SiteCredential {
 			BaseURL:         base,
 			Login:           login,
 			Password:        password,
-			Topic:           topic,
+			Topic:           v.Topic,
 			LoginStatus:     loginStatus,
 			PlacementStatus: placementStatus,
 		})
 	}
-	return out
+	return out, rejectedUnknown, rejectedNotSuitable
 }
 
 func cell(row []any, idx int) string {
@@ -357,19 +358,32 @@ func cell(row []any, idx int) string {
 	return strings.TrimSpace(fmt.Sprint(row[idx]))
 }
 
-// staleStatusRows returns the 1-based rows of the D:H range whose status (col H,
-// offset 4) is stale and should be blanked: a real site row (E is a URL) that is
-// no longer suitable (col D, offset 0) yet still carries a leftover status. The
-// header and blank rows (E not a URL) and suitable rows are left untouched.
-func staleStatusRows(values [][]any) []int {
+// normalizeURL lower-cases, trims whitespace, and drops a single trailing slash
+// so the join survives the cosmetic differences operators tend to leave
+// between A and E (e.g., "https://Site.com/" vs "https://site.com").
+func normalizeURL(s string) string {
+	s = strings.TrimSpace(strings.ToLower(s))
+	s = strings.TrimSuffix(s, "/")
+	return s
+}
+
+// staleEStatusRows returns 1-based rows in the E:H range whose H status is
+// orphaned: the URL in E is no longer suitable per aVerdicts (or not in A at
+// all) yet H still carries a status from a prior run. Used by Flow 2 to wipe
+// outdated H entries so the sheet matches the current campaign.
+func staleEStatusRows(values [][]any, aVerdicts map[string]qualVerdict) []int {
 	var rows []int
 	for i, row := range values {
-		suitable := strings.ToLower(cell(row, 0))
-		base := strings.ToLower(cell(row, 1))
-		status := cell(row, 4)
-		if strings.HasPrefix(base, "http") && suitable != "yes" && status != "" {
-			rows = append(rows, i+1)
+		base := cell(row, 0)
+		status := cell(row, 3)
+		if !strings.HasPrefix(strings.ToLower(base), "http") || status == "" {
+			continue
 		}
+		v, ok := aVerdicts[normalizeURL(base)]
+		if ok && v.Suitable {
+			continue
+		}
+		rows = append(rows, i+1)
 	}
 	return rows
 }

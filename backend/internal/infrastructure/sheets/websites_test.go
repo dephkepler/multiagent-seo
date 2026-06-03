@@ -30,44 +30,84 @@ func TestResultRangeTargetsRow(t *testing.T) {
 	}
 }
 
-func TestParseCredentialRows(t *testing.T) {
-	// Columns are B:I = topic | outbound | suitable | URL | login | password | login_status | placement_status.
+func TestParseAVerdicts(t *testing.T) {
+	// A:D = URL | topic | outbound | suitable
 	values := [][]any{
-		{"topic", "outbound", "suitable", "URL", "login", "password", "status", "placement"},                                // row 1: header → skipped
-		{"education", 12, "yes", "https://shdacademy.vn", "monamedia", "MonaM@123", "login ok", "placed: https://x/edit"},    // row 2: kept; placement_status surfaced
-		{"casino", 30, "no", "https://unsuitable.example", "user", "pass", "", ""},                                          // row 3: not suitable → skipped
-		{"education", 5, "yes", "https://only-url.example"},                                                                 // row 4: no login/pass → skipped
-		{"education", 1, "yes", "not-a-url", "user", "pass"},                                                                // row 5: not a URL → skipped
-		{"education", 8, "YES", " https://trimmed.example ", " admin ", " pw "},                                             // row 6: suitable, trimmed → kept; no I value at all
-		{"", 0, "yes", "https://stale-yes.example", "user", "pw", "login ok", ""},                                           // row 7: stale D=yes with empty topic → skipped
+		{"URL", "topic", "outbound", "suitable"},                 // header → skipped (col A not a URL)
+		{"https://travel.example", "travel", 7, "yes"},           // suitable travel
+		{"https://Greenworld.Com/", "travel", 1, "yes"},          // upper-case + trailing slash → normalized
+		{"https://acme.com", "tech", 5, "no"},                    // unsuitable
+		{"not-a-url", "topic", 1, "yes"},                         // garbage → skipped
+		{"https://no-topic.example", "", 0, ""},                  // empty topic + suitable=false
 	}
+	got := parseAVerdicts(values)
 
-	got := parseCredentialRows(values)
-
-	if len(got) != 2 {
-		t.Fatalf("got %d credentials, want 2 (only suitable rows with topic): %+v", len(got), got)
+	if v, ok := got["https://travel.example"]; !ok || v.Topic != "travel" || !v.Suitable {
+		t.Errorf("travel.example: %+v ok=%v", v, ok)
 	}
-	if got[0].Row != 2 || got[0].BaseURL != "https://shdacademy.vn" || got[0].Login != "monamedia" || got[0].Password != "MonaM@123" || got[0].Topic != "education" || got[0].LoginStatus != "login ok" || got[0].PlacementStatus != "placed: https://x/edit" {
-		t.Errorf("first credential wrong: %+v", got[0])
+	// Trailing slash + capital letters get normalized to lower-case, no slash.
+	if v, ok := got["https://greenworld.com"]; !ok || !v.Suitable {
+		t.Errorf("greenworld.com (normalized): %+v ok=%v", v, ok)
 	}
-	// row number preserved as the 1-based sheet line, fields trimmed, "YES" matched, missing I tolerated.
-	if got[1].Row != 6 || got[1].BaseURL != "https://trimmed.example" || got[1].Login != "admin" || got[1].Password != "pw" || got[1].Topic != "education" || got[1].PlacementStatus != "" {
-		t.Errorf("second credential wrong: %+v", got[1])
+	if v, ok := got["https://acme.com"]; !ok || v.Suitable {
+		t.Errorf("acme.com should be present but unsuitable: %+v ok=%v", v, ok)
+	}
+	if _, ok := got["not-a-url"]; ok {
+		t.Error("garbage URL should be skipped")
 	}
 }
 
-func TestStaleStatusRows(t *testing.T) {
-	// Columns are D:H = suitable | URL | login | password | status.
-	values := [][]any{
-		{"suitable", "URL", "login", "password", "status"},   // row 1: header (E not URL) → skip
-		{"yes", "https://keep.example", "u", "p", "login ok"}, // row 2: suitable → keep
-		{"no", "https://stale.example", "u", "p", "login ok"}, // row 3: unsuitable + status → clear
-		{"no", "https://blank.example", "u", "p", ""},         // row 4: unsuitable but no status → skip
-		{"no", "not-a-url", "", "", "failed"},                 // row 5: not a site row → skip
+func TestParseECredentialsJoin(t *testing.T) {
+	aVerdicts := map[string]qualVerdict{
+		"https://greenworldhotels.com": {Topic: "travel", Suitable: true},
+		"https://pennyforward.com":     {Topic: "ecommerce", Suitable: false},
+		// Note: "https://random.example" intentionally absent — not in column A.
 	}
 
-	got := staleStatusRows(values)
+	// E:I = baseURL | login | password | login_status | placement_status
+	values := [][]any{
+		{"baseURL", "login", "password", "status", "placement"},          // row 1: header (E not URL)
+		{"https://greenworldhotels.com", "root", "pw", "login ok", ""},   // row 2: suitable travel → kept
+		{"https://Pennyforward.com/", "u", "p", "", ""},                  // row 3: unsuitable per A → rejected_not_suitable
+		{"https://random.example", "u", "p", "", ""},                     // row 4: not in A at all → rejected_unknown
+		{"https://greenworldhotels.com/", "root", "pw", "", "placed: x"}, // row 5: trailing-slash variant joins → kept
+		{"https://acme.com", "", "", "", ""},                             // row 6: missing creds → skipped silently
+	}
+
+	got, rejUnknown, rejNotSuit := parseECredentialsJoin(values, aVerdicts)
+
+	if len(got) != 2 {
+		t.Fatalf("len(got) = %d, want 2; got=%+v", len(got), got)
+	}
+	if got[0].Row != 2 || got[0].BaseURL != "https://greenworldhotels.com" || got[0].Topic != "travel" || got[0].LoginStatus != "login ok" {
+		t.Errorf("first: %+v", got[0])
+	}
+	if got[1].Row != 5 || got[1].PlacementStatus != "placed: x" {
+		t.Errorf("second (trailing-slash variant): %+v", got[1])
+	}
+	if rejUnknown != 1 {
+		t.Errorf("rejUnknown = %d, want 1 (random.example)", rejUnknown)
+	}
+	if rejNotSuit != 1 {
+		t.Errorf("rejNotSuit = %d, want 1 (pennyforward unsuitable)", rejNotSuit)
+	}
+}
+
+func TestStaleEStatusRows(t *testing.T) {
+	aVerdicts := map[string]qualVerdict{
+		"https://keep.example": {Topic: "travel", Suitable: true},
+		// stale.example absent → orphan
+	}
+	// E:H = baseURL | login | password | login_status
+	values := [][]any{
+		{"baseURL", "login", "password", "status"},          // row 1: header (E not URL)
+		{"https://keep.example", "u", "p", "login ok"},      // row 2: suitable → keep
+		{"https://stale.example", "u", "p", "login ok"},     // row 3: not in A + has status → clear
+		{"https://blank.example", "u", "p", ""},             // row 4: empty status → no-op
+		{"not-a-url", "", "", "failed"},                     // row 5: not a site row → skip
+	}
+	got := staleEStatusRows(values, aVerdicts)
 	if len(got) != 1 || got[0] != 3 {
-		t.Errorf("staleStatusRows = %v, want [3]", got)
+		t.Errorf("staleEStatusRows = %v, want [3]", got)
 	}
 }
