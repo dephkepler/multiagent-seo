@@ -13,7 +13,6 @@ interface GenerateRequest {
   keyword: string
   site_id: string
   provider?: string
-  model?: string
   language?: string
   min_words?: number
   max_words?: number
@@ -22,13 +21,6 @@ interface GenerateRequest {
   ai_threshold?: number
   auto_publish?: boolean
   include_images?: boolean
-}
-
-// Each provider has its own model namespace, so we pick a sensible default per
-// provider transparently — the user only chooses the provider.
-const modelByProvider: Record<string, string> = {
-  groq: 'llama-3.3-70b-versatile',
-  claude: 'claude-haiku-4-5-20251001',
 }
 
 interface WordpressSite {
@@ -86,11 +78,8 @@ export default function GeneratePage() {
   const items: Article[] = Array.isArray(articles.data) ? articles.data : (articles.data as any)?.items || []
 
   const create = useMutation({
-    mutationFn: (body: GenerateRequest) => {
-      const provider = body.provider || 'groq'
-      const withModel = { ...body, model: modelByProvider[provider] || body.model }
-      return api<{ article_id: string }>('/generate', { method: 'POST', body: JSON.stringify(withModel) })
-    },
+    mutationFn: (body: GenerateRequest) =>
+      api<{ article_id: string }>('/generate', { method: 'POST', body: JSON.stringify(body) }),
     onSuccess: () => {
       toast.success('Queued')
       qc.invalidateQueries({ queryKey: ['articles'] })

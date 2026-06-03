@@ -378,6 +378,29 @@ paths:
         "400":
           $ref: "#/components/responses/BadRequest"
 
+  /linkbuilding/place-backlinks:
+    post:
+      operationId: placeBacklinks
+      security:
+        - bearerAuth: [ ]
+      tags: [ Link Building ]
+      summary: Place a backlink to one of our WordPress sites in each suitable donor's latest post
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PlaceBacklinksRequest"
+      responses:
+        "202":
+          description: Placement accepted; per-donor status is written to the sheet's I column
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlaceBacklinksAccepted"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
 components:
   securitySchemes:
     bearerAuth:
@@ -430,6 +453,12 @@ components:
           type: array
           items:
             type: string
+        provider:
+          type: string
+          description: Override the default LLM provider for this run only. Falls back to LLM_QUALIFY_PROVIDER (or LLM_PROVIDER) when empty.
+        model:
+          type: string
+          description: Override the default LLM model for this run only. Falls back to LLM_QUALIFY_MODEL (or LLM_MODEL) when empty.
 
     QualifyAccepted:
       type: object
@@ -448,8 +477,48 @@ components:
           type: string
           x-oapi-codegen-extra-tags:
             validate: "required,min=1"
+        topics:
+          type: array
+          items:
+            type: string
+          description: Optional Flow 1 topic allow-list. When set, only donors whose column B matches one of these (case-insensitive) are tried.
 
     SiteLoginAccepted:
+      type: object
+      required: [ sheet, sites_queued ]
+      properties:
+        sheet:
+          type: string
+        sites_queued:
+          type: integer
+
+    PlaceBacklinksRequest:
+      type: object
+      required: [ sheet, target_site_url ]
+      properties:
+        sheet:
+          type: string
+          x-oapi-codegen-extra-tags:
+            validate: "required,min=1"
+        target_site_url:
+          type: string
+          format: uri
+          description: Public URL of one of the user's wordpress_sites; the backend rejects URLs not present in that table.
+          x-oapi-codegen-extra-tags:
+            validate: "required,url"
+        topics:
+          type: array
+          items:
+            type: string
+          description: Optional Flow 1 topic allow-list. When set, only donors whose column B matches one of these (case-insensitive) are tried.
+        provider:
+          type: string
+          description: Override the default LLM provider for this run only. Falls back to LLM_BACKLINK_PROVIDER (or LLM_PROVIDER) when empty.
+        model:
+          type: string
+          description: Override the default LLM model for this run only. Falls back to LLM_BACKLINK_MODEL (or LLM_MODEL) when empty.
+
+    PlaceBacklinksAccepted:
       type: object
       required: [ sheet, sites_queued ]
       properties:

@@ -11,6 +11,7 @@ const links = [
   { href: '/sites', label: 'Sites' },
   { href: '/linkbuilding/qualify', label: 'Qualify donors' },
   { href: '/linkbuilding/login', label: 'Auto-login' },
+  { href: '/linkbuilding/place-backlinks', label: 'Place backlinks' },
 ]
 
 export function Nav() {

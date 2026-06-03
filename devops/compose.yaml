@@ -29,6 +29,9 @@ services:
       # 0.0.0.0 so the server is reachable from the host through the port map;
       # the localhost default would only bind inside the container.
       CF_APP_HOST: "0.0.0.0"
+      # debug surfaces every per-row sheet decision and the donor stage warnings;
+      # info is the production default.
+      CF_LOG_LEVEL: ${CF_LOG_LEVEL:-info}
       CF_DB_HOST: postgres
       CF_DB_PORT: "5432"
       CF_DB_USER: ${POSTGRES_USER}
