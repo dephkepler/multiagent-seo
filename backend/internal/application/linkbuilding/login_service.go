@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand"
+	"strings"
 	"time"
 
 	domain "multiagent-seo/internal/domain/linkbuilding"
@@ -57,6 +58,9 @@ func NewLoginService(creds domain.CredentialSource, auth domain.SiteAuthenticato
 
 type LoginRequest struct {
 	Sheet string
+	// Optional campaign-segment filter; same semantics as in PlaceBacklinksRequest.
+	// Empty = no extra filter, log into every D=yes donor.
+	Topics []string
 }
 
 type LoginQueued struct {
@@ -77,15 +81,36 @@ func (s *LoginService) LoginToSites(ctx context.Context, req LoginRequest) (Logi
 		return LoginQueued{}, fmt.Errorf("list credentials: %w", err)
 	}
 
+	// Narrow to the campaign-segment topics when provided; empty set = no filter.
+	topicAllow := make(map[string]struct{}, len(req.Topics))
+	for _, t := range req.Topics {
+		t = strings.TrimSpace(strings.ToLower(t))
+		if t != "" {
+			topicAllow[t] = struct{}{}
+		}
+	}
+	queued := creds
+	skippedTopic := 0
+	if len(topicAllow) > 0 {
+		queued = make([]domain.SiteCredential, 0, len(creds))
+		for _, c := range creds {
+			if _, ok := topicAllow[strings.TrimSpace(strings.ToLower(c.Topic))]; ok {
+				queued = append(queued, c)
+				continue
+			}
+			skippedTopic++
+		}
+	}
+
 	// Dispatch even when nothing is suitable: the job still clears stale
 	// statuses left on rows that are no longer suitable.
-	jobLog := s.log.With("sheet", req.Sheet, "sites", len(creds))
+	jobLog := s.log.With("sheet", req.Sheet, "sites", len(queued), "skipped_topic_mismatch", skippedTopic)
 	s.runner.Go(ctx, func(bg context.Context) {
-		s.loginAll(bg, jobLog, req.Sheet, creds)
+		s.loginAll(bg, jobLog, req.Sheet, queued)
 	})
 
 	jobLog.InfoContext(ctx, "site login accepted")
-	return LoginQueued{Sheet: req.Sheet, SitesQueued: len(creds)}, nil
+	return LoginQueued{Sheet: req.Sheet, SitesQueued: len(queued)}, nil
 }
 
 // loginAll logs into each site in turn, flushing statuses in chunks. A non-nil

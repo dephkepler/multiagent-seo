@@ -31,14 +31,14 @@ func TestResultRangeTargetsRow(t *testing.T) {
 }
 
 func TestParseCredentialRows(t *testing.T) {
-	// Columns are D:G = suitable | URL | login | password.
+	// Columns are B:H = topic | outbound | suitable | URL | login | password | login_status.
 	values := [][]any{
-		{"suitable", "URL", "login", "password"},                    // row 1: header → skipped
-		{"yes", "https://shdacademy.vn", "monamedia", "MonaM@123"},   // row 2: suitable → kept
-		{"no", "https://unsuitable.example", "user", "pass"},        // row 3: not suitable → skipped
-		{"yes", "https://only-url.example"},                         // row 4: no login/pass → skipped
-		{"yes", "not-a-url", "user", "pass"},                        // row 5: not a URL → skipped
-		{"YES", " https://trimmed.example ", " admin ", " pw "},     // row 6: suitable (any case), trimmed → kept
+		{"topic", "outbound", "suitable", "URL", "login", "password", "status"},                       // row 1: header → skipped
+		{"education", 12, "yes", "https://shdacademy.vn", "monamedia", "MonaM@123", "login ok"},       // row 2: suitable → kept
+		{"casino", 30, "no", "https://unsuitable.example", "user", "pass", ""},                        // row 3: not suitable → skipped
+		{"education", 5, "yes", "https://only-url.example"},                                           // row 4: no login/pass → skipped
+		{"education", 1, "yes", "not-a-url", "user", "pass"},                                          // row 5: not a URL → skipped
+		{"education", 8, "YES", " https://trimmed.example ", " admin ", " pw ", ""},                   // row 6: suitable (any case), trimmed → kept
 	}
 
 	got := parseCredentialRows(values)
@@ -46,11 +46,11 @@ func TestParseCredentialRows(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("got %d credentials, want 2 (only suitable rows): %+v", len(got), got)
 	}
-	if got[0].Row != 2 || got[0].BaseURL != "https://shdacademy.vn" || got[0].Login != "monamedia" || got[0].Password != "MonaM@123" {
+	if got[0].Row != 2 || got[0].BaseURL != "https://shdacademy.vn" || got[0].Login != "monamedia" || got[0].Password != "MonaM@123" || got[0].Topic != "education" || got[0].LoginStatus != "login ok" {
 		t.Errorf("first credential wrong: %+v", got[0])
 	}
 	// row number preserved as the 1-based sheet line, fields trimmed, "YES" matched.
-	if got[1].Row != 6 || got[1].BaseURL != "https://trimmed.example" || got[1].Login != "admin" || got[1].Password != "pw" {
+	if got[1].Row != 6 || got[1].BaseURL != "https://trimmed.example" || got[1].Login != "admin" || got[1].Password != "pw" || got[1].Topic != "education" {
 		t.Errorf("second credential wrong: %+v", got[1])
 	}
 }

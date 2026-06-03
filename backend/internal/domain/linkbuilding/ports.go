@@ -43,3 +43,41 @@ type CredentialSource interface {
 type SiteAuthenticator interface {
 	Login(ctx context.Context, cred SiteCredential) (LoginResult, error)
 }
+
+// PlacementSink writes the Flow 3 per-row outcome ("placed: <edit_url>" or a
+// failure reason) into the sheet's I column. Kept separate from
+// CredentialSource because it's only used by the backlink placement run.
+type PlacementSink interface {
+	WritePlacementStatus(ctx context.Context, sheet string, results []PlacementResult) error
+}
+
+// DonorCredentialStore caches the app-password we issued for each donor so the
+// next run skips the legacy form login. The store handles the at-rest
+// encryption of AppPassword.
+type DonorCredentialStore interface {
+	Get(ctx context.Context, donorURL string) (DonorCredential, bool, error)
+	Save(ctx context.Context, cred DonorCredential) error
+}
+
+// DonorAppPasswordIssuer logs into a donor's WordPress with the legacy
+// username + password from the sheet, then asks WP to mint a fresh
+// Application Password we can use for REST API auth on every future call.
+type DonorAppPasswordIssuer interface {
+	IssueAppPassword(ctx context.Context, donorURL, login, password string) (string, error)
+}
+
+// DonorPostEditor talks to the donor's WP REST API using an app password.
+// LatestPost returns the freshest published post; UpdatePostContent writes
+// modified HTML back to the same post.
+type DonorPostEditor interface {
+	LatestPost(ctx context.Context, cred DonorCredential) (DonorPost, error)
+	UpdatePostContent(ctx context.Context, cred DonorCredential, postID int64, newHTML string) error
+}
+
+// BacklinkPlacer asks an LLM to insert a contextually-anchored link to
+// targetURL into the existing post HTML, without changing the rest of the
+// article. The returned ModifiedHTML must contain targetURL; the caller checks
+// that as a sanity guard.
+type BacklinkPlacer interface {
+	Place(ctx context.Context, html, targetURL string) (BacklinkInsertion, error)
+}

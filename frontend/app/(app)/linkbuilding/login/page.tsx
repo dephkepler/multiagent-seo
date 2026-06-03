@@ -15,9 +15,20 @@ interface LoginAccepted {
 
 export default function AutoLoginPage() {
   const [sheet, setSheet] = useState('WEBSITES')
+  // Empty input = no topic filter, log into every D=yes donor.
+  const [topics, setTopics] = useState('')
 
   const run = useMutation({
-    mutationFn: () => api<LoginAccepted>('/linkbuilding/login', { method: 'POST', body: JSON.stringify({ sheet }) }),
+    mutationFn: () => {
+      const list = topics
+        .split(',')
+        .map((t) => t.trim())
+        .filter(Boolean)
+      return api<LoginAccepted>('/linkbuilding/login', {
+        method: 'POST',
+        body: JSON.stringify({ sheet, ...(list.length ? { topics: list } : {}) }),
+      })
+    },
     onSuccess: (r) => toast.success(`Queued ${r.sites_queued} sites in ${r.sheet}`),
     onError: (e: Error) => toast.error(e.message),
   })
@@ -40,6 +51,10 @@ export default function AutoLoginPage() {
           <div>
             <Label>Sheet tab</Label>
             <Input value={sheet} onChange={(e) => setSheet(e.target.value)} required />
+          </div>
+          <div>
+            <Label>Topics filter (optional, comma-separated)</Label>
+            <Input value={topics} onChange={(e) => setTopics(e.target.value)} placeholder='education, tech' />
           </div>
           <Button type='submit' disabled={run.isPending}>
             {run.isPending ? 'Queuing…' : 'Start auto-login'}
