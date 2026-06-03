@@ -39,12 +39,13 @@ func TestParseCredentialRows(t *testing.T) {
 		{"education", 5, "yes", "https://only-url.example"},                                           // row 4: no login/pass → skipped
 		{"education", 1, "yes", "not-a-url", "user", "pass"},                                          // row 5: not a URL → skipped
 		{"education", 8, "YES", " https://trimmed.example ", " admin ", " pw ", ""},                   // row 6: suitable (any case), trimmed → kept
+		{"", 0, "yes", "https://stale-yes.example", "user", "pw", "login ok"},                         // row 7: stale D=yes with empty topic → skipped
 	}
 
 	got := parseCredentialRows(values)
 
 	if len(got) != 2 {
-		t.Fatalf("got %d credentials, want 2 (only suitable rows): %+v", len(got), got)
+		t.Fatalf("got %d credentials, want 2 (only suitable rows with topic): %+v", len(got), got)
 	}
 	if got[0].Row != 2 || got[0].BaseURL != "https://shdacademy.vn" || got[0].Login != "monamedia" || got[0].Password != "MonaM@123" || got[0].Topic != "education" || got[0].LoginStatus != "login ok" {
 		t.Errorf("first credential wrong: %+v", got[0])

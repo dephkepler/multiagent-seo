@@ -189,18 +189,19 @@ func (s *websiteSource) ListCredentials(ctx context.Context, sheet string) ([]li
 	}
 
 	out := parseCredentialRows(resp.Values)
-	// Bumped from Debug to Info plus emit the actual row numbers that passed
-	// the suitable=yes filter — lets the user verify against the sheet exactly
-	// which rows we considered, without having to scroll the placement log.
-	rows := make([]int, 0, len(out))
+	// Emit row+topic+base_url for every included row so a stale D=yes that
+	// snuck through (or a mismatch between Flow-1's column A and Flow-2's
+	// column E) is visible in a single log line — no need to cross-reference
+	// against the sheet by hand.
+	included := make([]string, 0, len(out))
 	for _, c := range out {
-		rows = append(rows, c.Row)
+		included = append(included, fmt.Sprintf("row=%d topic=%q base=%s", c.Row, c.Topic, c.BaseURL))
 	}
 	s.log.InfoContext(ctx, "sheets credentials list",
 		"sheet", sheet,
 		"rows_scanned", len(resp.Values),
 		"credentials", len(out),
-		"included_rows", rows,
+		"included", included,
 	)
 	return out, nil
 }
@@ -318,6 +319,14 @@ func parseCredentialRows(values [][]any) []linkbuilding.SiteCredential {
 		password := cell(row, 5)
 		loginStatus := cell(row, 6)
 		if suitable != "yes" {
+			continue
+		}
+		// Flow 1 never writes D=yes with an empty topic — IsSuitable can't
+		// return true on an empty classification. If we see that pair, the
+		// row carries stale yes from an earlier campaign whose Flow 1 didn't
+		// re-process this line (e.g., column A blank, so qualify skipped it),
+		// and we should not act on it.
+		if topic == "" {
 			continue
 		}
 		if !strings.HasPrefix(strings.ToLower(base), "http") || login == "" || password == "" {
