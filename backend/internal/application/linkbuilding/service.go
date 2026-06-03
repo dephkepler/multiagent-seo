@@ -123,7 +123,14 @@ func (s *Service) QualifyWebsites(ctx context.Context, req QualifyRequest) (Qual
 	}
 
 	provider := pickStr(req.Provider, s.defaults.Provider)
-	model := pickStr(req.Model, s.defaults.Model)
+	// Only inherit defaults.Model when the provider didn't change — otherwise
+	// we'd ship a groq model name to claude (or vice versa). When the provider
+	// flips and model is empty, leave it blank and let the builder/factory
+	// pick the right per-provider default.
+	model := req.Model
+	if model == "" && provider == s.defaults.Provider {
+		model = s.defaults.Model
+	}
 	classifier, err := s.classifierBuilder(provider, model)
 	if err != nil {
 		return QualifyResult{}, fmt.Errorf("build classifier (%s/%s): %w", provider, model, err)

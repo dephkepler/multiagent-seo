@@ -201,6 +201,16 @@ func (s *Service) resolve(ctx context.Context, req GenerateRequest) (spec, error
 		attribution = *req.IncludeImageAttribution
 	}
 
+	provider := pickStr(req.Provider, s.defaults.Provider)
+	// Only inherit defaults.Model when the provider didn't change — otherwise
+	// we'd ship a groq model name to claude (or vice versa). When the provider
+	// flips and req.Model is empty, leave it blank so the factory falls back
+	// to the per-provider default model.
+	model := req.Model
+	if model == "" && provider == s.defaults.Provider {
+		model = s.defaults.Model
+	}
+
 	settings := spec{
 		keyword:          req.Keyword,
 		siteID:           req.SiteID,
@@ -209,8 +219,8 @@ func (s *Service) resolve(ctx context.Context, req GenerateRequest) (spec, error
 		language:         pickStr(req.Language, s.defaults.Language),
 		siteTopic:        pickStr(req.SiteTopic, s.defaults.SiteTopic),
 		extraRules:       pickStr(req.ExtraRules, s.defaults.ExtraRules),
-		provider:         pickStr(req.Provider, s.defaults.Provider),
-		model:            pickStr(req.Model, s.defaults.Model),
+		provider:         provider,
+		model:            model,
 		maxCycles:        pickInt(req.MaxCycles, s.defaults.MaxCycles),
 		aiThreshold:      pickFloat(req.AIThreshold, s.defaults.AIThreshold),
 		includeImages:    includeImages,
