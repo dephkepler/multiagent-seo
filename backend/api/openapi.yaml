@@ -441,20 +441,24 @@ components:
       properties:
         sheet:
           type: string
+          example: WEBSITES
           x-oapi-codegen-extra-tags:
             validate: "required,min=1"
         accepted_topics:
           type: array
           items:
             type: string
+          example: [ "travel" ]
           x-oapi-codegen-extra-tags:
             validate: "required,min=1"
         candidate_topics:
           type: array
           items:
             type: string
+          example: [ "travel", "tech", "ecommerce", "education", "casino", "news", "health", "food", "fashion", "fintech" ]
         provider:
           type: string
+          example: claude
           description: Override the default LLM provider for this run only. Falls back to LLM_QUALIFY_PROVIDER (or LLM_PROVIDER) when empty.
         model:
           type: string
@@ -475,12 +479,14 @@ components:
       properties:
         sheet:
           type: string
+          example: WEBSITES
           x-oapi-codegen-extra-tags:
             validate: "required,min=1"
         topics:
           type: array
           items:
             type: string
+          example: [ "travel" ]
           description: Optional Flow 1 topic allow-list. When set, only donors whose column B matches one of these (case-insensitive) are tried.
 
     SiteLoginAccepted:
@@ -498,11 +504,13 @@ components:
       properties:
         sheet:
           type: string
+          example: WEBSITES
           x-oapi-codegen-extra-tags:
             validate: "required,min=1"
         target_site_url:
           type: string
           format: uri
+          example: https://playpulse.tech
           description: Public URL of one of the user's wordpress_sites; the backend rejects URLs not present in that table.
           x-oapi-codegen-extra-tags:
             validate: "required,url"
@@ -510,9 +518,11 @@ components:
           type: array
           items:
             type: string
+          example: [ "travel" ]
           description: Optional Flow 1 topic allow-list. When set, only donors whose column B matches one of these (case-insensitive) are tried.
         provider:
           type: string
+          example: claude
           description: Override the default LLM provider for this run only. Falls back to LLM_BACKLINK_PROVIDER (or LLM_PROVIDER) when empty.
         model:
           type: string
