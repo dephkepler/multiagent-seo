@@ -112,6 +112,72 @@ func TestLLMKeyFor(t *testing.T) {
 	}
 }
 
+func TestLLMDefaultsFor(t *testing.T) {
+	base := LLMConfig{Provider: "groq", Model: "llama-3.3-70b-versatile"}
+
+	t.Run("unset task falls back to global", func(t *testing.T) {
+		p, m := base.DefaultsFor(TaskBacklink)
+		if p != "groq" || m != "llama-3.3-70b-versatile" {
+			t.Errorf("DefaultsFor(backlink) = (%q,%q), want global", p, m)
+		}
+	})
+
+	t.Run("per-task overrides take precedence", func(t *testing.T) {
+		c := base
+		c.BacklinkProvider = "claude"
+		c.BacklinkModel = "claude-haiku-4-5"
+		p, m := c.DefaultsFor(TaskBacklink)
+		if p != "claude" || m != "claude-haiku-4-5" {
+			t.Errorf("DefaultsFor(backlink) = (%q,%q), want override", p, m)
+		}
+		// Other task still uses global.
+		if p, m := c.DefaultsFor(TaskQualify); p != "groq" || m != "llama-3.3-70b-versatile" {
+			t.Errorf("DefaultsFor(qualify) = (%q,%q), want global (override is for backlink only)", p, m)
+		}
+	})
+
+	t.Run("only model overridden, provider stays global", func(t *testing.T) {
+		c := base
+		c.QualifyModel = "llama-3.1-8b-instant"
+		p, m := c.DefaultsFor(TaskQualify)
+		if p != "groq" || m != "llama-3.1-8b-instant" {
+			t.Errorf("DefaultsFor(qualify) = (%q,%q), want (groq, llama-3.1-8b-instant)", p, m)
+		}
+	})
+
+	t.Run("only provider overridden picks provider's own default model", func(t *testing.T) {
+		c := base
+		c.GroqDefaultModel = "llama-3.3-70b-versatile"
+		c.ClaudeDefaultModel = "claude-haiku-4-5"
+		c.BacklinkProvider = "claude"
+		// BacklinkModel intentionally empty — the fix is that this no longer
+		// leaks the groq default model when the user only specified provider.
+		p, m := c.DefaultsFor(TaskBacklink)
+		if p != "claude" || m != "claude-haiku-4-5" {
+			t.Errorf("DefaultsFor(backlink) = (%q,%q), want (claude, claude-haiku-4-5)", p, m)
+		}
+	})
+}
+
+func TestLLMModelFor(t *testing.T) {
+	c := LLMConfig{
+		Provider:           "groq",
+		Model:              "llama-3.3-70b-versatile",
+		GroqDefaultModel:   "llama-3.3-70b-versatile",
+		ClaudeDefaultModel: "claude-haiku-4-5",
+	}
+	if got := c.ModelFor("groq"); got != "llama-3.3-70b-versatile" {
+		t.Errorf("ModelFor(groq) = %q", got)
+	}
+	if got := c.ModelFor("claude"); got != "claude-haiku-4-5" {
+		t.Errorf("ModelFor(claude) = %q", got)
+	}
+	// anthropic alias normalizes to claude.
+	if got := c.ModelFor("anthropic"); got != "claude-haiku-4-5" {
+		t.Errorf("ModelFor(anthropic) = %q", got)
+	}
+}
+
 func TestLoad_RejectsDevSecretsOutsideLocal(t *testing.T) {
 	t.Setenv("CF_SENTRY_ENVIRONMENT", "production")
 	if _, err := Load(); err == nil {

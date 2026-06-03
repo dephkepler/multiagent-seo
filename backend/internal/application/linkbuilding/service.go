@@ -17,9 +17,12 @@ import (
 )
 
 const (
-	// maxConcurrentSites bounds parallel fetch+classify work so a large sheet
-	// doesn't open hundreds of sockets and LLM calls at once.
-	maxConcurrentSites = 8
+	// maxConcurrentSites bounds parallel fetch+classify work. Kept low because
+	// the 70B-class models we target have ~12k TPM free-tier budgets, and 8
+	// concurrent classifies easily punch through that into 429 storms; 2 keeps
+	// us well under the per-minute window while still hiding most network
+	// latency. Bump when running on dedicated/paid tiers.
+	maxConcurrentSites = 2
 	// resultFlushBatch writes results to the sheet as the run proceeds, so a job
 	// timeout can't discard everything already computed.
 	resultFlushBatch   = 25
@@ -32,34 +35,60 @@ var (
 	ErrNoTopics = errors.New("at least one accepted topic is required")
 )
 
+// LLMDefaults names the provider/model a service should use when the request
+// didn't pick its own. Mirrors apparticles.Defaults but kept tiny because
+// linkbuilding services only need these two knobs.
+type LLMDefaults struct {
+	Provider string
+	Model    string
+}
+
+// TopicClassifierBuilder constructs a fresh classifier bound to the given
+// provider/model. Wiring supplies it once (closing over the LLMFactory);
+// per-request overrides flow through the same builder so a single Qualify call
+// can target a different model than the deployment-wide default.
+type TopicClassifierBuilder func(provider, model string) (domain.TopicClassifier, error)
+
 type Service struct {
-	sites      domain.WebsiteSource
-	fetcher    domain.PageFetcher
-	classifier domain.TopicClassifier
-	runner     jobrunner.JobRunner
-	log        *slog.Logger
+	sites             domain.WebsiteSource
+	fetcher           domain.PageFetcher
+	classifierBuilder TopicClassifierBuilder
+	defaults          LLMDefaults
+	runner            jobrunner.JobRunner
+	log               *slog.Logger
 }
 
 func NewService(
 	sites domain.WebsiteSource,
 	fetcher domain.PageFetcher,
-	classifier domain.TopicClassifier,
+	classifierBuilder TopicClassifierBuilder,
+	defaults LLMDefaults,
 	runner jobrunner.JobRunner,
 	log *slog.Logger,
 ) *Service {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Service{sites: sites, fetcher: fetcher, classifier: classifier, runner: runner, log: log}
+	return &Service{
+		sites:             sites,
+		fetcher:           fetcher,
+		classifierBuilder: classifierBuilder,
+		defaults:          defaults,
+		runner:            runner,
+		log:               log,
+	}
 }
 
 // QualifyRequest is the use-case input. CandidateTopics is the set the classifier
 // chooses from; when empty it falls back to AcceptedTopics. A site is suitable
-// when its classified topic is in AcceptedTopics.
+// when its classified topic is in AcceptedTopics. Provider/Model override the
+// LLMDefaults for this run only.
 type QualifyRequest struct {
 	Sheet           string
 	AcceptedTopics  []string
 	CandidateTopics []string
+	Provider        string
+	Model           string
 }
 
 // QualifyResult is the synchronous 202-style outcome: how many websites were
@@ -93,20 +122,34 @@ func (s *Service) QualifyWebsites(ctx context.Context, req QualifyRequest) (Qual
 		return QualifyResult{Sheet: req.Sheet}, nil
 	}
 
-	jobLog := s.log.With("sheet", req.Sheet, "websites", len(sites))
+	provider := pickStr(req.Provider, s.defaults.Provider)
+	model := pickStr(req.Model, s.defaults.Model)
+	classifier, err := s.classifierBuilder(provider, model)
+	if err != nil {
+		return QualifyResult{}, fmt.Errorf("build classifier (%s/%s): %w", provider, model, err)
+	}
+
+	jobLog := s.log.With("sheet", req.Sheet, "websites", len(sites), "provider", provider, "model", model)
 	s.runner.Go(ctx, func(bg context.Context) {
-		s.qualifyAll(bg, jobLog, req.Sheet, sites, candidates, req.AcceptedTopics)
+		s.qualifyAll(bg, jobLog, req.Sheet, sites, candidates, req.AcceptedTopics, classifier)
 	})
 
 	jobLog.InfoContext(ctx, "website qualification accepted")
 	return QualifyResult{Sheet: req.Sheet, WebsitesQueued: len(sites)}, nil
 }
 
+func pickStr(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
+}
+
 // qualifyAll processes sites with bounded parallelism and writes results to the
 // sheet in batches as they complete. A per-site fetch/classify failure is
 // non-fatal (that row is marked unsuitable); a context cancellation aborts the
 // run without writing a misleading verdict for in-flight rows.
-func (s *Service) qualifyAll(ctx context.Context, log *slog.Logger, sheet string, sites []domain.Website, candidates, accepted []string) {
+func (s *Service) qualifyAll(ctx context.Context, log *slog.Logger, sheet string, sites []domain.Website, candidates, accepted []string, classifier domain.TopicClassifier) {
 	resultsCh := make(chan domain.Result)
 	sem := make(chan struct{}, maxConcurrentSites)
 	var wg sync.WaitGroup
@@ -124,7 +167,7 @@ func (s *Service) qualifyAll(ctx context.Context, log *slog.Logger, sheet string
 			go func(w domain.Website) {
 				defer wg.Done()
 				defer func() { <-sem }()
-				if res, ok := s.qualifyOne(ctx, log, w, candidates, accepted); ok {
+				if res, ok := s.qualifyOne(ctx, log, w, candidates, accepted, classifier); ok {
 					resultsCh <- res
 				}
 			}(w)
@@ -168,7 +211,7 @@ func (s *Service) qualifyAll(ctx context.Context, log *slog.Logger, sheet string
 // qualifyOne runs the fetch→count→classify→decide pipeline for one site. ok is
 // false when the context was cancelled mid-flight, so the caller skips writing a
 // misleading verdict for that row.
-func (s *Service) qualifyOne(ctx context.Context, log *slog.Logger, w domain.Website, candidates, accepted []string) (domain.Result, bool) {
+func (s *Service) qualifyOne(ctx context.Context, log *slog.Logger, w domain.Website, candidates, accepted []string, classifier domain.TopicClassifier) (domain.Result, bool) {
 	res := domain.Result{Row: w.Row, URL: w.URL}
 
 	page, err := s.fetcher.Fetch(ctx, w.URL)
@@ -182,7 +225,7 @@ func (s *Service) qualifyOne(ctx context.Context, log *slog.Logger, w domain.Web
 
 	res.OutboundDomains = domain.CountExternalDomains(w.URL, page.Links)
 
-	topic, err := s.classifier.Classify(ctx, page, candidates)
+	topic, err := classifier.Classify(ctx, page, candidates)
 	if err != nil {
 		if isCanceled(ctx, err) {
 			return domain.Result{}, false

@@ -3,12 +3,16 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
 	"os/signal"
 	"syscall"
 
+	"strings"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog/log"
 
 	appapitoken "multiagent-seo/internal/application/apitoken"
@@ -20,6 +24,8 @@ import (
 	domainarticles "multiagent-seo/internal/domain/articles"
 	domainauth "multiagent-seo/internal/domain/auth"
 	domainhealth "multiagent-seo/internal/domain/health"
+	domainlinkbuilding "multiagent-seo/internal/domain/linkbuilding"
+	"multiagent-seo/internal/infrastructure/backlinkplacer"
 	"multiagent-seo/internal/infrastructure/checker"
 	"multiagent-seo/internal/infrastructure/dataforseo"
 	"multiagent-seo/internal/infrastructure/db"
@@ -35,6 +41,7 @@ import (
 	"multiagent-seo/internal/infrastructure/webfetch"
 	infrawp "multiagent-seo/internal/infrastructure/wordpress"
 	"multiagent-seo/internal/infrastructure/wplogin"
+	"multiagent-seo/internal/infrastructure/wppost"
 	"multiagent-seo/pkg/config"
 	"multiagent-seo/pkg/jobrunner"
 	"multiagent-seo/pkg/logger"
@@ -73,6 +80,7 @@ func main() {
 	var articlesSvc *apparticles.Service
 	var apiTokenSvc *appapitoken.Service
 	var runner *jobrunner.AsyncRunner
+	var wordpressRepo *postgres.WordpressSiteRepository
 
 	pool, err := db.NewPool(ctx, cfg.Database)
 	if err != nil {
@@ -80,7 +88,7 @@ func main() {
 	} else {
 		defer pool.Close()
 		healthRepo = postgres.NewHealthRepository(pool)
-		wordpressRepo := postgres.NewWordpressSiteRepository(pool, cfg.WordPress.EncryptionKey)
+		wordpressRepo = postgres.NewWordpressSiteRepository(pool, cfg.WordPress.EncryptionKey)
 		wordpressSvc = appwordpress.NewService(wordpressRepo)
 		authSvc = appauth.NewService(postgres.NewUserRepository(pool), jwtSvc)
 		apiTokenSvc = appapitoken.NewService(postgres.NewApiTokenRepository(pool))
@@ -100,8 +108,10 @@ func main() {
 		)
 	}
 
-	// Link-building is Sheets-only (no DB), so it's built independently of the pool.
-	linkbuildingSvc, linkbuildingLoginSvc, lbRunner := buildLinkbuilding(ctx, cfg, slogLog)
+	// Link-building Flow 1/2 are Sheets-only; Flow 3 (place-backlinks) needs the
+	// DB to cache donor app-passwords and the wordpress repo to resolve target
+	// URLs. Both extra deps may be nil (no pool) — buildLinkbuilding handles it.
+	linkbuildingSvc, linkbuildingLoginSvc, linkbuildingBacklinkSvc, lbRunner := buildLinkbuilding(ctx, cfg, slogLog, pool, wordpressRepo)
 
 	healthSvc := apphealth.NewService(domainhealth.NewService(healthRepo))
 	server := handlers.NewServer(
@@ -109,7 +119,7 @@ func main() {
 		handlers.NewWordpressSitesHandler(nilableWordpressService(wordpressSvc)),
 		handlers.NewLoginHandler(nilableAuthService(authSvc)),
 		nilableArticlesHandler(articlesSvc),
-		nilableLinkbuildingHandler(linkbuildingSvc, linkbuildingLoginSvc),
+		nilableLinkbuildingHandler(linkbuildingSvc, linkbuildingLoginSvc, linkbuildingBacklinkSvc),
 		nilableApiTokensHandler(apiTokenSvc),
 	)
 
@@ -228,56 +238,132 @@ func nilableArticlesHandler(svc *apparticles.Service) *handlers.ArticlesHandler 
 	return handlers.NewArticlesHandler(svc)
 }
 
-// nilableLinkbuildingHandler passes untyped nil for whichever service is
-// absent, so the handler's nil checks (which return 503) work — a typed-nil
-// pointer stored in an interface would not compare equal to nil.
-func nilableLinkbuildingHandler(svc *applinkbuilding.Service, loginSvc *applinkbuilding.LoginService) *handlers.LinkbuildingHandler {
-	switch {
-	case svc != nil && loginSvc != nil:
-		return handlers.NewLinkbuildingHandler(svc, loginSvc)
-	case svc != nil:
-		return handlers.NewLinkbuildingHandler(svc, nil)
-	case loginSvc != nil:
-		return handlers.NewLinkbuildingHandler(nil, loginSvc)
-	default:
-		return handlers.NewLinkbuildingHandler(nil, nil)
-	}
+// nilableLinkbuildingHandler hands the constructor the typed-nil pointers
+// directly; the handler uses a reflect-based check that treats them as nil so
+// the 503 path still fires for missing prerequisites.
+func nilableLinkbuildingHandler(
+	svc *applinkbuilding.Service,
+	loginSvc *applinkbuilding.LoginService,
+	backlinkSvc *applinkbuilding.BacklinkService,
+) *handlers.LinkbuildingHandler {
+	return handlers.NewLinkbuildingHandler(svc, loginSvc, backlinkSvc)
 }
 
-// buildLinkbuilding wires the Sheets-only link-building feature. It returns nil
-// when its prerequisites (a writable Sheets website-source, an LLM for the topic
-// classifier) are absent, so the endpoint reports 503 instead of failing boot.
-func buildLinkbuilding(ctx context.Context, cfg config.Config, log *slog.Logger) (*applinkbuilding.Service, *applinkbuilding.LoginService, *jobrunner.AsyncRunner) {
+// buildLinkbuilding wires the link-building flows. Flow 1 (qualify) needs an
+// LLM; Flow 2 (login) needs only the sheets credential source; Flow 3
+// (place-backlinks) additionally needs the DB pool + wordpress repo to cache
+// donor app-passwords and resolve target URLs. Any flow whose prerequisites
+// are absent comes back nil so the endpoint reports 503 instead of crashing.
+func buildLinkbuilding(
+	ctx context.Context,
+	cfg config.Config,
+	log *slog.Logger,
+	pool *pgxpool.Pool,
+	wordpressRepo *postgres.WordpressSiteRepository,
+) (*applinkbuilding.Service, *applinkbuilding.LoginService, *applinkbuilding.BacklinkService, *jobrunner.AsyncRunner) {
 	src, err := sheets.NewWebsiteSource(ctx, cfg.Sheets.CredentialsFile, cfg.Sheets.SpreadsheetID, log)
 	if err != nil {
 		log.Warn("link-building disabled: website source unavailable", "err", err)
-		return nil, nil, nil
+		return nil, nil, nil, nil
 	}
 	runner := jobrunner.NewAsyncRunner(cfg.Server.BackgroundJobTimeout, log)
+	factory := infrallm.NewFactory(cfg.LLM, log)
 
-	// Qualification (Flow 1) needs the LLM topic classifier.
-	var qualifySvc *applinkbuilding.Service
-	if client, err := infrallm.NewFactory(cfg.LLM, log).ForModel(cfg.LLM.Provider, cfg.LLM.Model); err != nil {
-		log.Warn("link-building qualify disabled: llm classifier unavailable", "err", err)
-	} else {
-		qualifySvc = applinkbuilding.NewService(
-			src,
-			webfetch.New(log),
-			topicclassifier.New(classifierLLM{client}, log),
-			runner,
-			log,
-		)
+	// Qualification (Flow 1) — classifier built per request via the factory so
+	// the run can target a different model than the deployment default.
+	classifierBuilder := func(provider, model string) (domainlinkbuilding.TopicClassifier, error) {
+		client, err := factory.ForModel(provider, model)
+		if err != nil {
+			return nil, err
+		}
+		return topicclassifier.New(classifierLLM{client}, log), nil
 	}
+	qualifyProvider, qualifyModel := cfg.LLM.DefaultsFor(config.TaskQualify)
+	qualifySvc := applinkbuilding.NewService(
+		src,
+		webfetch.New(log),
+		classifierBuilder,
+		applinkbuilding.LLMDefaults{Provider: qualifyProvider, Model: qualifyModel},
+		runner,
+		log,
+	)
 
 	// Login (Flow 2) needs the credential source; it does not use the LLM.
-	var loginSvc *applinkbuilding.LoginService
-	if creds, err := sheets.NewCredentialSource(ctx, cfg.Sheets.CredentialsFile, cfg.Sheets.SpreadsheetID, log); err != nil {
+	creds, err := sheets.NewCredentialSource(ctx, cfg.Sheets.CredentialsFile, cfg.Sheets.SpreadsheetID, log)
+	if err != nil {
 		log.Warn("link-building login disabled: credential source unavailable", "err", err)
-	} else {
-		loginSvc = applinkbuilding.NewLoginService(creds, wplogin.New(log), runner, log)
+		return qualifySvc, nil, nil, runner
 	}
+	loginSvc := applinkbuilding.NewLoginService(creds, wplogin.New(log), runner, log)
 
-	return qualifySvc, loginSvc, runner
+	// Place-backlinks (Flow 3) wants DB + wordpress repo for the target-URL
+	// resolver, plus an LLM for the inline backlink rewrite.
+	if pool == nil || wordpressRepo == nil {
+		return qualifySvc, loginSvc, nil, runner
+	}
+	placements, err := sheets.NewPlacementSink(ctx, cfg.Sheets.CredentialsFile, cfg.Sheets.SpreadsheetID, log)
+	if err != nil {
+		log.Warn("link-building backlinks disabled: placement sink unavailable", "err", err)
+		return qualifySvc, loginSvc, nil, runner
+	}
+	placerBuilder := func(provider, model string) (domainlinkbuilding.BacklinkPlacer, error) {
+		client, err := factory.ForModel(provider, model)
+		if err != nil {
+			return nil, err
+		}
+		return backlinkplacer.New(placerLLM{client}, log), nil
+	}
+	backlinkProvider, backlinkModel := cfg.LLM.DefaultsFor(config.TaskBacklink)
+	backlinkSvc := applinkbuilding.NewBacklinkService(
+		creds,
+		placements,
+		postgres.NewDonorCredentialRepository(pool, cfg.WordPress.EncryptionKey),
+		wplogin.New(log),
+		wppost.New(log),
+		placerBuilder,
+		applinkbuilding.LLMDefaults{Provider: backlinkProvider, Model: backlinkModel},
+		wordpressTargetResolver{repo: wordpressRepo},
+		runner,
+		log,
+	)
+	return qualifySvc, loginSvc, backlinkSvc, runner
+}
+
+// placerLLM is the same adapter pattern as classifierLLM — the backlink placer's
+// port only needs the prose, not the token-usage triple.
+type placerLLM struct{ c domainarticles.LLMClient }
+
+func (a placerLLM) Complete(ctx context.Context, prompt string, maxTokens int) (string, error) {
+	out, _, err := a.c.Complete(ctx, prompt, maxTokens)
+	return out, err
+}
+
+// wordpressTargetResolver confirms the requested URL is one of our
+// wordpress_sites (case-insensitive, trailing-slash insensitive) and returns
+// the canonical stored form, so the backlink uses exactly what's in our DB.
+type wordpressTargetResolver struct{ repo *postgres.WordpressSiteRepository }
+
+func (r wordpressTargetResolver) ResolveSiteURL(ctx context.Context, raw string) (string, error) {
+	want := normalizeSiteURL(raw)
+	if want == "" {
+		return "", fmt.Errorf("invalid target site url")
+	}
+	sites, err := r.repo.List(ctx)
+	if err != nil {
+		return "", err
+	}
+	for _, s := range sites {
+		if normalizeSiteURL(s.URL) == want {
+			return s.URL, nil
+		}
+	}
+	return "", fmt.Errorf("target_site_url %q is not in wordpress_sites", raw)
+}
+
+func normalizeSiteURL(s string) string {
+	s = strings.TrimSpace(strings.ToLower(s))
+	s = strings.TrimSuffix(s, "/")
+	return s
 }
 
 // classifierLLM adapts the articles LLM client (whose Complete also returns token

@@ -7,6 +7,7 @@ import { api } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input, Label } from '@/components/ui/input'
+import { Select } from '@/components/ui/select'
 
 interface QualifyAccepted {
   sheet: string
@@ -17,6 +18,10 @@ export default function QualifyPage() {
   const [sheet, setSheet] = useState('WEBSITES')
   const [accepted, setAccepted] = useState('tech, education')
   const [candidate, setCandidate] = useState('tech, education, ecommerce, travel, casino')
+  // Empty string = let the backend use its env-level default (CF_LLM_QUALIFY_PROVIDER
+  // or the global CF_LLM_PROVIDER). The model is picked by the backend per provider
+  // so the UI doesn't have to track model names.
+  const [provider, setProvider] = useState('')
 
   const run = useMutation({
     mutationFn: () =>
@@ -26,6 +31,7 @@ export default function QualifyPage() {
           sheet,
           accepted_topics: parseList(accepted),
           candidate_topics: parseList(candidate),
+          ...(provider ? { provider } : {}),
         }),
       }),
     onSuccess: (r) => toast.success(`Queued ${r.websites_queued} websites in ${r.sheet}`),
@@ -57,6 +63,14 @@ export default function QualifyPage() {
           <div>
             <Label>Candidate topics (comma-separated, optional)</Label>
             <Input value={candidate} onChange={(e) => setCandidate(e.target.value)} />
+          </div>
+          <div>
+            <Label>Provider (optional)</Label>
+            <Select value={provider} onChange={(e) => setProvider(e.target.value)}>
+              <option value=''>Server default</option>
+              <option value='groq'>Groq</option>
+              <option value='claude'>Claude</option>
+            </Select>
           </div>
           <Button type='submit' disabled={run.isPending}>
             {run.isPending ? 'Queuing…' : 'Start qualification'}

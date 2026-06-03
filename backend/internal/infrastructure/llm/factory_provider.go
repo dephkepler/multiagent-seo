@@ -19,5 +19,11 @@ func NewFactory(cfg config.LLMConfig, log *slog.Logger) *Factory {
 }
 
 func (f *Factory) ForModel(provider, model string) (articles.LLMClient, error) {
+	// Empty model: pick the provider's own default, so callers that only know
+	// the vendor (e.g. /generate with provider=claude) don't accidentally ship
+	// a model name belonging to a different provider.
+	if model == "" {
+		model = f.cfg.ModelFor(provider)
+	}
 	return New(provider, f.cfg.KeyFor(provider), model, f.log)
 }
