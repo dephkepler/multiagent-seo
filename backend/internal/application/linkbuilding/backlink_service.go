@@ -144,13 +144,17 @@ func (s *BacklinkService) PlaceBacklinks(ctx context.Context, req PlaceBacklinks
 		}
 	}
 
-	// Two filters:
+	// Three filters:
 	// 1. Topic — narrow to current campaign segment (defends against a stale
 	//    D=yes lingering from a previous campaign's qualify run).
 	// 2. Flow 2 login status — skip rows that already proved we can't
 	//    authenticate; an empty status means Flow 2 hasn't run, so we still try.
+	// 3. Prior placement — if column I already says "placed: ...", we have
+	//    already modified that donor's article; running again would add a
+	//    second <a> tag to the same post. Skip; the operator can clear I in
+	//    the sheet to force a retry.
 	queued := make([]domain.SiteCredential, 0, len(creds))
-	var skippedTopic, skippedLogin int
+	var skippedTopic, skippedLogin, skippedAlreadyPlaced int
 	for _, c := range creds {
 		if len(topicAllow) > 0 {
 			if _, ok := topicAllow[strings.TrimSpace(strings.ToLower(c.Topic))]; !ok {
@@ -161,6 +165,10 @@ func (s *BacklinkService) PlaceBacklinks(ctx context.Context, req PlaceBacklinks
 		st := strings.TrimSpace(strings.ToLower(c.LoginStatus))
 		if st != "" && !strings.HasPrefix(st, "login ok") {
 			skippedLogin++
+			continue
+		}
+		if strings.HasPrefix(strings.TrimSpace(strings.ToLower(c.PlacementStatus)), "placed:") {
+			skippedAlreadyPlaced++
 			continue
 		}
 		queued = append(queued, c)
@@ -185,6 +193,7 @@ func (s *BacklinkService) PlaceBacklinks(ctx context.Context, req PlaceBacklinks
 		"sites", len(queued),
 		"skipped_topic_mismatch", skippedTopic,
 		"skipped_login_failed", skippedLogin,
+		"skipped_already_placed", skippedAlreadyPlaced,
 		"target_url", targetURL,
 		"provider", provider,
 		"model", model,

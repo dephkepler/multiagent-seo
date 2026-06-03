@@ -129,14 +129,16 @@ func (s *websiteSource) WriteResults(ctx context.Context, sheet string, results 
 				suitableCell(r.Suitable),
 			}},
 		})
-		// On a fresh "not suitable" verdict, blank H and I so a stale Flow 2
-		// "login ok" or Flow 3 "placed: ..." from a previous campaign doesn't
-		// linger on a row we just decided is out of scope. Suitable rows leave
-		// H/I untouched — those statuses are managed by Flow 2/3 themselves.
+		// On a fresh "not suitable" verdict, blank only H — Flow 2's old
+		// "login ok / failed" status is operational state that loses meaning
+		// once the row is out of scope. Column I is the audit trail of what
+		// Flow 3 wrote into a live donor article and must NOT be wiped: even
+		// if the donor falls out of scope tomorrow, we still want a record of
+		// the backlink we already placed.
 		if !r.Suitable {
 			data = append(data, &sheets.ValueRange{
-				Range:  fmt.Sprintf("%s!H%d:I%d", sheet, r.Row, r.Row),
-				Values: [][]any{{"", ""}},
+				Range:  fmt.Sprintf("%s!H%d", sheet, r.Row),
+				Values: [][]any{{""}},
 			})
 		}
 	}
@@ -174,11 +176,12 @@ func suitableCell(suitable bool) string {
 }
 
 func (s *websiteSource) ListCredentials(ctx context.Context, sheet string) ([]linkbuilding.SiteCredential, error) {
-	// B:H covers the Flow 1 topic (B) — surfaced for optional per-campaign
-	// topic filtering downstream — through suitability (D), credentials (E/F/G),
-	// and the prior Flow 2 login status (H). Column C (outbound count) is read
-	// but discarded.
-	rangeStr := fmt.Sprintf("%s!B:H", sheet)
+	// B:I covers the Flow 1 topic (B), suitability (D), credentials (E/F/G),
+	// the prior Flow 2 login status (H), and the prior Flow 3 placement
+	// status (I) — used by BacklinkService to skip donors where a backlink is
+	// already in place, so a repeat run doesn't add a second <a> tag to the
+	// same article. Column C (outbound count) is read but discarded.
+	rangeStr := fmt.Sprintf("%s!B:I", sheet)
 
 	resp, err := s.svc.Spreadsheets.Values.
 		Get(s.spreadsheetID, rangeStr).
@@ -303,12 +306,13 @@ func (s *websiteSource) ClearStaleStatuses(ctx context.Context, sheet string) er
 	return nil
 }
 
-// parseCredentialRows turns rows from the B:H range into credentials. Column
+// parseCredentialRows turns rows from the B:I range into credentials. Column
 // offsets: 0=topic (B), 1=outbound (C, unused), 2=suitable (D), 3=base URL (E),
-// 4=login (F), 5=password (G), 6=prior login status (H). Only rows the
-// qualification marked suitable ("yes") and that carry a URL + login + password
-// are kept; the header row and unsuitable/incomplete rows are skipped. Row is
-// the 1-based sheet line so the status can be written back.
+// 4=login (F), 5=password (G), 6=prior login status (H), 7=prior placement
+// status (I). Only rows the qualification marked suitable ("yes") and that
+// carry a URL + login + password are kept; the header row and
+// unsuitable/incomplete rows are skipped. Row is the 1-based sheet line so the
+// status can be written back.
 func parseCredentialRows(values [][]any) []linkbuilding.SiteCredential {
 	var out []linkbuilding.SiteCredential
 	for i, row := range values {
@@ -318,6 +322,7 @@ func parseCredentialRows(values [][]any) []linkbuilding.SiteCredential {
 		login := cell(row, 4)
 		password := cell(row, 5)
 		loginStatus := cell(row, 6)
+		placementStatus := cell(row, 7)
 		if suitable != "yes" {
 			continue
 		}
@@ -333,12 +338,13 @@ func parseCredentialRows(values [][]any) []linkbuilding.SiteCredential {
 			continue
 		}
 		out = append(out, linkbuilding.SiteCredential{
-			Row:         i + 1,
-			BaseURL:     base,
-			Login:       login,
-			Password:    password,
-			Topic:       topic,
-			LoginStatus: loginStatus,
+			Row:             i + 1,
+			BaseURL:         base,
+			Login:           login,
+			Password:        password,
+			Topic:           topic,
+			LoginStatus:     loginStatus,
+			PlacementStatus: placementStatus,
 		})
 	}
 	return out

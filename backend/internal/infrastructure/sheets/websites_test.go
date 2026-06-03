@@ -31,15 +31,15 @@ func TestResultRangeTargetsRow(t *testing.T) {
 }
 
 func TestParseCredentialRows(t *testing.T) {
-	// Columns are B:H = topic | outbound | suitable | URL | login | password | login_status.
+	// Columns are B:I = topic | outbound | suitable | URL | login | password | login_status | placement_status.
 	values := [][]any{
-		{"topic", "outbound", "suitable", "URL", "login", "password", "status"},                       // row 1: header → skipped
-		{"education", 12, "yes", "https://shdacademy.vn", "monamedia", "MonaM@123", "login ok"},       // row 2: suitable → kept
-		{"casino", 30, "no", "https://unsuitable.example", "user", "pass", ""},                        // row 3: not suitable → skipped
-		{"education", 5, "yes", "https://only-url.example"},                                           // row 4: no login/pass → skipped
-		{"education", 1, "yes", "not-a-url", "user", "pass"},                                          // row 5: not a URL → skipped
-		{"education", 8, "YES", " https://trimmed.example ", " admin ", " pw ", ""},                   // row 6: suitable (any case), trimmed → kept
-		{"", 0, "yes", "https://stale-yes.example", "user", "pw", "login ok"},                         // row 7: stale D=yes with empty topic → skipped
+		{"topic", "outbound", "suitable", "URL", "login", "password", "status", "placement"},                                // row 1: header → skipped
+		{"education", 12, "yes", "https://shdacademy.vn", "monamedia", "MonaM@123", "login ok", "placed: https://x/edit"},    // row 2: kept; placement_status surfaced
+		{"casino", 30, "no", "https://unsuitable.example", "user", "pass", "", ""},                                          // row 3: not suitable → skipped
+		{"education", 5, "yes", "https://only-url.example"},                                                                 // row 4: no login/pass → skipped
+		{"education", 1, "yes", "not-a-url", "user", "pass"},                                                                // row 5: not a URL → skipped
+		{"education", 8, "YES", " https://trimmed.example ", " admin ", " pw "},                                             // row 6: suitable, trimmed → kept; no I value at all
+		{"", 0, "yes", "https://stale-yes.example", "user", "pw", "login ok", ""},                                           // row 7: stale D=yes with empty topic → skipped
 	}
 
 	got := parseCredentialRows(values)
@@ -47,11 +47,11 @@ func TestParseCredentialRows(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("got %d credentials, want 2 (only suitable rows with topic): %+v", len(got), got)
 	}
-	if got[0].Row != 2 || got[0].BaseURL != "https://shdacademy.vn" || got[0].Login != "monamedia" || got[0].Password != "MonaM@123" || got[0].Topic != "education" || got[0].LoginStatus != "login ok" {
+	if got[0].Row != 2 || got[0].BaseURL != "https://shdacademy.vn" || got[0].Login != "monamedia" || got[0].Password != "MonaM@123" || got[0].Topic != "education" || got[0].LoginStatus != "login ok" || got[0].PlacementStatus != "placed: https://x/edit" {
 		t.Errorf("first credential wrong: %+v", got[0])
 	}
-	// row number preserved as the 1-based sheet line, fields trimmed, "YES" matched.
-	if got[1].Row != 6 || got[1].BaseURL != "https://trimmed.example" || got[1].Login != "admin" || got[1].Password != "pw" || got[1].Topic != "education" {
+	// row number preserved as the 1-based sheet line, fields trimmed, "YES" matched, missing I tolerated.
+	if got[1].Row != 6 || got[1].BaseURL != "https://trimmed.example" || got[1].Login != "admin" || got[1].Password != "pw" || got[1].Topic != "education" || got[1].PlacementStatus != "" {
 		t.Errorf("second credential wrong: %+v", got[1])
 	}
 }

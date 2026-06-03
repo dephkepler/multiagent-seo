@@ -38,12 +38,13 @@ type Result struct {
 // rewritten the boolean D flag. LoginStatus carries the prior Flow 2 verdict
 // from column H so Flow 3 can skip rows that already failed authentication.
 type SiteCredential struct {
-	Row         int
-	BaseURL     string
-	Login       string
-	Password    string
-	Topic       string
-	LoginStatus string
+	Row             int
+	BaseURL         string
+	Login           string
+	Password        string
+	Topic           string
+	LoginStatus     string
+	PlacementStatus string
 }
 
 // LoginResult is the outcome written back to the sheet. OK is true only on a
