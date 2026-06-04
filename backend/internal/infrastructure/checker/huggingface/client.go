@@ -1,6 +1,3 @@
-// Package huggingface implements checker.Client against HuggingFace's
-// Inference API. The default model is trained on English HC3 data, so accuracy
-// on non-English content is limited.
 package huggingface
 
 import (
@@ -19,10 +16,6 @@ import (
 	"unicode"
 )
 
-// Result is the checker output this client produces. It is a standalone type
-// (rather than importing the parent checker package) so the dependency only
-// ever points checker -> huggingface, avoiding an import cycle with the
-// factory that lives in the checker package.
 type Result struct {
 	AIScore          float64  `json:"ai_score"`
 	PlagiarismScore  float64  `json:"plagiarism_score"`
@@ -37,14 +30,14 @@ const (
 	defaultModel    = "Hello-SimpleAI/chatgpt-detector-roberta"
 	apiBase         = "https://router.huggingface.co/hf-inference/models/"
 	requestTimeout  = 60 * time.Second
-	maxInputChars   = 1500 // RoBERTa context is ~512 tokens
+	maxInputChars   = 1500
 	coldStartMaxTry = 3
 	coldStartDelay  = 20 * time.Second
 
-	minSentenceChars     = 40 // shorter snippets score too noisily to be useful
-	maxSentencesScored   = 20 // bound API cost: at most N sentence-level calls
-	maxFlaggedReturned   = 5  // K worst sentences fed to the humanize prompt
-	sentenceCallParallel = 4  // in-flight cap for sentence-level calls
+	minSentenceChars     = 40
+	maxSentencesScored   = 20
+	maxFlaggedReturned   = 5
+	sentenceCallParallel = 4
 )
 
 type Client struct {
@@ -74,7 +67,6 @@ func New(apiKey, model string, aiThreshold float64, log *slog.Logger) *Client {
 	}
 }
 
-// Response shape: [[{"label":"ChatGPT","score":0.92},{"label":"Human","score":0.08}]].
 type label struct {
 	Label string  `json:"label"`
 	Score float64 `json:"score"`
@@ -93,13 +85,11 @@ func (c *Client) Check(ctx context.Context, content string) (*Result, error) {
 
 	res := &Result{
 		AIScore:         round2(aiScore),
-		PlagiarismScore: 0, // HF detector has no plagiarism signal
+		PlagiarismScore: 0,
 		Original:        aiScore < c.aiThreshold,
 		Provider:        "huggingface:" + c.model,
 	}
 
-	// Sentence-level pass is purely diagnostic — it populates SentencesFlagged
-	// for the humanize prompt and never overrides the headline AIScore.
 	flagged := c.flagSentences(ctx, input)
 	res.SentencesFlagged = flagged
 
@@ -114,7 +104,6 @@ func (c *Client) Check(ctx context.Context, content string) (*Result, error) {
 	return res, nil
 }
 
-// score sends one input through the detector and returns the max non-human label score.
 func (c *Client) score(ctx context.Context, input string) (float64, error) {
 	body, err := json.Marshal(map[string]any{"inputs": input})
 	if err != nil {
@@ -139,7 +128,6 @@ func (c *Client) score(ctx context.Context, input string) (float64, error) {
 		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 		resp.Body.Close()
 
-		// 503 means the model is cold-loading on HF infra; back off and retry.
 		if resp.StatusCode == http.StatusServiceUnavailable {
 			c.log.WarnContext(ctx, "huggingface model loading, retrying",
 				"model", c.model, "attempt", attempt, "max", coldStartMaxTry)
@@ -168,7 +156,6 @@ func (c *Client) score(ctx context.Context, input string) (float64, error) {
 		return 0, fmt.Errorf("huggingface model %q still loading after %d attempts", c.model, coldStartMaxTry)
 	}
 
-	// Pick any non-human label so we tolerate model variations (ChatGPT/AI/etc.).
 	var aiScore float64
 	for _, l := range labels {
 		if !isHumanLabel(l.Label) {
@@ -180,17 +167,12 @@ func (c *Client) score(ctx context.Context, input string) (float64, error) {
 	return aiScore, nil
 }
 
-// flagSentences returns up to maxFlaggedReturned sentences whose individual AI
-// score meets the threshold, ordered by score descending. Failures on individual
-// sentences are logged and skipped — they never bubble up.
 func (c *Client) flagSentences(ctx context.Context, input string) []string {
 	sentences := splitSentences(input)
 	if len(sentences) == 0 {
 		return nil
 	}
 	if len(sentences) > maxSentencesScored {
-		// Longest sentences first — they're the highest-signal candidates and
-		// fit the per-call budget defined by maxSentencesScored.
 		sort.SliceStable(sentences, func(i, j int) bool {
 			return len(sentences[i]) > len(sentences[j])
 		})
@@ -203,7 +185,6 @@ func (c *Client) flagSentences(ctx context.Context, input string) []string {
 	}
 	results := make([]scored, len(sentences))
 
-	// Bounded concurrency with stdlib only: WaitGroup + buffered semaphore.
 	sem := make(chan struct{}, sentenceCallParallel)
 	var wg sync.WaitGroup
 	var failures atomic.Int64
@@ -215,8 +196,6 @@ func (c *Client) flagSentences(ctx context.Context, input string) []string {
 			defer func() { <-sem }()
 			score, err := c.score(ctx, s)
 			if err != nil {
-				// Aggregate rather than logging per sentence: a cold model would
-				// otherwise produce a Warn storm (one per scored sentence).
 				failures.Add(1)
 				return
 			}
@@ -251,9 +230,6 @@ func (c *Client) flagSentences(ctx context.Context, input string) []string {
 	return out
 }
 
-// splitSentences breaks text on `. `, `! `, `? ` when followed by an uppercase
-// letter or end-of-text. Trims whitespace and drops fragments shorter than
-// minSentenceChars to avoid scoring noise on stubs.
 func splitSentences(text string) []string {
 	var out []string
 	start := 0
@@ -266,7 +242,6 @@ func splitSentences(text string) []string {
 		if runes[i+1] != ' ' {
 			continue
 		}
-		// Require uppercase (or end) after the space to dodge "U.S. dollars" etc.
 		if i+2 >= len(runes) || unicode.IsUpper(runes[i+2]) {
 			seg := strings.TrimSpace(string(runes[start : i+1]))
 			if len(seg) >= minSentenceChars {
@@ -296,8 +271,6 @@ func round2(v float64) float64 {
 	return float64(int(v*100)) / 100
 }
 
-// truncate caps a response body before it lands in an error/log message so a
-// huge or runaway body can't bloat the logs.
 func truncate(b []byte) string {
 	const maxErrBody = 4 << 10
 	if len(b) > maxErrBody {

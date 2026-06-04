@@ -9,17 +9,12 @@ import (
 	"multiagent-seo/internal/infrastructure/checker/huggingface"
 )
 
-// checkFunc lets the adapter stay agnostic about whether the provider returns
-// checker.Result or huggingface.Result; both get mapped to articles.CheckResult.
 type checkFunc func(ctx context.Context, content string) (*articles.CheckResult, error)
 
 type adapter struct {
 	check checkFunc
 }
 
-// New builds a articles.ContentChecker for the given provider: "mock" (or ""),
-// or "huggingface". "originality" errors explicitly rather than silently falling
-// back to the mock — it was advertised in legacy config but never implemented.
 func New(provider, apiKey, model string, threshold float64, log *slog.Logger) (articles.ContentChecker, error) {
 	switch provider {
 	case "mock", "":

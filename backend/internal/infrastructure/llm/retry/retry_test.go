@@ -40,7 +40,7 @@ func TestDo_DoesNotRetryTerminal(t *testing.T) {
 	calls := 0
 	err := Do(context.Background(), cfg, nil, "test", func() error {
 		calls++
-		return fakeErr{status: 400} // 4xx (not 429) is terminal
+		return fakeErr{status: 400}
 	})
 	if err == nil {
 		t.Fatal("expected error")
@@ -51,8 +51,6 @@ func TestDo_DoesNotRetryTerminal(t *testing.T) {
 }
 
 func TestDo_HonorsRetryAfterOverBackoff(t *testing.T) {
-	// Backoff is tiny; Retry-After is larger → Do should wait at least the
-	// Retry-After before the second attempt.
 	cfg := Config{MaxAttempts: 2, Backoffs: []time.Duration{time.Microsecond}}
 	calls := 0
 	start := time.Now()

@@ -1,7 +1,3 @@
-// Package linkbuilding is the application-layer use-case that qualifies donor
-// websites: read a list from a sheet, classify each one's topic, count its
-// outbound domains, decide suitability, and write the results back. It owns no
-// infrastructure — every dependency is a domain port injected via the constructor.
 package linkbuilding
 
 import (
@@ -17,36 +13,21 @@ import (
 )
 
 const (
-	// maxConcurrentSites bounds parallel fetch+classify work. Kept low because
-	// the 70B-class models we target have ~12k TPM free-tier budgets, and 8
-	// concurrent classifies easily punch through that into 429 storms; 2 keeps
-	// us well under the per-minute window while still hiding most network
-	// latency. Bump when running on dedicated/paid tiers.
 	maxConcurrentSites = 2
-	// resultFlushBatch writes results to the sheet as the run proceeds, so a job
-	// timeout can't discard everything already computed.
 	resultFlushBatch   = 25
 	resultWriteTimeout = 30 * time.Second
 )
 
-// ErrNoSheet / ErrNoTopics guard the request; the HTTP layer maps them to 400.
 var (
 	ErrNoSheet  = errors.New("sheet name is required")
 	ErrNoTopics = errors.New("at least one accepted topic is required")
 )
 
-// LLMDefaults names the provider/model a service should use when the request
-// didn't pick its own. Mirrors apparticles.Defaults but kept tiny because
-// linkbuilding services only need these two knobs.
 type LLMDefaults struct {
 	Provider string
 	Model    string
 }
 
-// TopicClassifierBuilder constructs a fresh classifier bound to the given
-// provider/model. Wiring supplies it once (closing over the LLMFactory);
-// per-request overrides flow through the same builder so a single Qualify call
-// can target a different model than the deployment-wide default.
 type TopicClassifierBuilder func(provider, model string) (domain.TopicClassifier, error)
 
 type Service struct {
@@ -79,10 +60,6 @@ func NewService(
 	}
 }
 
-// QualifyRequest is the use-case input. CandidateTopics is the set the classifier
-// chooses from; when empty it falls back to AcceptedTopics. A site is suitable
-// when its classified topic is in AcceptedTopics. Provider/Model override the
-// LLMDefaults for this run only.
 type QualifyRequest struct {
 	Sheet           string
 	AcceptedTopics  []string
@@ -91,16 +68,11 @@ type QualifyRequest struct {
 	Model           string
 }
 
-// QualifyResult is the synchronous 202-style outcome: how many websites were
-// read and queued. Per-site results land in the sheet as the job runs.
 type QualifyResult struct {
 	Sheet          string
 	WebsitesQueued int
 }
 
-// QualifyWebsites reads the website list, then dispatches the per-site
-// fetch→count→classify→decide→write pipeline through the JobRunner and returns
-// immediately. A SyncRunner runs it inline (test seam).
 func (s *Service) QualifyWebsites(ctx context.Context, req QualifyRequest) (QualifyResult, error) {
 	if req.Sheet == "" {
 		return QualifyResult{}, ErrNoSheet
@@ -118,15 +90,10 @@ func (s *Service) QualifyWebsites(ctx context.Context, req QualifyRequest) (Qual
 		return QualifyResult{}, fmt.Errorf("list websites: %w", err)
 	}
 	if len(sites) == 0 {
-		// Nothing to qualify — no job dispatched, nothing written back.
 		return QualifyResult{Sheet: req.Sheet}, nil
 	}
 
 	provider := pickStr(req.Provider, s.defaults.Provider)
-	// Only inherit defaults.Model when the provider didn't change — otherwise
-	// we'd ship a groq model name to claude (or vice versa). When the provider
-	// flips and model is empty, leave it blank and let the builder/factory
-	// pick the right per-provider default.
 	model := req.Model
 	if model == "" && provider == s.defaults.Provider {
 		model = s.defaults.Model
@@ -152,10 +119,6 @@ func pickStr(a, b string) string {
 	return b
 }
 
-// qualifyAll processes sites with bounded parallelism and writes results to the
-// sheet in batches as they complete. A per-site fetch/classify failure is
-// non-fatal (that row is marked unsuitable); a context cancellation aborts the
-// run without writing a misleading verdict for in-flight rows.
 func (s *Service) qualifyAll(ctx context.Context, log *slog.Logger, sheet string, sites []domain.Website, candidates, accepted []string, classifier domain.TopicClassifier) {
 	resultsCh := make(chan domain.Result)
 	sem := make(chan struct{}, maxConcurrentSites)
@@ -188,8 +151,6 @@ func (s *Service) qualifyAll(ctx context.Context, log *slog.Logger, sheet string
 		if len(batch) == 0 {
 			return
 		}
-		// Detach from the job deadline so already-computed rows still persist even
-		// if the job context has timed out.
 		writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), resultWriteTimeout)
 		defer cancel()
 		if err := s.sites.WriteResults(writeCtx, sheet, batch); err != nil {
@@ -215,9 +176,6 @@ func (s *Service) qualifyAll(ctx context.Context, log *slog.Logger, sheet string
 	log.InfoContext(ctx, "website qualification done", "processed", processed)
 }
 
-// qualifyOne runs the fetch→count→classify→decide pipeline for one site. ok is
-// false when the context was cancelled mid-flight, so the caller skips writing a
-// misleading verdict for that row.
 func (s *Service) qualifyOne(ctx context.Context, log *slog.Logger, w domain.Website, candidates, accepted []string, classifier domain.TopicClassifier) (domain.Result, bool) {
 	res := domain.Result{Row: w.Row, URL: w.URL}
 
@@ -237,8 +195,6 @@ func (s *Service) qualifyOne(ctx context.Context, log *slog.Logger, w domain.Web
 		if isCanceled(ctx, err) {
 			return domain.Result{}, false
 		}
-		// A non-fatal classify failure leaves the topic empty (→ not suitable) but
-		// keeps the outbound count we already have.
 		log.WarnContext(ctx, "classify failed", "url", w.URL, "err", err)
 	} else {
 		res.Topic = topic
@@ -249,8 +205,6 @@ func (s *Service) qualifyOne(ctx context.Context, log *slog.Logger, w domain.Web
 	return res, true
 }
 
-// isCanceled reports whether the job context is done or err is a
-// cancellation/timeout, as opposed to a genuine per-site failure.
 func isCanceled(ctx context.Context, err error) bool {
 	return ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }

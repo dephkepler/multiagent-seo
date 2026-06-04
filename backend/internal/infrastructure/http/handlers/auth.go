@@ -50,7 +50,6 @@ func (h *LoginHandler) Login(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		log := logger.New(r.Context(), "handlers.auth")
 		if errors.Is(err, appauth.ErrInvalidCredentials) {
-			// Audit trail for failed logins; never log password or token.
 			log.Warn().Str("email", body.Email).Msg("login failed")
 			problem.Write(w, http.StatusUnauthorized, "invalid credentials")
 			return

@@ -309,11 +309,6 @@ func parseAVerdicts(values [][]any) map[string]qualVerdict {
 	return out
 }
 
-// parseECredentialsJoin walks the E:I range and emits credentials only for
-// rows whose E URL also lives in aVerdicts as suitable + classified. The Row
-// stored on each SiteCredential points back at the E-side row (so H/I writes
-// land on the credentials line, not on whatever unrelated URL happens to sit
-// at the same row in A).
 func parseECredentialsJoin(values [][]any, aVerdicts map[string]qualVerdict) (out []linkbuilding.SiteCredential, rejectedUnknown, rejectedNotSuitable int) {
 	for i, row := range values {
 		base := cell(row, 0)
@@ -326,14 +321,9 @@ func parseECredentialsJoin(values [][]any, aVerdicts map[string]qualVerdict) (ou
 		}
 		v, ok := aVerdicts[normalizeURL(base)]
 		if !ok {
-			// URL has credentials but was never classified by Flow 1 — most
-			// likely the operator pasted it only into E and forgot column A.
 			rejectedUnknown++
 			continue
 		}
-		// Flow 1 never writes Suitable=true with an empty topic; treating
-		// "missing topic" the same as "not suitable" guards against stale
-		// D=yes from an earlier campaign that Flow 1 didn't re-process.
 		if !v.Suitable || v.Topic == "" {
 			rejectedNotSuitable++
 			continue
@@ -358,19 +348,12 @@ func cell(row []any, idx int) string {
 	return strings.TrimSpace(fmt.Sprint(row[idx]))
 }
 
-// normalizeURL lower-cases, trims whitespace, and drops a single trailing slash
-// so the join survives the cosmetic differences operators tend to leave
-// between A and E (e.g., "https://Site.com/" vs "https://site.com").
 func normalizeURL(s string) string {
 	s = strings.TrimSpace(strings.ToLower(s))
 	s = strings.TrimSuffix(s, "/")
 	return s
 }
 
-// staleEStatusRows returns 1-based rows in the E:H range whose H status is
-// orphaned: the URL in E is no longer suitable per aVerdicts (or not in A at
-// all) yet H still carries a status from a prior run. Used by Flow 2 to wipe
-// outdated H entries so the sheet matches the current campaign.
 func staleEStatusRows(values [][]any, aVerdicts map[string]qualVerdict) []int {
 	var rows []int
 	for i, row := range values {

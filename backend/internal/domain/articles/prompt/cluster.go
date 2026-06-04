@@ -1,4 +1,3 @@
-// Package prompt builds the LLM prompts for the article-generation pipeline.
 package prompt
 
 import (
@@ -8,8 +7,6 @@ import (
 	"multiagent-seo/internal/domain/articles"
 )
 
-// renderCluster returns the "## Target Keywords" block, or empty when both the
-// title and keywords are empty.
 func renderCluster(c articles.Cluster) string {
 	title := strings.TrimSpace(c.Title)
 	var kws []string

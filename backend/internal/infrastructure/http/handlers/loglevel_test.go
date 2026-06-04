@@ -31,8 +31,6 @@ func TestDebugLogLevel_RequiresAuth(t *testing.T) {
 	srv := httptest.NewServer(newLogLevelRouter(jwtSvc))
 	defer srv.Close()
 
-	// Without a token the runtime log-level route must reject (it can amplify
-	// sensitive output), not silently pass through.
 	for _, m := range []string{http.MethodGet, http.MethodPut} {
 		req, _ := http.NewRequest(m, srv.URL+"/debug/log-level", nil)
 		resp, err := http.DefaultClient.Do(req)
@@ -45,8 +43,6 @@ func TestDebugLogLevel_RequiresAuth(t *testing.T) {
 		}
 	}
 
-	// With a valid token the route resolves (200, not 404) — proves it's gated,
-	// not absent.
 	token, _, err := jwtSvc.Issue(context.Background(), "user-1")
 	if err != nil {
 		t.Fatalf("issue token: %v", err)

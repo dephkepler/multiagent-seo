@@ -63,7 +63,6 @@ export default function GeneratePage() {
   })
   const siteOptions = (sites.data || []).filter((s) => s.enabled)
 
-  // Default the site to the first enabled one once loaded, so the form is valid.
   useEffect(() => {
     if (!form.site_id && siteOptions.length > 0) {
       setForm((f) => ({ ...f, site_id: siteOptions[0].id }))
@@ -96,7 +95,6 @@ export default function GeneratePage() {
     onError: (e: Error) => toast.error(e.message),
   })
 
-  // 1s tick so the "refreshed Ns ago" label and live elapsed values move.
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000)

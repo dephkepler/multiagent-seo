@@ -14,15 +14,13 @@ import (
 	"multiagent-seo/internal/domain/articles"
 )
 
-// mapPGError classifies known PostgreSQL error codes into clearer errors.
-// Unclassified codes (and non-pg errors) are returned unchanged.
 func mapPGError(err error) error {
 	var pgErr *pgconn.PgError
 	if !errors.As(err, &pgErr) {
 		return err
 	}
 	switch pgErr.Code {
-	case "23503": // foreign_key_violation
+	case "23503":
 		return fmt.Errorf("invalid site reference: %w", err)
 	default:
 		return err
@@ -51,7 +49,6 @@ func (r *ArticleRepository) Create(ctx context.Context, in articles.CreateArticl
 		"status":  articles.StatusGenerating,
 	}).Scan(&id)
 	if err != nil {
-		// A bad/deleted site_id violates the articles.site_id FK (pg 23503).
 		return 0, fmt.Errorf("create article: %w", mapPGError(err))
 	}
 	return id, nil
@@ -80,7 +77,6 @@ func (r *ArticleRepository) Get(ctx context.Context, id int64) (*articles.Articl
 }
 
 func (r *ArticleRepository) List(ctx context.Context) ([]articles.Article, error) {
-	// List omits the heavy JSONB columns; only Get loads them.
 	const q = `
 		SELECT id, keyword, site_id, site, status,
 		       COALESCE(wp_post_id, 0),
@@ -177,8 +173,6 @@ func (r *ArticleRepository) SaveCheckResult(ctx context.Context, id int64, resul
 	return r.exec(ctx, "save check result", q, pgx.NamedArgs{"result": b, "id": id})
 }
 
-// exec runs an UPDATE and maps a zero-row result to ErrNotFound so callers can
-// distinguish "no such article" from a successful no-op.
 func (r *ArticleRepository) exec(ctx context.Context, op, q string, args pgx.NamedArgs) error {
 	tag, err := r.db.Exec(ctx, q, args)
 	if err != nil {
@@ -190,7 +184,6 @@ func (r *ArticleRepository) exec(ctx context.Context, op, q string, args pgx.Nam
 	return nil
 }
 
-// scanArticle reads a list row (without the heavy JSONB columns).
 func scanArticle(row pgx.Row) (articles.Article, error) {
 	var (
 		a      articles.Article
@@ -211,11 +204,10 @@ func scanArticle(row pgx.Row) (articles.Article, error) {
 		&a.CreatedAt,
 		&a.UpdatedAt,
 	)
-	a.SiteID = siteID.UUID // zero UUID for legacy rows with NULL site_id
+	a.SiteID = siteID.UUID
 	return a, err
 }
 
-// scanArticleFull also reads the JSONB columns.
 func scanArticleFull(row pgx.Row) (articles.Article, error) {
 	var (
 		a      articles.Article

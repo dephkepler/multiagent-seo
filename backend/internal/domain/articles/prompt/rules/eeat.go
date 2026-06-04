@@ -1,6 +1,5 @@
 package rules
 
-// E-E-A-T rules: Experience, Expertise, Authoritativeness, Trustworthiness.
 var (
 	Experience = Rule{
 		ID:   "eeat.experience",

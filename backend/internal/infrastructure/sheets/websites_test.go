@@ -31,21 +31,19 @@ func TestResultRangeTargetsRow(t *testing.T) {
 }
 
 func TestParseAVerdicts(t *testing.T) {
-	// A:D = URL | topic | outbound | suitable
 	values := [][]any{
-		{"URL", "topic", "outbound", "suitable"},                 // header → skipped (col A not a URL)
-		{"https://travel.example", "travel", 7, "yes"},           // suitable travel
-		{"https://Greenworld.Com/", "travel", 1, "yes"},          // upper-case + trailing slash → normalized
-		{"https://acme.com", "tech", 5, "no"},                    // unsuitable
-		{"not-a-url", "topic", 1, "yes"},                         // garbage → skipped
-		{"https://no-topic.example", "", 0, ""},                  // empty topic + suitable=false
+		{"URL", "topic", "outbound", "suitable"},
+		{"https://travel.example", "travel", 7, "yes"},
+		{"https://Greenworld.Com/", "travel", 1, "yes"},
+		{"https://acme.com", "tech", 5, "no"},
+		{"not-a-url", "topic", 1, "yes"},
+		{"https://no-topic.example", "", 0, ""},
 	}
 	got := parseAVerdicts(values)
 
 	if v, ok := got["https://travel.example"]; !ok || v.Topic != "travel" || !v.Suitable {
 		t.Errorf("travel.example: %+v ok=%v", v, ok)
 	}
-	// Trailing slash + capital letters get normalized to lower-case, no slash.
 	if v, ok := got["https://greenworld.com"]; !ok || !v.Suitable {
 		t.Errorf("greenworld.com (normalized): %+v ok=%v", v, ok)
 	}
@@ -61,17 +59,15 @@ func TestParseECredentialsJoin(t *testing.T) {
 	aVerdicts := map[string]qualVerdict{
 		"https://greenworldhotels.com": {Topic: "travel", Suitable: true},
 		"https://pennyforward.com":     {Topic: "ecommerce", Suitable: false},
-		// Note: "https://random.example" intentionally absent — not in column A.
 	}
 
-	// E:I = baseURL | login | password | login_status | placement_status
 	values := [][]any{
-		{"baseURL", "login", "password", "status", "placement"},          // row 1: header (E not URL)
-		{"https://greenworldhotels.com", "root", "pw", "login ok", ""},   // row 2: suitable travel → kept
-		{"https://Pennyforward.com/", "u", "p", "", ""},                  // row 3: unsuitable per A → rejected_not_suitable
-		{"https://random.example", "u", "p", "", ""},                     // row 4: not in A at all → rejected_unknown
-		{"https://greenworldhotels.com/", "root", "pw", "", "placed: x"}, // row 5: trailing-slash variant joins → kept
-		{"https://acme.com", "", "", "", ""},                             // row 6: missing creds → skipped silently
+		{"baseURL", "login", "password", "status", "placement"},
+		{"https://greenworldhotels.com", "root", "pw", "login ok", ""},
+		{"https://Pennyforward.com/", "u", "p", "", ""},
+		{"https://random.example", "u", "p", "", ""},
+		{"https://greenworldhotels.com/", "root", "pw", "", "placed: x"},
+		{"https://acme.com", "", "", "", ""},
 	}
 
 	got, rejUnknown, rejNotSuit := parseECredentialsJoin(values, aVerdicts)
@@ -96,15 +92,13 @@ func TestParseECredentialsJoin(t *testing.T) {
 func TestStaleEStatusRows(t *testing.T) {
 	aVerdicts := map[string]qualVerdict{
 		"https://keep.example": {Topic: "travel", Suitable: true},
-		// stale.example absent → orphan
 	}
-	// E:H = baseURL | login | password | login_status
 	values := [][]any{
-		{"baseURL", "login", "password", "status"},          // row 1: header (E not URL)
-		{"https://keep.example", "u", "p", "login ok"},      // row 2: suitable → keep
-		{"https://stale.example", "u", "p", "login ok"},     // row 3: not in A + has status → clear
-		{"https://blank.example", "u", "p", ""},             // row 4: empty status → no-op
-		{"not-a-url", "", "", "failed"},                     // row 5: not a site row → skip
+		{"baseURL", "login", "password", "status"},
+		{"https://keep.example", "u", "p", "login ok"},
+		{"https://stale.example", "u", "p", "login ok"},
+		{"https://blank.example", "u", "p", ""},
+		{"not-a-url", "", "", "failed"},
 	}
 	got := staleEStatusRows(values, aVerdicts)
 	if len(got) != 1 || got[0] != 3 {

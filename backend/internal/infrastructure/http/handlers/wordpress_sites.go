@@ -132,8 +132,6 @@ func (h *WordpressSitesHandler) DeleteWordpressSite(w http.ResponseWriter, r *ht
 	response.NoContent(w)
 }
 
-// A nil service means the DB pool was missing at boot (see cmd/server wiring),
-// so we report the database as unavailable rather than panicking.
 func (h *WordpressSitesHandler) unavailable(w http.ResponseWriter) bool {
 	if h.sites == nil {
 		problem.Write(w, http.StatusServiceUnavailable, "database unavailable")
@@ -149,7 +147,6 @@ func (h *WordpressSitesHandler) writeError(ctx context.Context, w http.ResponseW
 	case errors.Is(err, domainwp.ErrAliasExists):
 		problem.Write(w, http.StatusConflict, "alias already in use")
 	default:
-		// Log the wrapped cause so 5xx origins are visible; client sees only "internal error".
 		log := logger.New(ctx, "handlers.wordpress_sites")
 		log.Error().Err(err).Msg("internal error")
 		problem.Write(w, http.StatusInternalServerError, "internal error")

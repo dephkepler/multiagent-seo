@@ -1,6 +1,3 @@
-// Package llm adapts the provider HTTP clients to the articles.LLMClient
-// domain port. Provider codecs return a transport.Client; client here wraps it
-// to translate transport usage counts into the domain Usage type.
 package llm
 
 import (

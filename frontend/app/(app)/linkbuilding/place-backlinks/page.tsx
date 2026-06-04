@@ -24,10 +24,7 @@ interface WordpressSite {
 export default function PlaceBacklinksPage() {
   const [sheet, setSheet] = useState('WEBSITES')
   const [targetSiteUrl, setTargetSiteUrl] = useState('')
-  // Empty input = no topic filter; otherwise narrow to those campaign segments.
   const [topics, setTopics] = useState('')
-  // Empty = let the backend use its env-level default (CF_LLM_BACKLINK_PROVIDER
-  // or CF_LLM_PROVIDER); model is auto-picked per provider.
   const [provider, setProvider] = useState('')
 
   const sites = useQuery({
@@ -36,7 +33,6 @@ export default function PlaceBacklinksPage() {
   })
   const siteOptions = (sites.data || []).filter((s) => s.enabled)
 
-  // Default the target site to the first enabled one once loaded.
   useEffect(() => {
     if (!targetSiteUrl && siteOptions.length > 0) {
       setTargetSiteUrl(siteOptions[0].url)

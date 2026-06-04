@@ -20,12 +20,8 @@ const (
 	ContextKeyUserID  ContextKey = "user_id"
 )
 
-// slogLevel is the live level for slog loggers. SetLevel updates it atomically,
-// so verbosity can change at runtime without rebuilding any logger.
 var slogLevel = new(slog.LevelVar)
 
-// Init applies the initial level to both zerolog (global) and slog, and installs
-// a JSON zerolog logger on stdout. Call once at startup after config is loaded.
 func Init(level string) error {
 	zl, sl, err := ParseLevel(level)
 	if err != nil {
@@ -37,7 +33,6 @@ func Init(level string) error {
 	return nil
 }
 
-// SetLevel changes the active level for both loggers at runtime.
 func SetLevel(level string) error {
 	zl, sl, err := ParseLevel(level)
 	if err != nil {
@@ -48,7 +43,6 @@ func SetLevel(level string) error {
 	return nil
 }
 
-// CurrentLevel reports the active level as a lowercase name.
 func CurrentLevel() string {
 	switch slogLevel.Level() {
 	case slog.LevelDebug:
@@ -62,7 +56,6 @@ func CurrentLevel() string {
 	}
 }
 
-// ParseLevel maps a name (debug|info|warn|error) to zerolog and slog levels.
 func ParseLevel(level string) (zerolog.Level, slog.Level, error) {
 	switch strings.ToLower(strings.TrimSpace(level)) {
 	case "debug":
@@ -78,8 +71,6 @@ func ParseLevel(level string) (zerolog.Level, slog.Level, error) {
 	}
 }
 
-// New returns a request-scoped zerolog logger (JSON on stdout) tagged with the
-// module and any trace/span/user IDs present in ctx. Level follows the global level.
 func New(ctx context.Context, module string) zerolog.Logger {
 	return newWithWriter(ctx, os.Stdout, module)
 }
@@ -101,19 +92,11 @@ func newWithWriter(ctx context.Context, out io.Writer, module string) zerolog.Lo
 	return logCtx.Str("module", module).Logger()
 }
 
-// NewSlog builds the application slog logger: JSON on stdout at the shared level
-// (SetLevel affects it at runtime) and trace-aware. Because the handler reads the
-// trace/span/user IDs from the context on every record, callers must use the
-// *Context log methods (InfoContext, ErrorContext, ...) for correlation — the
-// non-context methods pass a background context and so log without IDs.
 func NewSlog() *slog.Logger {
 	base := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slogLevel})
 	return slog.New(&contextHandler{Handler: base})
 }
 
-// contextHandler decorates each record with the trace/span/user IDs present in
-// the call's context, so infrastructure adapters (which hold a logger built once
-// at boot) still emit correlated logs during async jobs.
 type contextHandler struct {
 	slog.Handler
 }
@@ -127,8 +110,6 @@ func (h *contextHandler) Handle(ctx context.Context, rec slog.Record) error {
 	return h.Handler.Handle(ctx, rec)
 }
 
-// WithAttrs/WithGroup must re-wrap so the decoration survives logger.With(...);
-// the embedded handler's methods would otherwise return a bare base handler.
 func (h *contextHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 	return &contextHandler{Handler: h.Handler.WithAttrs(attrs)}
 }

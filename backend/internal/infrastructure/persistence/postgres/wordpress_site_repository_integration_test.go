@@ -35,7 +35,6 @@ func TestWordpressSiteRepository_CreateEncryptsAppPassword(t *testing.T) {
 		t.Errorf("returned site fields mismatch: %+v", site)
 	}
 
-	// The raw column must hold ciphertext, never the plaintext password.
 	var stored []byte
 	if err := pool.QueryRow(ctx,
 		`SELECT app_password FROM wordpress_sites WHERE id = $1`, site.ID).Scan(&stored); err != nil {
@@ -136,7 +135,6 @@ func TestWordpressSiteRepository_Update(t *testing.T) {
 	if updated.Alias != "after" {
 		t.Errorf("Alias = %q, want %q", updated.Alias, "after")
 	}
-	// Unchanged fields must be preserved.
 	if updated.URL != "https://before.example.com" || updated.Username != "u" {
 		t.Errorf("Update clobbered untouched fields: %+v", updated)
 	}
@@ -169,7 +167,6 @@ func TestWordpressSiteRepository_DeleteSoftDeletes(t *testing.T) {
 		t.Errorf("List after delete = %+v, want empty", list)
 	}
 
-	// Deleting again is a no-op that surfaces as not-found.
 	if err := repo.Delete(ctx, site.ID); !errors.Is(err, wordpress.ErrNotFound) {
 		t.Errorf("second Delete err = %v, want ErrNotFound", err)
 	}

@@ -17,8 +17,6 @@ type fakeSource struct {
 
 func (f *fakeSource) List(context.Context, string) ([]domain.Website, error) { return f.sites, nil }
 
-// WriteResults appends so chunked flushes (and out-of-order parallel results)
-// are all captured.
 func (f *fakeSource) WriteResults(_ context.Context, _ string, r []domain.Result) error {
 	f.written = append(f.written, r...)
 	return nil
@@ -28,8 +26,6 @@ type fakeFetcher struct{ page domain.Page }
 
 func (f fakeFetcher) Fetch(context.Context, string) (domain.Page, error) { return f.page, nil }
 
-// scriptedFetcher returns a per-URL page or error, for partial-failure and
-// cancellation tests.
 type scriptedFetcher struct {
 	pages map[string]domain.Page
 	errs  map[string]error
@@ -66,7 +62,6 @@ func TestQualifyWebsites_WritesPerSiteResults(t *testing.T) {
 		t.Fatalf("queued = %d, want 1", res.WebsitesQueued)
 	}
 
-	// SyncRunner ran inline, so results are already written back.
 	if len(src.written) != 1 {
 		t.Fatalf("written = %d, want 1", len(src.written))
 	}
@@ -74,7 +69,7 @@ func TestQualifyWebsites_WritesPerSiteResults(t *testing.T) {
 	if got.Row != 2 || got.Topic != "gambling" || !got.Suitable {
 		t.Errorf("result = %+v, want row 2 / gambling / suitable", got)
 	}
-	if got.OutboundDomains != 2 { // other.com, second.net (acme.com is internal)
+	if got.OutboundDomains != 2 {
 		t.Errorf("outbound = %d, want 2", got.OutboundDomains)
 	}
 }
@@ -97,7 +92,7 @@ func TestQualifyWebsites_UnacceptedTopicNotSuitable(t *testing.T) {
 func TestQualifyWebsites_ParallelPartialFailure(t *testing.T) {
 	sites := []domain.Website{
 		{Row: 2, URL: "https://a.com"},
-		{Row: 3, URL: "https://b.com"}, // fetch fails → unsuitable, run continues
+		{Row: 3, URL: "https://b.com"},
 		{Row: 4, URL: "https://c.com"},
 	}
 	src := &fakeSource{sites: sites}
@@ -117,7 +112,6 @@ func TestQualifyWebsites_ParallelPartialFailure(t *testing.T) {
 		t.Fatalf("QualifyWebsites: %v", err)
 	}
 
-	// Results arrive in completion (not input) order, so index by row.
 	byRow := make(map[int]domain.Result, len(src.written))
 	for _, r := range src.written {
 		byRow[r.Row] = r
@@ -144,7 +138,6 @@ func TestQualifyWebsites_CanceledFetchNotWritten(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("QualifyWebsites: %v", err)
 	}
-	// A cancellation must abort, not write a misleading "unsuitable" verdict.
 	if len(src.written) != 0 {
 		t.Errorf("canceled fetch must not write a verdict, got %d rows", len(src.written))
 	}

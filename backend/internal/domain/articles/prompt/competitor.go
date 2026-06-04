@@ -26,8 +26,6 @@ type Competitors struct {
 	FeaturedSnippet *FeaturedSnippetItem
 }
 
-// CompetitorsFrom adapts the SERP port's CompetitorData into the prompt's
-// render shape. A nil data yields an empty (no-op) Competitors.
 func CompetitorsFrom(data *articles.CompetitorData) Competitors {
 	var c Competitors
 	if data == nil {
@@ -51,7 +49,6 @@ func CompetitorsFrom(data *articles.CompetitorData) Competitors {
 	return c
 }
 
-// Render returns a formatted SERP-context section, or empty when nothing is set.
 func (c Competitors) Render() string {
 	if len(c.Items) == 0 && len(c.PAA) == 0 && c.FeaturedSnippet == nil {
 		return ""
@@ -100,8 +97,6 @@ func (c Competitors) Render() string {
 	return sb.String()
 }
 
-// RenderSlim returns a compact SERP context block for the writer/editor, where
-// the full brief is also present and we only need a quick competitor recap.
 func (c Competitors) RenderSlim() string {
 	if len(c.Items) == 0 && len(c.PAA) == 0 && c.FeaturedSnippet == nil {
 		return ""

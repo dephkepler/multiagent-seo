@@ -31,8 +31,6 @@ func (p *Problem) WithInstance(instance string) *Problem {
 	return p
 }
 
-// With adds an RFC 9457 extension member. Panics if key is a core member
-// (type, title, status, detail, instance) — RFC 9457 §3.2 forbids redefining them.
 func (p *Problem) With(key string, value any) *Problem {
 	switch key {
 	case "type", "title", "status", "detail", "instance":
@@ -70,7 +68,6 @@ func (p *Problem) WriteTo(w http.ResponseWriter) {
 	_ = json.NewEncoder(w).Encode(p)
 }
 
-// Write is a convenience wrapper for the common case with no extensions.
 func Write(w http.ResponseWriter, status int, detail string) {
 	New(status, detail).WriteTo(w)
 }

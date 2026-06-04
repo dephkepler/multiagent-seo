@@ -23,7 +23,6 @@ export async function api<T = unknown>(path: string, init: RequestInit = {}): Pr
     throw new ApiError(401, 'unauthorized')
   }
   if (!res.ok) {
-    // RFC 7807 problem+json uses `title`/`detail`; fall back to body or status.
     const msg = body?.title || body?.detail || (typeof body === 'string' ? body : res.statusText)
     throw new ApiError(res.status, msg)
   }

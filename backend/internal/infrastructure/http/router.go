@@ -22,8 +22,6 @@ func NewRouter(cfg config.ServerConfig, api oapigen.ServerInterface, authMW oapi
 	r := chi.NewRouter()
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.RequestID)
-	// A wildcard origin with credentials is a credential-leak footgun (and the
-	// browser rejects it anyway), so only allow credentials for explicit origins.
 	allowCredentials := !slices.Contains(cfg.CORSAllowedOrigins, "*")
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   cfg.CORSAllowedOrigins,
@@ -37,17 +35,11 @@ func NewRouter(cfg config.ServerConfig, api oapigen.ServerInterface, authMW oapi
 	r.Use(httpMiddleware.SentryScopeEnhancer)
 
 	sub := chi.NewRouter()
-	// Public, unauthenticated docs routes. Registered on the same base router as
-	// the API operations; oapigen bakes auth into each operation handler (not via
-	// router middleware), so these stay open.
 	sub.Get("/", handleLandingPage)
 	sub.Get("/docs", handleSwaggerUI)
 	sub.Get("/docs/", handleSwaggerUI)
 	sub.Get("/openapi.json", handleOpenAPISpec)
 
-	// Runtime log-level control, gated behind bearer auth. oapigen normally sets
-	// the auth marker per operation; for these hand-mounted routes we set it
-	// ourselves so BearerAuth enforces a token.
 	if authMW != nil {
 		sub.Group(func(gr chi.Router) {
 			gr.Use(requireBearer, authMW)
@@ -69,8 +61,6 @@ func NewRouter(cfg config.ServerConfig, api oapigen.ServerInterface, authMW oapi
 	return r
 }
 
-// requireBearer marks the request as auth-required so BearerAuth — which is
-// otherwise gated on oapigen's per-operation scope marker — enforces a token.
 func requireBearer(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := context.WithValue(r.Context(), oapigen.BearerAuthScopes, []string{})

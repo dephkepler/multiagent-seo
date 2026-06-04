@@ -7,7 +7,6 @@ import (
 	"multiagent-seo/internal/domain/articles"
 )
 
-// NewMock returns an in-memory TopicSource used when Google credentials are missing.
 func NewMock() articles.TopicSource {
 	return &mockClient{
 		data: map[string]articles.Cluster{
@@ -39,7 +38,6 @@ func (m *mockClient) Lookup(_ context.Context, topic string) (articles.Cluster, 
 	if !ok {
 		return articles.Cluster{}, nil
 	}
-	// Defensive copy so callers can't mutate the mock's state.
 	cp := articles.Cluster{Title: r.Title, Keywords: make([]string, len(r.Keywords))}
 	copy(cp.Keywords, r.Keywords)
 	return cp, nil

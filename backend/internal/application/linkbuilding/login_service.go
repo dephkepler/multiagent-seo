@@ -12,14 +12,8 @@ import (
 	"multiagent-seo/pkg/jobrunner"
 )
 
-// loginWriteChunk is how many statuses we flush at once; writing in chunks
-// means a job timeout can't discard the whole batch.
 const loginWriteChunk = 10
 
-// LoginService logs into the donor-site network: read the credential inventory
-// from a sheet, log into each WordPress admin, write the per-site status back.
-// Logins are deliberately sequential with a jittered pause — hammering many
-// wp-login.php endpoints trips security plugins (Wordfence) and gets us banned.
 type LoginService struct {
 	creds    domain.CredentialSource
 	auth     domain.SiteAuthenticator
@@ -29,11 +23,8 @@ type LoginService struct {
 	maxDelay time.Duration
 }
 
-// LoginOption customizes a LoginService; WithLoginDelay is used by tests to
-// disable the inter-login pause.
 type LoginOption func(*LoginService)
 
-// WithLoginDelay sets the jittered pause between consecutive logins.
 func WithLoginDelay(min, max time.Duration) LoginOption {
 	return func(s *LoginService) { s.minDelay, s.maxDelay = min, max }
 }
@@ -57,9 +48,7 @@ func NewLoginService(creds domain.CredentialSource, auth domain.SiteAuthenticato
 }
 
 type LoginRequest struct {
-	Sheet string
-	// Optional campaign-segment filter; same semantics as in PlaceBacklinksRequest.
-	// Empty = no extra filter, log into every D=yes donor.
+	Sheet  string
 	Topics []string
 }
 
@@ -68,9 +57,6 @@ type LoginQueued struct {
 	SitesQueued int
 }
 
-// LoginToSites reads the credential inventory and dispatches the login pipeline
-// through the JobRunner, returning immediately (202-style). A SyncRunner runs it
-// inline (test seam).
 func (s *LoginService) LoginToSites(ctx context.Context, req LoginRequest) (LoginQueued, error) {
 	if req.Sheet == "" {
 		return LoginQueued{}, ErrNoSheet
@@ -81,7 +67,6 @@ func (s *LoginService) LoginToSites(ctx context.Context, req LoginRequest) (Logi
 		return LoginQueued{}, fmt.Errorf("list credentials: %w", err)
 	}
 
-	// Narrow to the campaign-segment topics when provided; empty set = no filter.
 	topicAllow := make(map[string]struct{}, len(req.Topics))
 	for _, t := range req.Topics {
 		t = strings.TrimSpace(strings.ToLower(t))
@@ -102,8 +87,6 @@ func (s *LoginService) LoginToSites(ctx context.Context, req LoginRequest) (Logi
 		}
 	}
 
-	// Dispatch even when nothing is suitable: the job still clears stale
-	// statuses left on rows that are no longer suitable.
 	jobLog := s.log.With("sheet", req.Sheet, "sites", len(queued), "skipped_topic_mismatch", skippedTopic)
 	s.runner.Go(ctx, func(bg context.Context) {
 		s.loginAll(bg, jobLog, req.Sheet, queued)
@@ -113,12 +96,7 @@ func (s *LoginService) LoginToSites(ctx context.Context, req LoginRequest) (Logi
 	return LoginQueued{Sheet: req.Sheet, SitesQueued: len(queued)}, nil
 }
 
-// loginAll logs into each site in turn, flushing statuses in chunks. A non-nil
-// error from Login means the context was cancelled → abort the run rather than
-// mark the remaining sites failed; statuses gathered so far are still written.
 func (s *LoginService) loginAll(ctx context.Context, log *slog.Logger, sheet string, creds []domain.SiteCredential) {
-	// Wipe statuses from rows that are no longer suitable, so H reflects only
-	// the sites still in scope (non-fatal if it fails).
 	if err := s.creds.ClearStaleStatuses(ctx, sheet); err != nil {
 		log.WarnContext(ctx, "clear stale statuses failed", "err", err)
 	}
@@ -130,8 +108,6 @@ func (s *LoginService) loginAll(ctx context.Context, log *slog.Logger, sheet str
 		if len(pending) == 0 {
 			return true
 		}
-		// Detach from the job context so a timeout that just fired still persists
-		// the statuses already collected.
 		writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
 		err := s.creds.WriteLoginStatus(writeCtx, sheet, pending)
 		cancel()

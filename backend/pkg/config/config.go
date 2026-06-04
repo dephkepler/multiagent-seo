@@ -1,8 +1,3 @@
-// Package config loads application configuration from environment variables.
-//
-// All variables share the CF_ prefix (e.g. CF_DB_HOST). Defaults declared in
-// envDefault tags target a local docker-compose dev setup; real deployments
-// override via the runtime environment.
 package config
 
 import (
@@ -29,8 +24,6 @@ type ServerConfig struct {
 	BackgroundJobTimeout time.Duration `env:"APP_BACKGROUND_JOB_TIMEOUT" envDefault:"15m"`
 }
 
-// LoggerConfig controls log verbosity. Level is the initial value; it can be
-// changed at runtime via the admin log-level endpoint. Output is always JSON.
 type LoggerConfig struct {
 	Level string `env:"LOG_LEVEL" envDefault:"info" validate:"required"`
 }
@@ -45,7 +38,6 @@ type DatabaseConfig struct {
 	MigrationsDir string `env:"MIGRATIONS_DIR" envDefault:"migrations"`
 }
 
-// DSN builds a libpq/pgx-compatible connection string.
 func (c DatabaseConfig) DSN() string {
 	u := url.URL{
 		Scheme: "postgres",
@@ -73,25 +65,15 @@ type LLMConfig struct {
 	GroqAPIKey   string `env:"LLM_GROQ_API_KEY"`
 	ClaudeAPIKey string `env:"LLM_CLAUDE_API_KEY"`
 
-	// Per-task overrides. Empty means fall back to the global Provider/Model
-	// above. Articles generation reads request-level overrides directly and
-	// does not use these fields. See DefaultsFor.
 	QualifyProvider  string `env:"LLM_QUALIFY_PROVIDER"`
 	QualifyModel     string `env:"LLM_QUALIFY_MODEL"`
 	BacklinkProvider string `env:"LLM_BACKLINK_PROVIDER"`
 	BacklinkModel    string `env:"LLM_BACKLINK_MODEL"`
 
-	// Per-provider fallback models. Used when a request (or per-task default)
-	// names a provider but leaves the model empty — picking a sensible default
-	// for the chosen provider instead of the unrelated global Model. See
-	// ModelFor.
 	GroqDefaultModel   string `env:"LLM_GROQ_DEFAULT_MODEL"   envDefault:"llama-3.3-70b-versatile"`
 	ClaudeDefaultModel string `env:"LLM_CLAUDE_DEFAULT_MODEL" envDefault:"claude-haiku-4-5"`
 }
 
-// TaskKind names a workload that may want its own LLM model so the heavy
-// article generator (70B) doesn't share a TPD bucket with cheap classifier or
-// inline-rewrite calls.
 type TaskKind string
 
 const (
@@ -99,11 +81,6 @@ const (
 	TaskBacklink TaskKind = "backlink"
 )
 
-// DefaultsFor returns the (provider, model) the named task should use when its
-// own request didn't specify one. Falls back to the global Provider/Model so
-// existing deployments without per-task env vars keep working. When the
-// per-task env names a provider but not a model, the model still tracks the
-// chosen provider (via ModelFor) instead of leaking the unrelated global model.
 func (c LLMConfig) DefaultsFor(task TaskKind) (provider, model string) {
 	switch task {
 	case TaskQualify:
@@ -120,9 +97,6 @@ func (c LLMConfig) resolveTaskDefaults(taskProvider, taskModel string) (provider
 	if model != "" {
 		return provider, model
 	}
-	// Provider was overridden but model wasn't — pick the right model for that
-	// provider, otherwise fall back to the global model only when the provider
-	// also matches the global one.
 	if normalizeProvider(provider) != normalizeProvider(c.Provider) {
 		return provider, c.ModelFor(provider)
 	}
@@ -136,11 +110,6 @@ func pickStr(a, b string) string {
 	return b
 }
 
-// ModelFor returns the default model for the named provider, used when the
-// caller knows which vendor to talk to but doesn't care which specific model.
-// Falls back to the global Model only when the chosen provider matches the
-// global Provider, so an /generate request with provider=claude but no model
-// no longer sends a groq model name into the claude API.
 func (c LLMConfig) ModelFor(provider string) string {
 	switch normalizeProvider(provider) {
 	case "groq":
@@ -154,8 +123,6 @@ func (c LLMConfig) ModelFor(provider string) string {
 	return ""
 }
 
-// normalizeProvider collapses the "anthropic" alias onto "claude" so both
-// names resolve to the same key, including the generic-APIKey fallback.
 func normalizeProvider(s string) string {
 	s = strings.ToLower(strings.TrimSpace(s))
 	if s == "anthropic" {
@@ -188,7 +155,7 @@ type SheetsConfig struct {
 	Sheet           string `env:"SHEETS_SHEET" envDefault:"Keywords"`
 	TopicColumn     string `env:"SHEETS_TOPIC_COLUMN" envDefault:"A"`
 	KeywordColumn   string `env:"SHEETS_KEYWORD_COLUMN" envDefault:"B"`
-	TitleColumn     string `env:"SHEETS_TITLE_COLUMN" envDefault:"C"` // empty disables suggested-title lookup
+	TitleColumn     string `env:"SHEETS_TITLE_COLUMN" envDefault:"C"`
 	HeaderRow       bool   `env:"SHEETS_HEADER_ROW" envDefault:"true"`
 }
 
@@ -211,13 +178,11 @@ type DataForSEOConfig struct {
 }
 
 type CheckerConfig struct {
-	// Provider selects the checker implementation: "mock", "originality", or "huggingface".
 	Provider    string  `env:"CHECKER_PROVIDER" envDefault:"mock"`
 	APIKey      string  `env:"CHECKER_API_KEY"`
 	AIThreshold float64 `env:"CHECKER_AI_THRESHOLD" envDefault:"0.8"`
 	Model       string  `env:"CHECKER_MODEL"`
-	// MaxCycles caps humanize rewrites; on overflow the article is published as-is.
-	MaxCycles int `env:"CHECKER_MAX_CYCLES" envDefault:"3"`
+	MaxCycles   int     `env:"CHECKER_MAX_CYCLES" envDefault:"3"`
 }
 
 type PexelsConfig struct {
@@ -225,18 +190,13 @@ type PexelsConfig struct {
 	APIKey  string `env:"PEXELS_API_KEY"`
 }
 
-// devEncryptionKey is the shared dev default for WP_ENCRYPTION_KEY and JWT_SECRET;
-// Load rejects it outside the local environment so prod can't boot on it silently.
 const devEncryptionKey = "dev-insecure-change-me"
 
 type WordPressConfig struct {
-	// EncryptionKey is the pgcrypto symmetric key used to encrypt stored WordPress
-	// app passwords. The default is dev-only; production MUST override it.
 	EncryptionKey string `env:"WP_ENCRYPTION_KEY" envDefault:"dev-insecure-change-me" validate:"required"`
 }
 
 type JWTConfig struct {
-	// Secret signs and verifies auth tokens (HS256). Dev-only default; prod MUST override.
 	Secret string        `env:"JWT_SECRET" envDefault:"dev-insecure-change-me" validate:"required"`
 	TTL    time.Duration `env:"JWT_TTL" envDefault:"24h"`
 }

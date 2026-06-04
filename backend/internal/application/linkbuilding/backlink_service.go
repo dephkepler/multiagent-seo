@@ -13,47 +13,31 @@ import (
 	"multiagent-seo/pkg/jobrunner"
 )
 
-// placeWriteChunk is how many placement statuses we flush at once. WP REST
-// edits are slower than wp-login form posts, so the chunk is smaller than in
-// LoginService — partial progress still survives a job timeout.
 const placeWriteChunk = 5
 
-// ErrNoTargetSite guards the request; the HTTP layer maps it to 400.
 var ErrNoTargetSite = errors.New("target site id is required")
 
-// TargetSiteResolver confirms the per-request target_site_url belongs to one
-// of our wordpress_sites and returns the canonical (stored) form of that URL,
-// which is what we plant into donor posts.
 type TargetSiteResolver interface {
 	ResolveSiteURL(ctx context.Context, url string) (string, error)
 }
 
-// BacklinkPlacerBuilder constructs a fresh placer bound to the given
-// provider/model. Mirrors TopicClassifierBuilder so per-request overrides flow
-// through the same path as deployment-wide defaults.
 type BacklinkPlacerBuilder func(provider, model string) (domain.BacklinkPlacer, error)
 
-// BacklinkService runs Flow 3: for each suitable donor in the sheet, ensure we
-// have a stored app-password (issue + save on first contact), fetch the
-// latest post via REST, let an LLM weave in a backlink to the client's site,
-// PUT the modified HTML back, and record the result in the sheet's I column.
 type BacklinkService struct {
-	creds          domain.CredentialSource
-	placements     domain.PlacementSink
-	donors         domain.DonorCredentialStore
-	issuer         domain.DonorAppPasswordIssuer
-	editor         domain.DonorPostEditor
-	placerBuilder  BacklinkPlacerBuilder
-	defaults       LLMDefaults
-	targets        TargetSiteResolver
-	runner         jobrunner.JobRunner
-	log            *slog.Logger
-	minDelay       time.Duration
-	maxDelay       time.Duration
+	creds         domain.CredentialSource
+	placements    domain.PlacementSink
+	donors        domain.DonorCredentialStore
+	issuer        domain.DonorAppPasswordIssuer
+	editor        domain.DonorPostEditor
+	placerBuilder BacklinkPlacerBuilder
+	defaults      LLMDefaults
+	targets       TargetSiteResolver
+	runner        jobrunner.JobRunner
+	log           *slog.Logger
+	minDelay      time.Duration
+	maxDelay      time.Duration
 }
 
-// BacklinkOption customizes a BacklinkService; WithBacklinkDelay disables the
-// inter-donor pause in tests.
 type BacklinkOption func(*BacklinkService)
 
 func WithBacklinkDelay(min, max time.Duration) BacklinkOption {
@@ -87,10 +71,8 @@ func NewBacklinkService(
 		targets:       targets,
 		runner:        runner,
 		log:           log,
-		// REST edits are heavier than form logins; pause a bit more to stay
-		// under any "too many edits" rate limit a security plugin might apply.
-		minDelay: 2 * time.Second,
-		maxDelay: 5 * time.Second,
+		minDelay:      2 * time.Second,
+		maxDelay:      5 * time.Second,
 	}
 	for _, o := range opts {
 		o(s)
@@ -101,13 +83,9 @@ func NewBacklinkService(
 type PlaceBacklinksRequest struct {
 	Sheet         string
 	TargetSiteURL string
-	// Optional campaign-segment filter. When set, only donors whose Flow 1
-	// topic (column B) matches one of these (case-insensitive) are processed.
-	// Empty slice = no extra filter, all D=yes donors qualify.
-	Topics []string
-	// Optional LLM overrides for this run; empty falls back to LLMDefaults.
-	Provider string
-	Model    string
+	Topics        []string
+	Provider      string
+	Model         string
 }
 
 type PlaceBacklinksQueued struct {
@@ -115,8 +93,6 @@ type PlaceBacklinksQueued struct {
 	SitesQueued int
 }
 
-// PlaceBacklinks reads the suitable donors and dispatches the placement
-// pipeline through the JobRunner, returning immediately (202-style).
 func (s *BacklinkService) PlaceBacklinks(ctx context.Context, req PlaceBacklinksRequest) (PlaceBacklinksQueued, error) {
 	if req.Sheet == "" {
 		return PlaceBacklinksQueued{}, ErrNoSheet
@@ -135,7 +111,6 @@ func (s *BacklinkService) PlaceBacklinks(ctx context.Context, req PlaceBacklinks
 		return PlaceBacklinksQueued{}, fmt.Errorf("list credentials: %w", err)
 	}
 
-	// Build a topic allow-set once. Empty set = topic filter disabled.
 	topicAllow := make(map[string]struct{}, len(req.Topics))
 	for _, t := range req.Topics {
 		t = strings.TrimSpace(strings.ToLower(t))
@@ -144,15 +119,6 @@ func (s *BacklinkService) PlaceBacklinks(ctx context.Context, req PlaceBacklinks
 		}
 	}
 
-	// Three filters:
-	// 1. Topic — narrow to current campaign segment (defends against a stale
-	//    D=yes lingering from a previous campaign's qualify run).
-	// 2. Flow 2 login status — skip rows that already proved we can't
-	//    authenticate; an empty status means Flow 2 hasn't run, so we still try.
-	// 3. Prior placement — if column I already says "placed: ...", we have
-	//    already modified that donor's article; running again would add a
-	//    second <a> tag to the same post. Skip; the operator can clear I in
-	//    the sheet to force a retry.
 	queued := make([]domain.SiteCredential, 0, len(creds))
 	var skippedTopic, skippedLogin, skippedAlreadyPlaced int
 	for _, c := range creds {
@@ -175,10 +141,6 @@ func (s *BacklinkService) PlaceBacklinks(ctx context.Context, req PlaceBacklinks
 	}
 
 	provider := pickStr(req.Provider, s.defaults.Provider)
-	// Only inherit defaults.Model when the provider didn't change — otherwise
-	// we'd ship a groq model name to claude (or vice versa). When the provider
-	// flips and model is empty, leave it blank and let the builder/factory
-	// pick the right per-provider default.
 	model := req.Model
 	if model == "" && provider == s.defaults.Provider {
 		model = s.defaults.Model
@@ -206,9 +168,6 @@ func (s *BacklinkService) PlaceBacklinks(ctx context.Context, req PlaceBacklinks
 	return PlaceBacklinksQueued{Sheet: req.Sheet, SitesQueued: len(queued)}, nil
 }
 
-// placeAll walks the donor list sequentially, flushing statuses in chunks. On
-// ctx cancellation we abort instead of writing failures for the remaining
-// rows — matches the LoginService convention.
 func (s *BacklinkService) placeAll(ctx context.Context, log *slog.Logger, sheet string, creds []domain.SiteCredential, targetURL string, placer domain.BacklinkPlacer) {
 	pending := make([]domain.PlacementResult, 0, placeWriteChunk)
 	processed := 0
@@ -237,15 +196,10 @@ func (s *BacklinkService) placeAll(ctx context.Context, log *slog.Logger, sheet 
 			s.sleep(ctx)
 		}
 
-		// Explicit "we are about to process this donor" line so the operator
-		// can match the queue against the sheet without waiting for the
-		// outcome line (which only appears after the LLM + REST calls).
 		log.InfoContext(ctx, "donor selected", "row", c.Row, "url", c.BaseURL, "login_status", c.LoginStatus)
 
 		res := s.placeOne(ctx, log, c, targetURL, placer)
 
-		// An error that bubbles up as a context cancellation means the run
-		// got cancelled mid-call — abort without recording a false failure.
 		if ctx.Err() != nil {
 			log.WarnContext(ctx, "backlink run cancelled mid-step", "url", c.BaseURL, "processed", processed)
 			break
@@ -266,9 +220,6 @@ func (s *BacklinkService) placeAll(ctx context.Context, log *slog.Logger, sheet 
 	log.InfoContext(ctx, "backlink placement done", "processed", processed)
 }
 
-// placeOne is the per-donor pipeline: ensure cached creds → latest post →
-// LLM rewrite → REST update. Each step that fails turns into a "failed: ..."
-// row in the sheet; the next donor still runs.
 func (s *BacklinkService) placeOne(ctx context.Context, log *slog.Logger, c domain.SiteCredential, targetURL string, placer domain.BacklinkPlacer) domain.PlacementResult {
 	res := domain.PlacementResult{Row: c.Row, DonorURL: c.BaseURL}
 
@@ -286,8 +237,6 @@ func (s *BacklinkService) placeOne(ctx context.Context, log *slog.Logger, c doma
 			return res
 		}
 		donor = domain.DonorCredential{DonorURL: c.BaseURL, Login: c.Login, AppPassword: appPwd}
-		// Save is best-effort: even if persistence fails we still proceed with
-		// the in-memory credential; the next run will just re-issue.
 		if err := s.donors.Save(ctx, donor); err != nil {
 			log.WarnContext(ctx, "save donor credential failed", "url", c.BaseURL, "err", err)
 		}
@@ -314,10 +263,6 @@ func (s *BacklinkService) placeOne(ctx context.Context, log *slog.Logger, c doma
 	}
 
 	res.OK = true
-	// Two URLs in the sheet status: the public permalink (so the user can open
-	// the live post in one click and see the inserted backlink in context) and
-	// the wp-admin edit URL (for revisiting/reverting). Public goes first since
-	// it's the verification step the user reaches for most often.
 	res.Status = fmt.Sprintf("placed: %s | edit: %s (anchor: %s)", post.PublicURL, post.EditURL, ins.Anchor)
 	return res
 }
@@ -342,8 +287,6 @@ func (s *BacklinkService) jitter() time.Duration {
 	return s.minDelay + time.Duration(rand.Int63n(int64(s.maxDelay-s.minDelay)))
 }
 
-// truncReason keeps the status cell readable in the sheet — full errors go to
-// the structured log; the I column just gets a short pointer.
 func truncReason(s string) string {
 	const max = 120
 	if len(s) <= max {
