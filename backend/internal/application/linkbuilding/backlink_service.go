@@ -133,7 +133,7 @@ func (s *BacklinkService) PlaceBacklinks(ctx context.Context, req PlaceBacklinks
 			skippedLogin++
 			continue
 		}
-		if strings.HasPrefix(strings.TrimSpace(strings.ToLower(c.PlacementStatus)), "placed:") {
+		if hasLatestPlaced(c.PlacementStatus) {
 			skippedAlreadyPlaced++
 			continue
 		}
@@ -293,4 +293,13 @@ func truncReason(s string) string {
 		return s
 	}
 	return s[:max] + "…"
+}
+
+func hasLatestPlaced(status string) bool {
+	first := strings.TrimSpace(status)
+	if idx := strings.IndexByte(first, '\n'); idx >= 0 {
+		first = first[:idx]
+	}
+	low := strings.ToLower(first)
+	return strings.Contains(low, "] placed:") || strings.HasPrefix(low, "placed:")
 }

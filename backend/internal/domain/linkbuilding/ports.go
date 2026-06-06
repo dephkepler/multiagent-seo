@@ -11,6 +11,10 @@ type PageFetcher interface {
 	Fetch(ctx context.Context, url string) (Page, error)
 }
 
+type PostsDiscover interface {
+	Discover(ctx context.Context, siteURL string, limit int) ([]string, error)
+}
+
 type TopicClassifier interface {
 	Classify(ctx context.Context, page Page, candidates []string) (string, error)
 }

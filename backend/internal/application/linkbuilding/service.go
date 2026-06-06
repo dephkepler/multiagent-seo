@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	domain "multiagent-seo/internal/domain/linkbuilding"
 	"multiagent-seo/pkg/jobrunner"
@@ -16,6 +17,8 @@ const (
 	maxConcurrentSites = 2
 	resultFlushBatch   = 25
 	resultWriteTimeout = 30 * time.Second
+	maxPostsPerSite    = 3
+	perPageChars       = 400
 )
 
 var (
@@ -33,6 +36,7 @@ type TopicClassifierBuilder func(provider, model string) (domain.TopicClassifier
 type Service struct {
 	sites             domain.WebsiteSource
 	fetcher           domain.PageFetcher
+	posts             domain.PostsDiscover
 	classifierBuilder TopicClassifierBuilder
 	defaults          LLMDefaults
 	runner            jobrunner.JobRunner
@@ -42,6 +46,7 @@ type Service struct {
 func NewService(
 	sites domain.WebsiteSource,
 	fetcher domain.PageFetcher,
+	posts domain.PostsDiscover,
 	classifierBuilder TopicClassifierBuilder,
 	defaults LLMDefaults,
 	runner jobrunner.JobRunner,
@@ -53,6 +58,7 @@ func NewService(
 	return &Service{
 		sites:             sites,
 		fetcher:           fetcher,
+		posts:             posts,
 		classifierBuilder: classifierBuilder,
 		defaults:          defaults,
 		runner:            runner,
@@ -179,7 +185,7 @@ func (s *Service) qualifyAll(ctx context.Context, log *slog.Logger, sheet string
 func (s *Service) qualifyOne(ctx context.Context, log *slog.Logger, w domain.Website, candidates, accepted []string, classifier domain.TopicClassifier) (domain.Result, bool) {
 	res := domain.Result{Row: w.Row, URL: w.URL}
 
-	page, err := s.fetcher.Fetch(ctx, w.URL)
+	home, err := s.fetcher.Fetch(ctx, w.URL)
 	if err != nil {
 		if isCanceled(ctx, err) {
 			return domain.Result{}, false
@@ -188,9 +194,17 @@ func (s *Service) qualifyOne(ctx context.Context, log *slog.Logger, w domain.Web
 		return res, true
 	}
 
-	res.OutboundDomains = domain.CountExternalDomains(w.URL, page.Links)
+	sample := home
+	postURLs := s.discoverPosts(ctx, log, w.URL)
+	if len(postURLs) > 0 {
+		extras := s.fetchPosts(ctx, log, w.URL, postURLs)
+		sample = mergePages(home, extras)
+	}
 
-	topic, err := classifier.Classify(ctx, page, candidates)
+	res.OutboundDomains = domain.CountExternalDomains(w.URL, sample.Links)
+	res.PostsSampled = len(postURLs)
+
+	topic, err := classifier.Classify(ctx, sample, candidates)
 	if err != nil {
 		if isCanceled(ctx, err) {
 			return domain.Result{}, false
@@ -201,8 +215,82 @@ func (s *Service) qualifyOne(ctx context.Context, log *slog.Logger, w domain.Web
 	}
 	res.Suitable = domain.IsSuitable(res.Topic, accepted)
 
-	log.DebugContext(ctx, "site qualified", "url", w.URL, "topic", res.Topic, "outbound", res.OutboundDomains, "suitable", res.Suitable)
+	log.InfoContext(ctx, "site qualified",
+		"url", w.URL,
+		"topic", res.Topic,
+		"outbound", res.OutboundDomains,
+		"posts_sampled", res.PostsSampled,
+		"merged_text_chars", len(sample.TextSample),
+		"links_total", len(sample.Links),
+		"suitable", res.Suitable,
+	)
 	return res, true
+}
+
+func (s *Service) discoverPosts(ctx context.Context, log *slog.Logger, siteURL string) []string {
+	if s.posts == nil {
+		return nil
+	}
+	dCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	urls, err := s.posts.Discover(dCtx, siteURL, maxPostsPerSite)
+	if err != nil {
+		log.WarnContext(ctx, "posts discover failed", "url", siteURL, "err", err)
+		return nil
+	}
+	return urls
+}
+
+func (s *Service) fetchPosts(ctx context.Context, log *slog.Logger, siteURL string, urls []string) []domain.Page {
+	if len(urls) == 0 {
+		return nil
+	}
+	out := make([]domain.Page, 0, len(urls))
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	for _, u := range urls {
+		wg.Add(1)
+		go func(postURL string) {
+			defer wg.Done()
+			p, err := s.fetcher.Fetch(ctx, postURL)
+			if err != nil {
+				log.DebugContext(ctx, "post fetch failed", "site", siteURL, "post", postURL, "err", err)
+				return
+			}
+			mu.Lock()
+			out = append(out, p)
+			mu.Unlock()
+		}(u)
+	}
+	wg.Wait()
+	return out
+}
+
+func mergePages(home domain.Page, extras []domain.Page) domain.Page {
+	out := home
+	out.TextSample = trimRunes(out.TextSample, perPageChars)
+	for _, p := range extras {
+		snippet := trimRunes(p.TextSample, perPageChars)
+		if snippet != "" {
+			if out.TextSample != "" {
+				out.TextSample += "\n\n"
+			}
+			out.TextSample += snippet
+		}
+		out.Headings = append(out.Headings, p.Headings...)
+		out.Links = append(out.Links, p.Links...)
+	}
+	return out
+}
+
+func trimRunes(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	for max > 0 && !utf8.RuneStart(s[max]) {
+		max--
+	}
+	return s[:max]
 }
 
 func isCanceled(ctx context.Context, err error) bool {

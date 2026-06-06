@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"time"
 
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/option"
@@ -228,11 +229,34 @@ func (s *websiteSource) WritePlacementStatus(ctx context.Context, sheet string, 
 		return nil
 	}
 
+	ranges := make([]string, 0, len(results))
+	for _, r := range results {
+		ranges = append(ranges, fmt.Sprintf("%s!I%d", sheet, r.Row))
+	}
+	existing, err := s.svc.Spreadsheets.Values.BatchGet(s.spreadsheetID).Ranges(ranges...).Context(ctx).Do()
+	if err != nil {
+		return fmt.Errorf("read existing placement in %s: %w", sheet, err)
+	}
+	existingByRow := make(map[int]string, len(results))
+	for i, vr := range existing.ValueRanges {
+		if i >= len(results) {
+			break
+		}
+		if len(vr.Values) > 0 && len(vr.Values[0]) > 0 {
+			existingByRow[results[i].Row] = strings.TrimSpace(fmt.Sprint(vr.Values[0][0]))
+		}
+	}
+
+	now := time.Now().UTC().Format("2006-01-02 15:04:05")
 	data := make([]*sheets.ValueRange, 0, len(results))
 	for _, r := range results {
+		entry := fmt.Sprintf("[%s] %s", now, r.Status)
+		if old := existingByRow[r.Row]; old != "" {
+			entry = entry + "\n" + old
+		}
 		data = append(data, &sheets.ValueRange{
 			Range:  fmt.Sprintf("%s!I%d", sheet, r.Row),
-			Values: [][]any{{r.Status}},
+			Values: [][]any{{entry}},
 		})
 	}
 

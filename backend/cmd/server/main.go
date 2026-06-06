@@ -35,6 +35,7 @@ import (
 	"multiagent-seo/internal/infrastructure/jwtauth"
 	infrallm "multiagent-seo/internal/infrastructure/llm"
 	"multiagent-seo/internal/infrastructure/persistence/postgres"
+	"multiagent-seo/internal/infrastructure/postsdiscover"
 	"multiagent-seo/internal/infrastructure/pexels"
 	"multiagent-seo/internal/infrastructure/sheets"
 	"multiagent-seo/internal/infrastructure/topicclassifier"
@@ -259,6 +260,7 @@ func buildLinkbuilding(
 	qualifySvc := applinkbuilding.NewService(
 		src,
 		webfetch.New(log),
+		postsdiscover.New(log),
 		classifierBuilder,
 		applinkbuilding.LLMDefaults{Provider: qualifyProvider, Model: qualifyModel},
 		runner,

@@ -18,6 +18,7 @@ type Result struct {
 	URL             string
 	Topic           string
 	OutboundDomains int
+	PostsSampled    int
 	Suitable        bool
 }
 
