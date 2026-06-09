@@ -194,14 +194,9 @@ export default function GeneratePage() {
       <Card>
         <div className='mb-4 flex items-center justify-between'>
           <h2 className='text-base font-semibold'>Articles</h2>
-          <div className='flex items-center gap-3'>
-            <span className='text-xs text-gray-500'>
-              {articles.dataUpdatedAt ? `refreshed ${fmtAgo(now, articles.dataUpdatedAt)}` : '—'}
-            </span>
-            <Button variant='secondary' size='sm' onClick={() => articles.refetch()}>
-              Refresh
-            </Button>
-          </div>
+          <Button variant='secondary' size='sm' onClick={() => articles.refetch()}>
+            Refresh
+          </Button>
         </div>
         <div className='overflow-x-auto'>
           <table className='w-full text-sm'>
@@ -266,12 +261,6 @@ function fmtElapsed(start: string, end: string | undefined, now: number, termina
   const s = Math.max(0, Math.floor((endMs - new Date(start).getTime()) / 1000))
   if (s < 60) return `${s}s`
   return `${Math.floor(s / 60)}m ${s % 60}s`
-}
-
-function fmtAgo(now: number, t: number): string {
-  const s = Math.max(0, Math.floor((now - t) / 1000))
-  if (s < 60) return `${s}s ago`
-  return `${Math.floor(s / 60)}m ${s % 60}s ago`
 }
 
 function WpActions({
