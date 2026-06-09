@@ -19,7 +19,6 @@ func TestUserRepository_FindByEmail(t *testing.T) {
 	pool := testsupport.NewTestDB(t, baseConnStr)
 	repo := postgres.NewUserRepository(pool)
 
-	// The repository is read-only, so seed the row directly.
 	const (
 		email = "user@example.com"
 		hash  = "$2a$10$abcdefghijklmnopqrstuv"

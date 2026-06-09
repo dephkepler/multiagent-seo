@@ -18,9 +18,6 @@ export default function QualifyPage() {
   const [sheet, setSheet] = useState('WEBSITES')
   const [accepted, setAccepted] = useState('tech, education')
   const [candidate, setCandidate] = useState('tech, education, ecommerce, travel, casino')
-  // Empty string = let the backend use its env-level default (CF_LLM_QUALIFY_PROVIDER
-  // or the global CF_LLM_PROVIDER). The model is picked by the backend per provider
-  // so the UI doesn't have to track model names.
   const [provider, setProvider] = useState('')
 
   const run = useMutation({

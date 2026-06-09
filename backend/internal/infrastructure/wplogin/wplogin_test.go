@@ -39,7 +39,6 @@ const (
 <input type="text" name="captcha">
 <input type="submit" name="wp-submit"></form>`
 
-	// An extra challenge field with no solvable math (e.g. a worded riddle).
 	unknownChallengeForm = `<form id="loginform">
 <label>Security question: capital of France?</label>
 <input type="text" name="log"><input type="password" name="pwd">
@@ -47,8 +46,6 @@ const (
 <input type="submit" name="wp-submit"></form>`
 )
 
-// loginMux serves the login form on GET and, on POST, sets the logged-in cookie
-// + redirects to wp-admin only when accept(form) is true.
 func loginMux(loginHTML string, accept func(url.Values) bool) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/wp-login.php", func(w http.ResponseWriter, r *http.Request) {
@@ -126,8 +123,6 @@ func TestLoginSolvesMathCaptcha(t *testing.T) {
 }
 
 func TestLoginUnsolvableChallenge(t *testing.T) {
-	// Server requires the security answer we can't compute, so login fails and
-	// the verdict must flag an unsolved challenge rather than a plain failure.
 	srv := wpServer(t, unknownChallengeForm, func(f url.Values) bool {
 		return validCreds(f) && f.Get("security-answer") != ""
 	})
@@ -189,7 +184,7 @@ func TestLoginEndpointMissing(t *testing.T) {
 func TestLoginUnreachable(t *testing.T) {
 	srv := wpServer(t, basicForm, validCreds)
 	base := srv.URL
-	srv.Close() // now refuses connections
+	srv.Close()
 
 	res, err := New(nil).Login(context.Background(), cred(base))
 	if err != nil {
@@ -217,7 +212,6 @@ func TestLoginContextCancelledReturnsError(t *testing.T) {
 }
 
 func TestLoginCustomPhpPath(t *testing.T) {
-	// Login lives at a renamed script; only that path is served (no wp-login.php).
 	mux := http.NewServeMux()
 	mux.HandleFunc("/secret-login.php", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
@@ -257,8 +251,6 @@ func TestLoginError(t *testing.T) {
 }
 
 func TestLoginOverSelfSignedTLS(t *testing.T) {
-	// httptest's TLS server uses an untrusted self-signed cert; login must still
-	// succeed because the adapter skips certificate verification.
 	srv := httptest.NewTLSServer(loginMux(basicForm, validCreds))
 	defer srv.Close()
 
@@ -294,7 +286,7 @@ func TestSolveMath(t *testing.T) {
 		{"2 * 8 =", 16, true},
 		{"8 ÷ 2 =", 4, true},
 		{"9 / 3 =", 3, true},
-		{"5 / 0 =", 0, false}, // division by zero is not solvable
+		{"5 / 0 =", 0, false},
 		{"no math here", 0, false},
 	}
 	for _, c := range cases {
@@ -313,10 +305,10 @@ func TestSolveWordedMath(t *testing.T) {
 		{"ten minus six =", 4},
 		{"five plus four =", 9},
 		{"three times two =", 6},
-		{"10 - six =", 4},        // mixed digit/word
-		{"twenty minus 1 =", 19},     // tens word + digit
-		{"twelve divided by 4 =", 3}, // worded division
-		{"5 × 4 =", 20},              // pure digits still work
+		{"10 - six =", 4},
+		{"twenty minus 1 =", 19},
+		{"twelve divided by 4 =", 3},
+		{"5 × 4 =", 20},
 	}
 	for _, c := range cases {
 		got, ok := solveMath(normalizeWords(c.in))

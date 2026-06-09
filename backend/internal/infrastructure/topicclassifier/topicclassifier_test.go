@@ -53,7 +53,6 @@ func TestClassify(t *testing.T) {
 }
 
 func TestClassifyMultiWordCandidate(t *testing.T) {
-	// Would have failed under the old 20-token cap that truncated the reply.
 	candidates := []string{"Web Development", "Finance", "Travel"}
 	page := linkbuilding.Page{Title: "Building modern web apps"}
 
@@ -82,7 +81,6 @@ func TestClassifyMalformedReply(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Contract: malformed/empty reply maps to "" (none) without error.
 			got, err := newTestClassifier(tt.reply).Classify(context.Background(), page, candidates)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)

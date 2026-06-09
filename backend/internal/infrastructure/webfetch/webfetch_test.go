@@ -87,8 +87,7 @@ func TestParsePageTextSampleCap(t *testing.T) {
 }
 
 func TestTruncateRunesBoundary(t *testing.T) {
-	// Each "é" is 2 bytes; cap at an odd length lands mid-rune.
-	s := strings.Repeat("é", 50) // 100 bytes
+	s := strings.Repeat("é", 50)
 	out := truncateRunes(s, 51)
 	if !utf8.ValidString(out) {
 		t.Fatalf("truncateRunes produced invalid UTF-8: %q", out)
@@ -96,7 +95,6 @@ func TestTruncateRunesBoundary(t *testing.T) {
 	if len(out) > 51 {
 		t.Errorf("len(out) = %d, want <= 51", len(out))
 	}
-	// ASCII-only and under-cap inputs must pass through unchanged.
 	if got := truncateRunes("hello", 100); got != "hello" {
 		t.Errorf("truncateRunes(short) = %q", got)
 	}
@@ -127,8 +125,6 @@ func TestDisallowedIP(t *testing.T) {
 	}
 }
 
-// testFetcher builds a Fetcher whose dial guard allows loopback so it can reach
-// an httptest server, while keeping all other SSRF guards active.
 func testFetcher() *Fetcher {
 	f := New(nil)
 	f.allowLoopback = true
@@ -137,8 +133,6 @@ func testFetcher() *Fetcher {
 }
 
 func TestFetchRedirectToBlockedTarget(t *testing.T) {
-	// 302 to a private/link-local target: even with loopback allowed, the dial
-	// guard must reject the redirect hop.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "http://169.254.169.254/latest/meta-data/", http.StatusFound)
 	}))
@@ -150,11 +144,10 @@ func TestFetchRedirectToBlockedTarget(t *testing.T) {
 }
 
 func TestFetchOversizedBodyCapped(t *testing.T) {
-	// Body far larger than maxBody must be capped, not OOM, and still parse.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
 		_, _ = w.Write([]byte("<html><body><p>start</p>"))
-		junk := strings.Repeat("x", 4<<20) // 4 MiB > maxBody (2 MiB)
+		junk := strings.Repeat("x", 4<<20)
 		_, _ = w.Write([]byte("<p>" + junk + "</p></body></html>"))
 	}))
 	defer srv.Close()

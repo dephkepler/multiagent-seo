@@ -1,7 +1,3 @@
-// Package wppost is an infrastructure adapter that talks to a donor site's
-// WordPress REST API for the linkbuilding Flow 3 (backlink placement): list
-// the latest published post and write modified HTML back. Authentication is
-// Basic Auth with the donor's stored Application Password.
 package wppost
 
 import (
@@ -34,9 +30,6 @@ func New(log *slog.Logger) *Client {
 	return &Client{
 		http: &http.Client{
 			Timeout: 25 * time.Second,
-			// Donor sites often run incomplete certificate chains; this client
-			// is for sites the user owns, so TLS verification is intentionally
-			// skipped (same as wplogin).
 			Transport: &http.Transport{
 				TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // G402: own-network linkbuilding tool
 			},
@@ -71,10 +64,10 @@ func (c *Client) LatestPost(ctx context.Context, cred linkbuilding.DonorCredenti
 	}
 
 	var arr []struct {
-		ID      int64           `json:"id"`
-		Title   renderedField   `json:"title"`
-		Content renderedField   `json:"content"`
-		Link    string          `json:"link"`
+		ID      int64         `json:"id"`
+		Title   renderedField `json:"title"`
+		Content renderedField `json:"content"`
+		Link    string        `json:"link"`
 	}
 	if err := json.Unmarshal(body, &arr); err != nil {
 		return linkbuilding.DonorPost{}, fmt.Errorf("wppost decode list: %w", err)

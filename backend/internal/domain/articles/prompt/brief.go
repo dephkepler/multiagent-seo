@@ -43,9 +43,6 @@ Follow these rules:
 	)
 }
 
-// clusterBriefInstruction tells the strategist to honour the sheet-supplied H1
-// and LSI set instead of inventing new ones that the writer would then have to
-// override.
 func clusterBriefInstruction(c articles.Cluster) string {
 	rendered := renderCluster(c)
 	if rendered == "" {

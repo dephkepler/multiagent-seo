@@ -16,9 +16,6 @@ import (
 	"multiagent-seo/pkg/validate"
 )
 
-// isNil treats a typed-nil interface (e.g. an interface holding a
-// *applinkbuilding.Service value that happens to be nil) as nil so callers
-// don't have to spell out the untyped-nil dance at the call site.
 func isNil(i any) bool {
 	if i == nil {
 		return true
@@ -166,12 +163,9 @@ func (h *LinkbuildingHandler) PlaceBacklinks(w http.ResponseWriter, r *http.Requ
 	})
 }
 
-// derefStr turns an oapigen optional *string into a plain string ("" if nil),
-// so the application layer can stick with a value-typed request struct.
 func derefStr(p *string) string {
 	if p == nil {
 		return ""
 	}
 	return *p
 }
-

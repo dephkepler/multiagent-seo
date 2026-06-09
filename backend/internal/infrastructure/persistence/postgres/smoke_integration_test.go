@@ -9,8 +9,6 @@ import (
 	"multiagent-seo/internal/testsupport"
 )
 
-// TestSmoke_MigrationsApplied confirms the container boots, migrations run, and
-// each test gets an isolated database with the expected schema.
 func TestSmoke_MigrationsApplied(t *testing.T) {
 	pool := testsupport.NewTestDB(t, baseConnStr)
 	ctx := context.Background()
@@ -28,7 +26,6 @@ func TestSmoke_MigrationsApplied(t *testing.T) {
 		}
 	}
 
-	// pgcrypto must be installed (wordpress app-password encryption depends on it).
 	var hasPgcrypto bool
 	if err := pool.QueryRow(ctx,
 		`SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pgcrypto')`).Scan(&hasPgcrypto); err != nil {

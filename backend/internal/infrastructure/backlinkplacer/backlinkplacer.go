@@ -1,7 +1,3 @@
-// Package backlinkplacer implements the linkbuilding.BacklinkPlacer port by
-// asking an LLM to weave one inline anchor link into existing post HTML and
-// to return both the chosen anchor and the modified HTML in a separator-based
-// format (no JSON), which survives unescaped HTML in the body.
 package backlinkplacer
 
 import (
@@ -11,25 +7,16 @@ import (
 	"strings"
 
 	"multiagent-seo/internal/domain/linkbuilding"
+	"multiagent-seo/internal/domain/linkbuilding/prompt"
 )
 
-// LLM is the minimal completion surface this package needs. main.go adapts the
-// existing provider client to it, the same way topicclassifier does.
 type LLM interface {
-	Complete(ctx context.Context, prompt string, maxTokens int) (string, error)
+	Complete(ctx context.Context, p string, maxTokens int) (string, error)
 }
 
 const (
-	// maxInputHTML caps how much of the post body we ship to the LLM. Posts
-	// longer than this get truncated; placement still happens inside whatever
-	// the LLM saw, which is the leading content for typical articles.
 	maxInputHTML = 20000
-	// maxTokens has to fit the modified HTML in the reply.
-	maxTokens = 6000
-	// htmlSeparator splits the reply between metadata (anchor) and raw HTML.
-	// Using a literal sentinel instead of JSON dodges the unescaped '<' problem
-	// Llama-3.3 hit when asked to embed HTML inside a JSON string value.
-	htmlSeparator = "---HTML---"
+	maxTokens    = 2000
 )
 
 type Placer struct {
@@ -50,89 +37,80 @@ func (p *Placer) Place(ctx context.Context, html, targetURL string) (linkbuildin
 		src = src[:maxInputHTML]
 	}
 
-	reply, err := p.llm.Complete(ctx, buildPrompt(src, targetURL), maxTokens)
+	reply, err := p.llm.Complete(ctx, prompt.Placer(src, targetURL), maxTokens)
 	if err != nil {
 		return linkbuilding.BacklinkInsertion{}, fmt.Errorf("backlink llm: %w", err)
 	}
 
-	out, err := parseReply(reply)
+	anchor, original, modified, err := parseReply(reply)
 	if err != nil {
-		// Surface the head of the raw reply so we can diagnose why the model
-		// broke the format without rerunning the whole job.
-		p.log.WarnContext(ctx, "backlink llm parse failed",
-			"err", err,
-			"reply_head", head(reply, 500),
-			"target_url", targetURL,
-		)
+		p.log.WarnContext(ctx, "backlink llm parse failed", "err", err, "reply_head", head(reply, 500), "target_url", targetURL)
 		return linkbuilding.BacklinkInsertion{}, err
 	}
-	if !strings.Contains(out.ModifiedHTML, targetURL) {
-		p.log.WarnContext(ctx, "backlink llm omitted target url",
-			"target_url", targetURL,
-			"reply_head", head(reply, 500),
-		)
-		return linkbuilding.BacklinkInsertion{}, fmt.Errorf("backlink llm: target URL missing from modified html")
+	if !strings.Contains(modified, targetURL) {
+		p.log.WarnContext(ctx, "backlink llm omitted target url", "target_url", targetURL, "reply_head", head(reply, 500))
+		return linkbuilding.BacklinkInsertion{}, fmt.Errorf("backlink llm: target URL missing from modified paragraph")
+	}
+	if !strings.Contains(html, original) {
+		p.log.WarnContext(ctx, "backlink llm original not in source", "original_head", head(original, 300))
+		return linkbuilding.BacklinkInsertion{}, fmt.Errorf("backlink llm: original paragraph not found verbatim in source html (model paraphrased)")
 	}
 
-	p.log.DebugContext(ctx, "backlink placed", "anchor", out.Anchor, "target_url", targetURL)
-	return out, nil
+	full := strings.Replace(html, original, modified, 1)
+	p.log.DebugContext(ctx, "backlink placed", "anchor", anchor, "target_url", targetURL)
+	return linkbuilding.BacklinkInsertion{Anchor: anchor, ModifiedHTML: full}, nil
 }
 
-func buildPrompt(html, targetURL string) string {
-	var b strings.Builder
-	b.WriteString(`You are editing an existing WordPress blog post. Insert exactly ONE inline backlink to the URL below into the most contextually-fitting sentence of the post. Pick a natural anchor of 2-4 words drawn from the surrounding text; never invent unrelated phrasing. Do not paraphrase, add new sentences, change punctuation outside the link, or alter HTML structure beyond the new <a> tag. Use rel="noopener".`)
-	b.WriteString("\n\nURL to link to: ")
-	b.WriteString(targetURL)
-	b.WriteString("\n\nExisting post HTML:\n")
-	b.WriteString(html)
-	b.WriteString("\n\nReply with EXACTLY this two-part format and nothing else (no prose, no markdown fences):\n")
-	b.WriteString("ANCHOR: <chosen 2-4 word anchor>\n")
-	b.WriteString(htmlSeparator)
-	b.WriteString("\n<the entire modified post HTML with your single inline <a> tag inserted>")
-	return b.String()
-}
-
-// parseReply pulls anchor + HTML out of the model's reply. The HTML half lives
-// after the separator and is taken verbatim — no JSON-escaping required.
-func parseReply(reply string) (linkbuilding.BacklinkInsertion, error) {
+func parseReply(reply string) (anchor, original, modified string, err error) {
 	s := strings.TrimSpace(reply)
-	// Some models still wrap the whole thing in a code fence despite the
-	// instruction; peel the most common variants.
 	s = strings.TrimPrefix(s, "```html")
 	s = strings.TrimPrefix(s, "```")
 	s = strings.TrimSuffix(s, "```")
 	s = strings.TrimSpace(s)
 
-	idx := strings.Index(s, htmlSeparator)
-	if idx < 0 {
-		return linkbuilding.BacklinkInsertion{}, fmt.Errorf("backlink llm: separator %q missing from reply", htmlSeparator)
+	origIdx := strings.Index(s, prompt.SepOriginal)
+	if origIdx < 0 {
+		return "", "", "", fmt.Errorf("backlink llm: separator %q missing from reply", prompt.SepOriginal)
 	}
+	headPart := s[:origIdx]
+	rest := s[origIdx+len(prompt.SepOriginal):]
 
-	head := s[:idx]
-	body := strings.TrimSpace(s[idx+len(htmlSeparator):])
-	body = strings.TrimPrefix(body, "```html")
-	body = strings.TrimPrefix(body, "```")
-	body = strings.TrimSuffix(body, "```")
-	body = strings.TrimSpace(body)
+	modIdx := strings.Index(rest, prompt.SepModified)
+	if modIdx < 0 {
+		return "", "", "", fmt.Errorf("backlink llm: separator %q missing from reply", prompt.SepModified)
+	}
+	original = strings.TrimSpace(rest[:modIdx])
+	modified = strings.TrimSpace(rest[modIdx+len(prompt.SepModified):])
 
-	anchor := extractAnchor(head)
+	for _, fence := range []string{"```html", "```"} {
+		original = strings.TrimPrefix(original, fence)
+		modified = strings.TrimPrefix(modified, fence)
+	}
+	original = strings.TrimSuffix(original, "```")
+	modified = strings.TrimSuffix(modified, "```")
+	original = strings.TrimSpace(original)
+	modified = strings.TrimSpace(modified)
+
+	anchor = extractAnchor(headPart)
 	if anchor == "" {
-		return linkbuilding.BacklinkInsertion{}, fmt.Errorf("backlink llm: ANCHOR line missing from reply")
+		return "", "", "", fmt.Errorf("backlink llm: ANCHOR line missing from reply")
 	}
-	if body == "" {
-		return linkbuilding.BacklinkInsertion{}, fmt.Errorf("backlink llm: html body missing from reply")
+	if original == "" {
+		return "", "", "", fmt.Errorf("backlink llm: ORIGINAL section empty")
 	}
-	return linkbuilding.BacklinkInsertion{Anchor: anchor, ModifiedHTML: body}, nil
+	if modified == "" {
+		return "", "", "", fmt.Errorf("backlink llm: MODIFIED section empty")
+	}
+	return anchor, original, modified, nil
 }
 
-func extractAnchor(head string) string {
-	for _, line := range strings.Split(head, "\n") {
+func extractAnchor(headPart string) string {
+	for _, line := range strings.Split(headPart, "\n") {
 		line = strings.TrimSpace(line)
 		if !strings.HasPrefix(strings.ToUpper(line), "ANCHOR:") {
 			continue
 		}
 		v := strings.TrimSpace(line[len("ANCHOR:"):])
-		// Strip optional quoting the model sometimes adds.
 		v = strings.Trim(v, "\"'`")
 		return strings.TrimSpace(v)
 	}

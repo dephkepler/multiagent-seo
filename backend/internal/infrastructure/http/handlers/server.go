@@ -1,6 +1,5 @@
 package handlers
 
-// Server embeds the per-feature handlers to satisfy the generated oapigen.ServerInterface.
 type Server struct {
 	*HealthHandler
 	*WordpressSitesHandler

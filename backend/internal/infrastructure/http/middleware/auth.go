@@ -11,9 +11,6 @@ import (
 	"multiagent-seo/pkg/logger"
 )
 
-// BearerAuth enforces auth on routes marked with the bearerAuth security scheme.
-// oapi-codegen sets BearerAuthScopes in context for those routes before this runs,
-// so routes without it (healthz, login) pass through untouched.
 func BearerAuth(verifier auth.TokenVerifier) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -38,8 +35,6 @@ func BearerAuth(verifier auth.TokenVerifier) func(http.Handler) http.Handler {
 				return
 			}
 
-			// Report user_id on the access-log line too: RequestLogger seeded a
-			// holder before auth ran, so fill it now (same goroutine, no race).
 			if h, ok := r.Context().Value(userIDHolderKey).(*userIDHolder); ok {
 				h.id = userID
 			}

@@ -113,8 +113,6 @@ func TestLoginToSites_CancellationAbortsAndKeepsPartial(t *testing.T) {
 	if _, err := newLoginSvc(creds, auth).LoginToSites(context.Background(), applb.LoginRequest{Sheet: "WEBSITES"}); err != nil {
 		t.Fatalf("LoginToSites: %v", err)
 	}
-	// a.com (row 2) succeeded and must be persisted; the cancellation at b.com
-	// aborts the run, so c.com is never attempted and b.com is NOT marked failed.
 	if len(creds.written) != 1 {
 		t.Fatalf("written = %d, want 1 (only the pre-cancel success)", len(creds.written))
 	}
@@ -137,7 +135,6 @@ func TestLoginToSites_EmptyInventory(t *testing.T) {
 	if res.SitesQueued != 0 || len(creds.written) != 0 {
 		t.Errorf("empty inventory: queued=%d written=%d, want 0/0", res.SitesQueued, len(creds.written))
 	}
-	// Stale statuses must still be cleared even when nothing is suitable.
 	if creds.cleared != 1 {
 		t.Errorf("ClearStaleStatuses called %d times, want 1", creds.cleared)
 	}

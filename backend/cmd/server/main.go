@@ -35,6 +35,7 @@ import (
 	"multiagent-seo/internal/infrastructure/jwtauth"
 	infrallm "multiagent-seo/internal/infrastructure/llm"
 	"multiagent-seo/internal/infrastructure/persistence/postgres"
+	"multiagent-seo/internal/infrastructure/postsdiscover"
 	"multiagent-seo/internal/infrastructure/pexels"
 	"multiagent-seo/internal/infrastructure/sheets"
 	"multiagent-seo/internal/infrastructure/topicclassifier"
@@ -69,11 +70,8 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	// JWT signing/verification needs no DB, so the issuer-verifier is always ready.
 	jwtSvc := jwtauth.New(cfg.JWT.Secret, cfg.JWT.TTL)
 
-	// A DB outage must not stop the server from booting — DB-backed features then
-	// report 503/degraded per request instead of the process failing to start.
 	var healthRepo domainhealth.Repository
 	var wordpressSvc *appwordpress.Service
 	var authSvc *appauth.Service
@@ -108,9 +106,6 @@ func main() {
 		)
 	}
 
-	// Link-building Flow 1/2 are Sheets-only; Flow 3 (place-backlinks) needs the
-	// DB to cache donor app-passwords and the wordpress repo to resolve target
-	// URLs. Both extra deps may be nil (no pool) — buildLinkbuilding handles it.
 	linkbuildingSvc, linkbuildingLoginSvc, linkbuildingBacklinkSvc, lbRunner := buildLinkbuilding(ctx, cfg, slogLog, pool, wordpressRepo)
 
 	healthSvc := apphealth.NewService(domainhealth.NewService(healthRepo))
@@ -123,7 +118,6 @@ func main() {
 		nilableApiTokensHandler(apiTokenSvc),
 	)
 
-	// API keys authenticate alongside JWTs once the DB (their store) is up.
 	var verifier domainauth.TokenVerifier = jwtSvc
 	if apiTokenSvc != nil {
 		verifier = compositeVerifier{jwt: jwtSvc, keys: apiTokenSvc}
@@ -151,8 +145,6 @@ func main() {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.Server.ShutdownWaitTimeout)
 	defer cancel()
 
-	// Stop accepting requests before draining background jobs: no new jobs can be
-	// dispatched mid-drain, avoiding a WaitGroup Add-vs-Wait race in the runner.
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Error().Err(err).Msg("graceful shutdown failed")
 	}
@@ -182,7 +174,6 @@ func articleDefaults(cfg config.Config) apparticles.Defaults {
 	}
 }
 
-// newSERP falls back to a mock when DataForSEO is unconfigured.
 func newSERP(cfg config.Config, log *slog.Logger) domainarticles.SERPProvider {
 	if cfg.DataForSEO.Login != "" && cfg.DataForSEO.Password != "" {
 		return dataforseo.New(cfg.DataForSEO.Login, cfg.DataForSEO.Password)
@@ -191,7 +182,6 @@ func newSERP(cfg config.Config, log *slog.Logger) domainarticles.SERPProvider {
 	return dataforseo.NewMock()
 }
 
-// newTopics falls back to a mock when Sheets is unconfigured or unreachable.
 func newTopics(ctx context.Context, cfg config.Config, log *slog.Logger) domainarticles.TopicSource {
 	if cfg.Sheets.SpreadsheetID == "" {
 		log.Warn("sheets unconfigured; using topic mock")
@@ -206,8 +196,6 @@ func newTopics(ctx context.Context, cfg config.Config, log *slog.Logger) domaina
 	return ts
 }
 
-// newChecker falls back to the mock checker when the configured provider can't
-// be built (e.g. missing key), matching the legacy degrade-to-mock behaviour.
 func newChecker(cfg config.Config, log *slog.Logger) domainarticles.ContentChecker {
 	c, err := checker.New(cfg.Checker.Provider, cfg.Checker.APIKey, cfg.Checker.Model, cfg.Checker.AIThreshold, log)
 	if err != nil {
@@ -238,9 +226,6 @@ func nilableArticlesHandler(svc *apparticles.Service) *handlers.ArticlesHandler 
 	return handlers.NewArticlesHandler(svc)
 }
 
-// nilableLinkbuildingHandler hands the constructor the typed-nil pointers
-// directly; the handler uses a reflect-based check that treats them as nil so
-// the 503 path still fires for missing prerequisites.
 func nilableLinkbuildingHandler(
 	svc *applinkbuilding.Service,
 	loginSvc *applinkbuilding.LoginService,
@@ -249,11 +234,6 @@ func nilableLinkbuildingHandler(
 	return handlers.NewLinkbuildingHandler(svc, loginSvc, backlinkSvc)
 }
 
-// buildLinkbuilding wires the link-building flows. Flow 1 (qualify) needs an
-// LLM; Flow 2 (login) needs only the sheets credential source; Flow 3
-// (place-backlinks) additionally needs the DB pool + wordpress repo to cache
-// donor app-passwords and resolve target URLs. Any flow whose prerequisites
-// are absent comes back nil so the endpoint reports 503 instead of crashing.
 func buildLinkbuilding(
 	ctx context.Context,
 	cfg config.Config,
@@ -269,8 +249,6 @@ func buildLinkbuilding(
 	runner := jobrunner.NewAsyncRunner(cfg.Server.BackgroundJobTimeout, log)
 	factory := infrallm.NewFactory(cfg.LLM, log)
 
-	// Qualification (Flow 1) — classifier built per request via the factory so
-	// the run can target a different model than the deployment default.
 	classifierBuilder := func(provider, model string) (domainlinkbuilding.TopicClassifier, error) {
 		client, err := factory.ForModel(provider, model)
 		if err != nil {
@@ -282,13 +260,13 @@ func buildLinkbuilding(
 	qualifySvc := applinkbuilding.NewService(
 		src,
 		webfetch.New(log),
+		postsdiscover.New(log),
 		classifierBuilder,
 		applinkbuilding.LLMDefaults{Provider: qualifyProvider, Model: qualifyModel},
 		runner,
 		log,
 	)
 
-	// Login (Flow 2) needs the credential source; it does not use the LLM.
 	creds, err := sheets.NewCredentialSource(ctx, cfg.Sheets.CredentialsFile, cfg.Sheets.SpreadsheetID, log)
 	if err != nil {
 		log.Warn("link-building login disabled: credential source unavailable", "err", err)
@@ -296,8 +274,6 @@ func buildLinkbuilding(
 	}
 	loginSvc := applinkbuilding.NewLoginService(creds, wplogin.New(log), runner, log)
 
-	// Place-backlinks (Flow 3) wants DB + wordpress repo for the target-URL
-	// resolver, plus an LLM for the inline backlink rewrite.
 	if pool == nil || wordpressRepo == nil {
 		return qualifySvc, loginSvc, nil, runner
 	}
@@ -329,8 +305,6 @@ func buildLinkbuilding(
 	return qualifySvc, loginSvc, backlinkSvc, runner
 }
 
-// placerLLM is the same adapter pattern as classifierLLM — the backlink placer's
-// port only needs the prose, not the token-usage triple.
 type placerLLM struct{ c domainarticles.LLMClient }
 
 func (a placerLLM) Complete(ctx context.Context, prompt string, maxTokens int) (string, error) {
@@ -338,10 +312,9 @@ func (a placerLLM) Complete(ctx context.Context, prompt string, maxTokens int) (
 	return out, err
 }
 
-// wordpressTargetResolver confirms the requested URL is one of our
-// wordpress_sites (case-insensitive, trailing-slash insensitive) and returns
-// the canonical stored form, so the backlink uses exactly what's in our DB.
-type wordpressTargetResolver struct{ repo *postgres.WordpressSiteRepository }
+type wordpressTargetResolver struct {
+	repo *postgres.WordpressSiteRepository
+}
 
 func (r wordpressTargetResolver) ResolveSiteURL(ctx context.Context, raw string) (string, error) {
 	want := normalizeSiteURL(raw)
@@ -366,8 +339,6 @@ func normalizeSiteURL(s string) string {
 	return s
 }
 
-// classifierLLM adapts the articles LLM client (whose Complete also returns token
-// usage) to the topic classifier's minimal LLM interface.
 type classifierLLM struct{ c domainarticles.LLMClient }
 
 func (a classifierLLM) Complete(ctx context.Context, prompt string, maxTokens int) (string, error) {
@@ -382,8 +353,6 @@ func nilableApiTokensHandler(svc *appapitoken.Service) *handlers.ApiTokensHandle
 	return handlers.NewApiTokensHandler(svc)
 }
 
-// compositeVerifier authenticates a bearer value as either one of our API keys
-// (recognised by prefix) or a JWT.
 type compositeVerifier struct {
 	jwt  domainauth.TokenVerifier
 	keys *appapitoken.Service

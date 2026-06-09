@@ -6,8 +6,6 @@ import (
 
 func setMinEnv(t *testing.T) {
 	t.Helper()
-	// Required fields without envDefault must be set so validation passes;
-	// everything else relies on defaults declared in struct tags.
 }
 
 func TestLoad_DefaultsAreValid(t *testing.T) {
@@ -70,8 +68,6 @@ func TestDatabaseDSN(t *testing.T) {
 		User: "u", Password: "p@ss/word",
 		Dbname: "mydb", SSLMode: "require",
 	}
-	// @ and / must be percent-encoded in userinfo or postgres URL parsing breaks
-	// on the host/path boundaries.
 	got := c.DSN()
 	want := "postgres://u:p%40ss%2Fword@db.example:5432/mydb?sslmode=require"
 	if got != want {
@@ -99,13 +95,11 @@ func TestLLMKeyFor(t *testing.T) {
 		t.Errorf("KeyFor(unknown) = %q, want empty", got)
 	}
 
-	// Fallback to APIKey only when no per-provider key set AND provider matches default.
 	c2 := LLMConfig{Provider: "groq", APIKey: "default-key"}
 	if got := c2.KeyFor("groq"); got != "default-key" {
 		t.Errorf("KeyFor fallback = %q, want default-key", got)
 	}
 
-	// anthropic alias resolves to the claude provider for the APIKey fallback too.
 	c3 := LLMConfig{Provider: "claude", APIKey: "default-key"}
 	if got := c3.KeyFor("anthropic"); got != "default-key" {
 		t.Errorf("KeyFor(anthropic) alias fallback = %q, want default-key", got)
@@ -130,7 +124,6 @@ func TestLLMDefaultsFor(t *testing.T) {
 		if p != "claude" || m != "claude-haiku-4-5" {
 			t.Errorf("DefaultsFor(backlink) = (%q,%q), want override", p, m)
 		}
-		// Other task still uses global.
 		if p, m := c.DefaultsFor(TaskQualify); p != "groq" || m != "llama-3.3-70b-versatile" {
 			t.Errorf("DefaultsFor(qualify) = (%q,%q), want global (override is for backlink only)", p, m)
 		}
@@ -150,8 +143,6 @@ func TestLLMDefaultsFor(t *testing.T) {
 		c.GroqDefaultModel = "llama-3.3-70b-versatile"
 		c.ClaudeDefaultModel = "claude-haiku-4-5"
 		c.BacklinkProvider = "claude"
-		// BacklinkModel intentionally empty — the fix is that this no longer
-		// leaks the groq default model when the user only specified provider.
 		p, m := c.DefaultsFor(TaskBacklink)
 		if p != "claude" || m != "claude-haiku-4-5" {
 			t.Errorf("DefaultsFor(backlink) = (%q,%q), want (claude, claude-haiku-4-5)", p, m)
@@ -172,7 +163,6 @@ func TestLLMModelFor(t *testing.T) {
 	if got := c.ModelFor("claude"); got != "claude-haiku-4-5" {
 		t.Errorf("ModelFor(claude) = %q", got)
 	}
-	// anthropic alias normalizes to claude.
 	if got := c.ModelFor("anthropic"); got != "claude-haiku-4-5" {
 		t.Errorf("ModelFor(anthropic) = %q", got)
 	}

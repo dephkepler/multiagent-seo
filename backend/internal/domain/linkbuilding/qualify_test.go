@@ -4,19 +4,19 @@ import "testing"
 
 func TestCountExternalDomains(t *testing.T) {
 	links := []string{
-		"https://other.com/page",          // external
-		"https://other.com/another",       // same external domain → not double-counted
-		"http://second.net",               // external
-		"https://www.mysite.com/internal", // subdomain of own → internal
-		"https://mysite.com/x",            // own apex → internal
-		"/relative/path",                  // relative → no host → skip
-		"#anchor",                         // anchor → skip
-		"mailto:hi@mysite.com",            // mailto → skip
-		"https://sub.example.co.uk/a",     // external (eTLD+1 example.co.uk)
-		"javascript:void(0)",              // skip
+		"https://other.com/page",
+		"https://other.com/another",
+		"http://second.net",
+		"https://www.mysite.com/internal",
+		"https://mysite.com/x",
+		"/relative/path",
+		"#anchor",
+		"mailto:hi@mysite.com",
+		"https://sub.example.co.uk/a",
+		"javascript:void(0)",
 	}
 	got := CountExternalDomains("https://mysite.com", links)
-	if got != 3 { // other.com, second.net, example.co.uk
+	if got != 3 {
 		t.Errorf("CountExternalDomains = %d, want 3", got)
 	}
 }
@@ -30,11 +30,11 @@ func TestCountExternalDomains_NoLinks(t *testing.T) {
 func TestIsSuitable(t *testing.T) {
 	accepted := []string{"Gambling", "news"}
 	cases := map[string]bool{
-		"gambling": true,  // case-insensitive match
-		"NEWS":     true,  // case-insensitive match
-		"  news  ": true,  // trimmed
-		"tech":     false, // not accepted
-		"":         false, // empty topic never suitable
+		"gambling": true,
+		"NEWS":     true,
+		"  news  ": true,
+		"tech":     false,
+		"":         false,
 	}
 	for topic, want := range cases {
 		if got := IsSuitable(topic, accepted); got != want {

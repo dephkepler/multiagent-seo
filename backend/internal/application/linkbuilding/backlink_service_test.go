@@ -11,8 +11,6 @@ import (
 	"multiagent-seo/pkg/jobrunner"
 )
 
-// --- fakes ---
-
 type fakePlacements struct {
 	written []domain.PlacementResult
 }
@@ -47,7 +45,7 @@ func (s scriptedIssuer) IssueAppPassword(_ context.Context, donorURL, login, pas
 type scriptedEditor struct {
 	latest func(domain.DonorCredential) (domain.DonorPost, error)
 	update func(domain.DonorCredential, int64, string) error
-	posted []string // captures HTML passed to UpdatePostContent
+	posted []string
 }
 
 func (s *scriptedEditor) LatestPost(_ context.Context, c domain.DonorCredential) (domain.DonorPost, error) {
@@ -88,8 +86,6 @@ func newBacklinkSvc(
 	placerBuilder := func(string, string) (domain.BacklinkPlacer, error) { return pr, nil }
 	return applb.NewBacklinkService(creds, pl, ds, is, ed, placerBuilder, applb.LLMDefaults{}, tg, jobrunner.NewSyncRunner(), nil, applb.WithBacklinkDelay(0, 0))
 }
-
-// --- tests ---
 
 func TestPlaceBacklinks_HappyPathIssuesAndCachesCreds(t *testing.T) {
 	creds := &fakeCredSource{creds: []domain.SiteCredential{
@@ -189,31 +185,12 @@ func TestPlaceBacklinks_FailureStagesAreRecorded(t *testing.T) {
 			return nil
 		},
 	}
-	placer := scriptedPlacer{fn: func(_, t string) (domain.BacklinkInsertion, error) {
-		if strings.Contains(t, "client.example") {
-			// LLM fails for the second donor only.
-			if editor.posted == nil && len(editor.posted) == 0 {
-				// First and second donor share this path; gate by counter.
-			}
-		}
-		return domain.BacklinkInsertion{Anchor: "a", ModifiedHTML: "<a href=\"" + t + "\">a</a>"}, nil
-	}}
-	// Override placer to fail for the llmfail donor specifically.
-	placer = scriptedPlacer{fn: func(html, target string) (domain.BacklinkInsertion, error) {
-		if html == "<p>x</p>" && len(editor.posted) == 0 {
-			// Heuristic: first run on llmfail donor. Use a sentinel donor URL
-			// instead by checking the editor.latest call count via posted.
-		}
-		return domain.BacklinkInsertion{Anchor: "a", ModifiedHTML: "<a href=\"" + target + "\">a</a>"}, nil
-	}}
-	// Simpler: route placer failure by the donor we last saw via editor.latest.
-	// We use a closure with an injected per-donor map.
 	var lastDonor string
 	editor.latest = func(c domain.DonorCredential) (domain.DonorPost, error) {
 		lastDonor = c.DonorURL
 		return domain.DonorPost{ID: 1, Content: "<p>x</p>", EditURL: c.DonorURL + "/wp-admin/post.php?post=1&action=edit"}, nil
 	}
-	placer = scriptedPlacer{fn: func(_, target string) (domain.BacklinkInsertion, error) {
+	placer := scriptedPlacer{fn: func(_, target string) (domain.BacklinkInsertion, error) {
 		if lastDonor == "https://llmfail.example" {
 			return domain.BacklinkInsertion{}, errors.New("rate limited")
 		}

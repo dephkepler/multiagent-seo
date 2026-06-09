@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"time"
 
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/option"
@@ -28,8 +29,6 @@ func NewWebsiteSource(ctx context.Context, credentialsFile, spreadsheetID string
 	return src, nil
 }
 
-// NewCredentialSource builds the same Google Sheets adapter for the Flow 2
-// login inventory: it reads the credential columns and writes the login status.
 func NewCredentialSource(ctx context.Context, credentialsFile, spreadsheetID string, log *slog.Logger) (linkbuilding.CredentialSource, error) {
 	src, err := newSource(ctx, credentialsFile, spreadsheetID, log)
 	if err != nil {
@@ -38,8 +37,6 @@ func NewCredentialSource(ctx context.Context, credentialsFile, spreadsheetID str
 	return src, nil
 }
 
-// NewPlacementSink builds the same Google Sheets adapter as a Flow 3 placement
-// sink — it writes per-donor "placed / failed" rows back to the I column.
 func NewPlacementSink(ctx context.Context, credentialsFile, spreadsheetID string, log *slog.Logger) (linkbuilding.PlacementSink, error) {
 	src, err := newSource(ctx, credentialsFile, spreadsheetID, log)
 	if err != nil {
@@ -58,8 +55,6 @@ func newSource(ctx context.Context, credentialsFile, spreadsheetID string, log *
 		return nil, fmt.Errorf("read credentials: %w", err)
 	}
 
-	// Read-write scope so the result/status writes can update the sheet;
-	// the keyword client (client.go) stays read-only.
 	creds, err := google.CredentialsFromJSON(ctx, data, sheets.SpreadsheetsScope)
 	if err != nil {
 		return nil, fmt.Errorf("parse credentials: %w", err)
@@ -94,9 +89,6 @@ func (s *websiteSource) List(ctx context.Context, sheet string) ([]linkbuilding.
 			continue
 		}
 		url := strings.TrimSpace(fmt.Sprint(row[0]))
-		// Only rows whose first cell is a URL count — this skips blanks and a
-		// header row like "URL"/"Website" without assuming row 1 is a header
-		// (the donor list often starts at row 1 with no header).
 		if !strings.HasPrefix(strings.ToLower(url), "http") {
 			continue
 		}
@@ -129,14 +121,10 @@ func (s *websiteSource) WriteResults(ctx context.Context, sheet string, results 
 				suitableCell(r.Suitable),
 			}},
 		})
-		// On a fresh "not suitable" verdict, blank H and I so a stale Flow 2
-		// "login ok" or Flow 3 "placed: ..." from a previous campaign doesn't
-		// linger on a row we just decided is out of scope. Suitable rows leave
-		// H/I untouched — those statuses are managed by Flow 2/3 themselves.
 		if !r.Suitable {
 			data = append(data, &sheets.ValueRange{
-				Range:  fmt.Sprintf("%s!H%d:I%d", sheet, r.Row, r.Row),
-				Values: [][]any{{"", ""}},
+				Range:  fmt.Sprintf("%s!H%d", sheet, r.Row),
+				Values: [][]any{{""}},
 			})
 		}
 	}
@@ -161,7 +149,6 @@ func (s *websiteSource) WriteResults(ctx context.Context, sheet string, results 
 	return nil
 }
 
-// resultRange is the A1 range for a single result's qualification columns (B:D).
 func resultRange(sheet string, row int) string {
 	return fmt.Sprintf("%s!B%d:D%d", sheet, row, row)
 }
@@ -174,33 +161,32 @@ func suitableCell(suitable bool) string {
 }
 
 func (s *websiteSource) ListCredentials(ctx context.Context, sheet string) ([]linkbuilding.SiteCredential, error) {
-	// B:H covers the Flow 1 topic (B) — surfaced for optional per-campaign
-	// topic filtering downstream — through suitability (D), credentials (E/F/G),
-	// and the prior Flow 2 login status (H). Column C (outbound count) is read
-	// but discarded.
-	rangeStr := fmt.Sprintf("%s!B:H", sheet)
-
-	resp, err := s.svc.Spreadsheets.Values.
-		Get(s.spreadsheetID, rangeStr).
-		Context(ctx).
-		Do()
+	aRange := fmt.Sprintf("%s!A:D", sheet)
+	aResp, err := s.svc.Spreadsheets.Values.Get(s.spreadsheetID, aRange).Context(ctx).Do()
 	if err != nil {
-		return nil, fmt.Errorf("fetch range %s: %w", rangeStr, err)
+		return nil, fmt.Errorf("fetch range %s: %w", aRange, err)
 	}
+	aVerdicts := parseAVerdicts(aResp.Values)
 
-	out := parseCredentialRows(resp.Values)
-	// Bumped from Debug to Info plus emit the actual row numbers that passed
-	// the suitable=yes filter — lets the user verify against the sheet exactly
-	// which rows we considered, without having to scroll the placement log.
-	rows := make([]int, 0, len(out))
+	eRange := fmt.Sprintf("%s!E:I", sheet)
+	eResp, err := s.svc.Spreadsheets.Values.Get(s.spreadsheetID, eRange).Context(ctx).Do()
+	if err != nil {
+		return nil, fmt.Errorf("fetch range %s: %w", eRange, err)
+	}
+	out, rejectedUnknown, rejectedNotSuitable := parseECredentialsJoin(eResp.Values, aVerdicts)
+
+	included := make([]string, 0, len(out))
 	for _, c := range out {
-		rows = append(rows, c.Row)
+		included = append(included, fmt.Sprintf("row=%d topic=%q base=%s", c.Row, c.Topic, c.BaseURL))
 	}
 	s.log.InfoContext(ctx, "sheets credentials list",
 		"sheet", sheet,
-		"rows_scanned", len(resp.Values),
+		"a_qualified", len(aVerdicts),
+		"e_rows_scanned", len(eResp.Values),
 		"credentials", len(out),
-		"included_rows", rows,
+		"rejected_url_not_in_a", rejectedUnknown,
+		"rejected_not_suitable", rejectedNotSuitable,
+		"included", included,
 	)
 	return out, nil
 }
@@ -243,11 +229,34 @@ func (s *websiteSource) WritePlacementStatus(ctx context.Context, sheet string, 
 		return nil
 	}
 
+	ranges := make([]string, 0, len(results))
+	for _, r := range results {
+		ranges = append(ranges, fmt.Sprintf("%s!I%d", sheet, r.Row))
+	}
+	existing, err := s.svc.Spreadsheets.Values.BatchGet(s.spreadsheetID).Ranges(ranges...).Context(ctx).Do()
+	if err != nil {
+		return fmt.Errorf("read existing placement in %s: %w", sheet, err)
+	}
+	existingByRow := make(map[int]string, len(results))
+	for i, vr := range existing.ValueRanges {
+		if i >= len(results) {
+			break
+		}
+		if len(vr.Values) > 0 && len(vr.Values[0]) > 0 {
+			existingByRow[results[i].Row] = strings.TrimSpace(fmt.Sprint(vr.Values[0][0]))
+		}
+	}
+
+	now := time.Now().UTC().Format("2006-01-02 15:04:05")
 	data := make([]*sheets.ValueRange, 0, len(results))
 	for _, r := range results {
+		entry := fmt.Sprintf("[%s] %s", now, r.Status)
+		if old := existingByRow[r.Row]; old != "" {
+			entry = entry + "\n" + old
+		}
 		data = append(data, &sheets.ValueRange{
 			Range:  fmt.Sprintf("%s!I%d", sheet, r.Row),
-			Values: [][]any{{r.Status}},
+			Values: [][]any{{entry}},
 		})
 	}
 
@@ -267,17 +276,17 @@ func (s *websiteSource) WritePlacementStatus(ctx context.Context, sheet string, 
 }
 
 func (s *websiteSource) ClearStaleStatuses(ctx context.Context, sheet string) error {
-	rangeStr := fmt.Sprintf("%s!D:H", sheet)
-
-	resp, err := s.svc.Spreadsheets.Values.
-		Get(s.spreadsheetID, rangeStr).
-		Context(ctx).
-		Do()
+	aResp, err := s.svc.Spreadsheets.Values.Get(s.spreadsheetID, fmt.Sprintf("%s!A:D", sheet)).Context(ctx).Do()
 	if err != nil {
-		return fmt.Errorf("fetch range %s: %w", rangeStr, err)
+		return fmt.Errorf("fetch range %s!A:D: %w", sheet, err)
 	}
+	aVerdicts := parseAVerdicts(aResp.Values)
 
-	rows := staleStatusRows(resp.Values)
+	eResp, err := s.svc.Spreadsheets.Values.Get(s.spreadsheetID, fmt.Sprintf("%s!E:H", sheet)).Context(ctx).Do()
+	if err != nil {
+		return fmt.Errorf("fetch range %s!E:H: %w", sheet, err)
+	}
+	rows := staleEStatusRows(eResp.Values, aVerdicts)
 	if len(rows) == 0 {
 		return nil
 	}
@@ -302,37 +311,58 @@ func (s *websiteSource) ClearStaleStatuses(ctx context.Context, sheet string) er
 	return nil
 }
 
-// parseCredentialRows turns rows from the B:H range into credentials. Column
-// offsets: 0=topic (B), 1=outbound (C, unused), 2=suitable (D), 3=base URL (E),
-// 4=login (F), 5=password (G), 6=prior login status (H). Only rows the
-// qualification marked suitable ("yes") and that carry a URL + login + password
-// are kept; the header row and unsuitable/incomplete rows are skipped. Row is
-// the 1-based sheet line so the status can be written back.
-func parseCredentialRows(values [][]any) []linkbuilding.SiteCredential {
-	var out []linkbuilding.SiteCredential
-	for i, row := range values {
-		topic := cell(row, 0)
-		suitable := strings.ToLower(cell(row, 2))
-		base := cell(row, 3)
-		login := cell(row, 4)
-		password := cell(row, 5)
-		loginStatus := cell(row, 6)
-		if suitable != "yes" {
+type qualVerdict struct {
+	Topic    string
+	Suitable bool
+}
+
+func parseAVerdicts(values [][]any) map[string]qualVerdict {
+	out := make(map[string]qualVerdict, len(values))
+	for _, row := range values {
+		url := cell(row, 0)
+		if !strings.HasPrefix(strings.ToLower(url), "http") {
 			continue
 		}
+		topic := cell(row, 1)
+		suitable := strings.ToLower(cell(row, 3))
+		out[normalizeURL(url)] = qualVerdict{
+			Topic:    topic,
+			Suitable: suitable == "yes",
+		}
+	}
+	return out
+}
+
+func parseECredentialsJoin(values [][]any, aVerdicts map[string]qualVerdict) (out []linkbuilding.SiteCredential, rejectedUnknown, rejectedNotSuitable int) {
+	for i, row := range values {
+		base := cell(row, 0)
+		login := cell(row, 1)
+		password := cell(row, 2)
+		loginStatus := cell(row, 3)
+		placementStatus := cell(row, 4)
 		if !strings.HasPrefix(strings.ToLower(base), "http") || login == "" || password == "" {
 			continue
 		}
+		v, ok := aVerdicts[normalizeURL(base)]
+		if !ok {
+			rejectedUnknown++
+			continue
+		}
+		if !v.Suitable || v.Topic == "" {
+			rejectedNotSuitable++
+			continue
+		}
 		out = append(out, linkbuilding.SiteCredential{
-			Row:         i + 1,
-			BaseURL:     base,
-			Login:       login,
-			Password:    password,
-			Topic:       topic,
-			LoginStatus: loginStatus,
+			Row:             i + 1,
+			BaseURL:         base,
+			Login:           login,
+			Password:        password,
+			Topic:           v.Topic,
+			LoginStatus:     loginStatus,
+			PlacementStatus: placementStatus,
 		})
 	}
-	return out
+	return out, rejectedUnknown, rejectedNotSuitable
 }
 
 func cell(row []any, idx int) string {
@@ -342,19 +372,25 @@ func cell(row []any, idx int) string {
 	return strings.TrimSpace(fmt.Sprint(row[idx]))
 }
 
-// staleStatusRows returns the 1-based rows of the D:H range whose status (col H,
-// offset 4) is stale and should be blanked: a real site row (E is a URL) that is
-// no longer suitable (col D, offset 0) yet still carries a leftover status. The
-// header and blank rows (E not a URL) and suitable rows are left untouched.
-func staleStatusRows(values [][]any) []int {
+func normalizeURL(s string) string {
+	s = strings.TrimSpace(strings.ToLower(s))
+	s = strings.TrimSuffix(s, "/")
+	return s
+}
+
+func staleEStatusRows(values [][]any, aVerdicts map[string]qualVerdict) []int {
 	var rows []int
 	for i, row := range values {
-		suitable := strings.ToLower(cell(row, 0))
-		base := strings.ToLower(cell(row, 1))
-		status := cell(row, 4)
-		if strings.HasPrefix(base, "http") && suitable != "yes" && status != "" {
-			rows = append(rows, i+1)
+		base := cell(row, 0)
+		status := cell(row, 3)
+		if !strings.HasPrefix(strings.ToLower(base), "http") || status == "" {
+			continue
 		}
+		v, ok := aVerdicts[normalizeURL(base)]
+		if ok && v.Suitable {
+			continue
+		}
+		rows = append(rows, i+1)
 	}
 	return rows
 }

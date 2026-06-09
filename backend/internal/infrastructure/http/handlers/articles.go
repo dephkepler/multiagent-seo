@@ -48,8 +48,6 @@ func (h *ArticlesHandler) GenerateArticle(w http.ResponseWriter, r *http.Request
 		problem.Write(w, http.StatusBadRequest, strings.Join(validate.MissingFields(err), ", "))
 		return
 	}
-	// A zero uuid satisfies "required" (its bytes are non-empty), so reject it
-	// explicitly: an unset site_id must not silently target the nil site.
 	if body.SiteId == uuid.Nil {
 		problem.Write(w, http.StatusBadRequest, "site_id")
 		return
@@ -147,7 +145,6 @@ func (h *ArticlesHandler) writeError(ctx context.Context, w http.ResponseWriter,
 	case errors.Is(err, apparticles.ErrNoDraftToPublish):
 		problem.Write(w, http.StatusConflict, "article has no draft to publish")
 	default:
-		// Log the wrapped cause so 5xx origins are visible; client sees only "internal error".
 		log := logger.New(ctx, "handlers.articles")
 		log.Error().Err(err).Msg("internal error")
 		problem.Write(w, http.StatusInternalServerError, "internal error")

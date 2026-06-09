@@ -9,8 +9,6 @@ import (
 	"multiagent-seo/pkg/logger"
 )
 
-// SentryMiddleware captures panics and errors. Safe to always wire in: Sentry
-// no-ops when not initialized. Repanic lets the chi Recoverer still handle the panic.
 func SentryMiddleware() func(http.Handler) http.Handler {
 	handler := sentryhttp.New(sentryhttp.Options{
 		Repanic: true,
@@ -18,8 +16,6 @@ func SentryMiddleware() func(http.Handler) http.Handler {
 	return handler.Handle
 }
 
-// SentryScopeEnhancer enriches the Sentry scope with trace_id and span_id from context.
-// Must be registered after RequestLogger so trace context is already set on the request context.
 func SentryScopeEnhancer(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
