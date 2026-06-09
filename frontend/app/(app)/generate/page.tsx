@@ -41,6 +41,9 @@ interface Article {
   wp_post_id?: number
 }
 
+// Статусы, после которых статья больше не меняется — на них опрос /articles можно остановить.
+const TERMINAL_STATUSES = ['draft', 'published', 'failed']
+
 export default function GeneratePage() {
   const qc = useQueryClient()
   const [form, setForm] = useState<GenerateRequest>({
@@ -72,7 +75,12 @@ export default function GeneratePage() {
   const articles = useQuery({
     queryKey: ['articles'],
     queryFn: () => api<Article[] | { items: Article[] }>('/articles'),
-    refetchInterval: 5_000,
+    refetchInterval: (query) => {
+      const data = query.state.data
+      const list: Article[] = Array.isArray(data) ? data : data?.items || []
+      const busy = list.some((a) => !TERMINAL_STATUSES.includes(a.status))
+      return busy ? 5_000 : false
+    },
   })
   const items: Article[] = Array.isArray(articles.data) ? articles.data : (articles.data as any)?.items || []
 
@@ -212,7 +220,7 @@ export default function GeneratePage() {
               )}
               {items.map((a) => {
                 const site = a.site_id ? sitesById.get(a.site_id) : undefined
-                const terminal = ['draft', 'published', 'failed'].includes(a.status)
+                const terminal = TERMINAL_STATUSES.includes(a.status)
                 const elapsed = fmtElapsed(a.created_at, a.updated_at, now, terminal)
                 return (
                   <tr key={String(a.id)} className='border-t border-gray-100'>
