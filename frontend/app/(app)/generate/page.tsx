@@ -81,8 +81,13 @@ export default function GeneratePage() {
       const busy = list.some((a) => !TERMINAL_STATUSES.includes(a.status))
       return busy ? 5_000 : false
     },
+    // Idle articles never change on their own; mutations invalidate explicitly
+    // and the busy-poll above covers generations. Without this the 1s elapsed
+    // timer's re-renders trip the global 30s staleTime into background refetches.
+    staleTime: Infinity,
   })
   const items: Article[] = Array.isArray(articles.data) ? articles.data : (articles.data as any)?.items || []
+  const busy = items.some((a) => !TERMINAL_STATUSES.includes(a.status))
 
   const create = useMutation({
     mutationFn: (body: GenerateRequest) =>
@@ -105,9 +110,10 @@ export default function GeneratePage() {
 
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
+    if (!busy) return
     const t = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(t)
-  }, [])
+  }, [busy])
 
   const sitesById = new Map((sites.data || []).map((s) => [s.id, s]))
 
