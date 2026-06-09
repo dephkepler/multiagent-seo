@@ -19,18 +19,13 @@ func Default() Config {
 	}
 }
 
-// maxRetryAfter caps a server-suggested wait so a hostile/huge Retry-After can't stall us.
 const maxRetryAfter = 30 * time.Second
 
-// HTTPStatus() == 0 signals a transport-level failure (no HTTP response received).
 type HTTPStatusError interface {
 	error
 	HTTPStatus() int
 }
 
-// RetryAfterError optionally reports how long the server asked us to wait (e.g.
-// a 429 Retry-After). When present it overrides the default backoff so we pace
-// to the provider's rate limit instead of guessing.
 type RetryAfterError interface {
 	RetryAfter() (time.Duration, bool)
 }
@@ -43,7 +38,6 @@ func retryAfterOf(err error) (time.Duration, bool) {
 	return 0, false
 }
 
-// statusOf extracts the HTTP status from a HTTPStatusError; 0 if absent/transport-level.
 func statusOf(err error) int {
 	var he HTTPStatusError
 	if errors.As(err, &he) {
@@ -52,7 +46,6 @@ func statusOf(err error) int {
 	return 0
 }
 
-// Retryable: transport failures (status 0), 429, and 5xx. Everything else is terminal.
 func shouldRetry(err error) bool {
 	if err == nil {
 		return false
@@ -71,7 +64,6 @@ func shouldRetry(err error) bool {
 	return status >= 500 && status < 600
 }
 
-// provider is used only for log fields.
 func Do(ctx context.Context, cfg Config, log *slog.Logger, provider string, fn func() error) error {
 	if log == nil {
 		log = slog.Default()
@@ -91,7 +83,6 @@ func Do(ctx context.Context, cfg Config, log *slog.Logger, provider string, fn f
 				}
 				delay = ra
 			}
-			// Retries on 429/5xx/transport are expected; log at Info, not Warn.
 			log.InfoContext(ctx, "llm retry backoff",
 				"provider", provider,
 				"attempt", attempt,

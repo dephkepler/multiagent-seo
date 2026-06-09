@@ -84,8 +84,6 @@ func TestGetHealthz_Load(t *testing.T) {
 
 	var ok, failed int64
 	var wg sync.WaitGroup
-	// Reuse keep-alive connections across the load (one idle conn per worker),
-	// otherwise 10k short-lived connections exhaust ephemeral ports on macOS.
 	tr := http.DefaultTransport.(*http.Transport).Clone()
 	tr.MaxIdleConns = workers
 	tr.MaxIdleConnsPerHost = workers
@@ -104,7 +102,6 @@ func TestGetHealthz_Load(t *testing.T) {
 					}
 					continue
 				}
-				// Drain so the connection returns to the keep-alive pool.
 				_, _ = io.Copy(io.Discard, resp.Body)
 				resp.Body.Close()
 				atomic.AddInt64(&ok, 1)

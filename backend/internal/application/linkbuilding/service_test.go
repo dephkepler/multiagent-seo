@@ -17,8 +17,6 @@ type fakeSource struct {
 
 func (f *fakeSource) List(context.Context, string) ([]domain.Website, error) { return f.sites, nil }
 
-// WriteResults appends so chunked flushes (and out-of-order parallel results)
-// are all captured.
 func (f *fakeSource) WriteResults(_ context.Context, _ string, r []domain.Result) error {
 	f.written = append(f.written, r...)
 	return nil
@@ -28,8 +26,6 @@ type fakeFetcher struct{ page domain.Page }
 
 func (f fakeFetcher) Fetch(context.Context, string) (domain.Page, error) { return f.page, nil }
 
-// scriptedFetcher returns a per-URL page or error, for partial-failure and
-// cancellation tests.
 type scriptedFetcher struct {
 	pages map[string]domain.Page
 	errs  map[string]error
@@ -53,7 +49,7 @@ func TestQualifyWebsites_WritesPerSiteResults(t *testing.T) {
 	fetcher := fakeFetcher{page: domain.Page{Links: []string{
 		"https://other.com/a", "https://acme.com/internal", "https://second.net",
 	}}}
-	svc := applb.NewService(src, fetcher, func(string, string) (domain.TopicClassifier, error) { return fakeClassifier{topic: "gambling"}, nil }, applb.LLMDefaults{}, jobrunner.NewSyncRunner(), nil)
+	svc := applb.NewService(src, fetcher, nil, func(string, string) (domain.TopicClassifier, error) { return fakeClassifier{topic: "gambling"}, nil }, applb.LLMDefaults{}, jobrunner.NewSyncRunner(), nil)
 
 	res, err := svc.QualifyWebsites(context.Background(), applb.QualifyRequest{
 		Sheet:          "WEBSITES",
@@ -66,7 +62,6 @@ func TestQualifyWebsites_WritesPerSiteResults(t *testing.T) {
 		t.Fatalf("queued = %d, want 1", res.WebsitesQueued)
 	}
 
-	// SyncRunner ran inline, so results are already written back.
 	if len(src.written) != 1 {
 		t.Fatalf("written = %d, want 1", len(src.written))
 	}
@@ -74,14 +69,14 @@ func TestQualifyWebsites_WritesPerSiteResults(t *testing.T) {
 	if got.Row != 2 || got.Topic != "gambling" || !got.Suitable {
 		t.Errorf("result = %+v, want row 2 / gambling / suitable", got)
 	}
-	if got.OutboundDomains != 2 { // other.com, second.net (acme.com is internal)
+	if got.OutboundDomains != 2 {
 		t.Errorf("outbound = %d, want 2", got.OutboundDomains)
 	}
 }
 
 func TestQualifyWebsites_UnacceptedTopicNotSuitable(t *testing.T) {
 	src := &fakeSource{sites: []domain.Website{{Row: 2, URL: "https://tech.io"}}}
-	svc := applb.NewService(src, fakeFetcher{}, func(string, string) (domain.TopicClassifier, error) { return fakeClassifier{topic: "tech"}, nil }, applb.LLMDefaults{}, jobrunner.NewSyncRunner(), nil)
+	svc := applb.NewService(src, fakeFetcher{}, nil, func(string, string) (domain.TopicClassifier, error) { return fakeClassifier{topic: "tech"}, nil }, applb.LLMDefaults{}, jobrunner.NewSyncRunner(), nil)
 
 	if _, err := svc.QualifyWebsites(context.Background(), applb.QualifyRequest{
 		Sheet:          "WEBSITES",
@@ -97,7 +92,7 @@ func TestQualifyWebsites_UnacceptedTopicNotSuitable(t *testing.T) {
 func TestQualifyWebsites_ParallelPartialFailure(t *testing.T) {
 	sites := []domain.Website{
 		{Row: 2, URL: "https://a.com"},
-		{Row: 3, URL: "https://b.com"}, // fetch fails → unsuitable, run continues
+		{Row: 3, URL: "https://b.com"},
 		{Row: 4, URL: "https://c.com"},
 	}
 	src := &fakeSource{sites: sites}
@@ -108,7 +103,7 @@ func TestQualifyWebsites_ParallelPartialFailure(t *testing.T) {
 		},
 		errs: map[string]error{"https://b.com": errors.New("boom")},
 	}
-	svc := applb.NewService(src, fetcher, func(string, string) (domain.TopicClassifier, error) { return fakeClassifier{topic: "gambling"}, nil }, applb.LLMDefaults{}, jobrunner.NewSyncRunner(), nil)
+	svc := applb.NewService(src, fetcher, nil, func(string, string) (domain.TopicClassifier, error) { return fakeClassifier{topic: "gambling"}, nil }, applb.LLMDefaults{}, jobrunner.NewSyncRunner(), nil)
 
 	if _, err := svc.QualifyWebsites(context.Background(), applb.QualifyRequest{
 		Sheet:          "WEBSITES",
@@ -117,7 +112,6 @@ func TestQualifyWebsites_ParallelPartialFailure(t *testing.T) {
 		t.Fatalf("QualifyWebsites: %v", err)
 	}
 
-	// Results arrive in completion (not input) order, so index by row.
 	byRow := make(map[int]domain.Result, len(src.written))
 	for _, r := range src.written {
 		byRow[r.Row] = r
@@ -136,7 +130,7 @@ func TestQualifyWebsites_ParallelPartialFailure(t *testing.T) {
 func TestQualifyWebsites_CanceledFetchNotWritten(t *testing.T) {
 	src := &fakeSource{sites: []domain.Website{{Row: 2, URL: "https://a.com"}}}
 	fetcher := scriptedFetcher{errs: map[string]error{"https://a.com": context.Canceled}}
-	svc := applb.NewService(src, fetcher, func(string, string) (domain.TopicClassifier, error) { return fakeClassifier{topic: "gambling"}, nil }, applb.LLMDefaults{}, jobrunner.NewSyncRunner(), nil)
+	svc := applb.NewService(src, fetcher, nil, func(string, string) (domain.TopicClassifier, error) { return fakeClassifier{topic: "gambling"}, nil }, applb.LLMDefaults{}, jobrunner.NewSyncRunner(), nil)
 
 	if _, err := svc.QualifyWebsites(context.Background(), applb.QualifyRequest{
 		Sheet:          "WEBSITES",
@@ -144,14 +138,13 @@ func TestQualifyWebsites_CanceledFetchNotWritten(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("QualifyWebsites: %v", err)
 	}
-	// A cancellation must abort, not write a misleading "unsuitable" verdict.
 	if len(src.written) != 0 {
 		t.Errorf("canceled fetch must not write a verdict, got %d rows", len(src.written))
 	}
 }
 
 func TestQualifyWebsites_Validation(t *testing.T) {
-	svc := applb.NewService(&fakeSource{}, fakeFetcher{}, func(string, string) (domain.TopicClassifier, error) { return fakeClassifier{}, nil }, applb.LLMDefaults{}, jobrunner.NewSyncRunner(), nil)
+	svc := applb.NewService(&fakeSource{}, fakeFetcher{}, nil, func(string, string) (domain.TopicClassifier, error) { return fakeClassifier{}, nil }, applb.LLMDefaults{}, jobrunner.NewSyncRunner(), nil)
 	if _, err := svc.QualifyWebsites(context.Background(), applb.QualifyRequest{AcceptedTopics: []string{"x"}}); err != applb.ErrNoSheet {
 		t.Errorf("missing sheet err = %v, want ErrNoSheet", err)
 	}

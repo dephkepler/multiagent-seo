@@ -11,7 +11,6 @@ import (
 	"multiagent-seo/pkg/logger"
 )
 
-// BuildDate is injected at build time via -ldflags "-X multiagent-seo/pkg/sentry.BuildDate=<value>".
 var BuildDate string
 
 var once sync.Once
@@ -61,7 +60,6 @@ func (s *sentryClient) Initialize() error {
 	return err
 }
 
-// Flush waits for buffered events to be sent before shutdown.
 func (s *sentryClient) Flush() {
 	sentry.Flush(2 * time.Second)
 }

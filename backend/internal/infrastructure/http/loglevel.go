@@ -13,7 +13,6 @@ func handleGetLogLevel(w http.ResponseWriter, _ *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]string{"level": logger.CurrentLevel()})
 }
 
-// handleSetLogLevel changes log verbosity at runtime (no restart). Body: {"level":"debug"}.
 func handleSetLogLevel(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Level string `json:"level"`

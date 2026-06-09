@@ -1,6 +1,3 @@
-// Package checker is an infrastructure adapter implementing the domain
-// articles.ContentChecker port. adapter.go provides the New factory and maps
-// the local Result type onto articles.CheckResult.
 package checker
 
 import (
@@ -77,7 +74,6 @@ func (m *MockClient) Check(_ context.Context, content string) (*Result, error) {
 		}
 	}
 
-	// Fields can be empty for blank/whitespace-only content; avoid indexing [0].
 	slug := "empty"
 	if fields := strings.Fields(content); len(fields) > 0 {
 		slug = strings.ReplaceAll(strings.ToLower(fields[0]), " ", "-")

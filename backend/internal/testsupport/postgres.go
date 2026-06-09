@@ -19,10 +19,6 @@ import (
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 )
 
-// StartPostgres boots an ephemeral Postgres container, creates a migrated
-// "test_template" database, and returns the base connection string plus a
-// terminate func. Call it once per package from TestMain; each test then clones
-// an isolated database from the template via NewTestDB.
 func StartPostgres(ctx context.Context) (baseConnStr string, terminate func(), err error) {
 	container, err := tcpostgres.Run(ctx, "postgres:16-alpine",
 		tcpostgres.BasicWaitStrategies(),
@@ -48,7 +44,6 @@ func StartPostgres(ctx context.Context) (baseConnStr string, terminate func(), e
 	return baseConnStr, stop, nil
 }
 
-// buildTemplate creates test_template and applies every up-migration to it once.
 func buildTemplate(ctx context.Context, base string) error {
 	admin, err := pgxpool.New(ctx, base)
 	if err != nil {
@@ -62,8 +57,6 @@ func buildTemplate(ctx context.Context, base string) error {
 	return applyMigrations(ctx, connStrForDB(base, "test_template"))
 }
 
-// applyMigrations runs all *.up.sql files in migration order. It uses the simple
-// query protocol so multi-statement migration files execute in one round-trip.
 func applyMigrations(ctx context.Context, connStr string) error {
 	cfg, err := pgxpool.ParseConfig(connStr)
 	if err != nil {
@@ -92,14 +85,11 @@ func applyMigrations(ctx context.Context, connStr string) error {
 	return nil
 }
 
-// upMigrationFiles returns the absolute, ascending-sorted list of *.up.sql files
-// from backend/migrations, located relative to this source file.
 func upMigrationFiles() ([]string, error) {
 	_, thisFile, _, ok := runtime.Caller(0)
 	if !ok {
 		return nil, fmt.Errorf("runtime.Caller failed")
 	}
-	// this file: backend/internal/testsupport/postgres.go → backend/migrations
 	migrationsDir := filepath.Join(filepath.Dir(thisFile), "..", "..", "migrations")
 	matches, err := filepath.Glob(filepath.Join(migrationsDir, "*.up.sql"))
 	if err != nil {
@@ -112,9 +102,6 @@ func upMigrationFiles() ([]string, error) {
 	return matches, nil
 }
 
-// NewTestDB clones test_template into a fresh database for a single test and
-// returns a pool to it. The database is dropped in t.Cleanup, so tests are
-// fully isolated from one another.
 func NewTestDB(t *testing.T, baseConnStr string) *pgxpool.Pool {
 	t.Helper()
 	ctx := context.Background()

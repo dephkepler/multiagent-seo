@@ -1,7 +1,3 @@
-// Package sheets adapts a Google Sheets keyword table to the articles.TopicSource
-// port. One row per article; on duplicate topic rows the keywords merge and the
-// first non-empty H1 wins. The constructor takes primitives so infrastructure
-// stays independent of internal/config.
 package sheets
 
 import (
@@ -30,8 +26,6 @@ type client struct {
 	log           *slog.Logger
 }
 
-// New returns an error when credentials or spreadsheet ID are missing so
-// callers can fall back to the mock.
 func New(ctx context.Context, credentialsFile, spreadsheetID, sheet, topicCol, keywordCol, titleCol string, headerRow bool, log *slog.Logger) (articles.TopicSource, error) {
 	if credentialsFile == "" || spreadsheetID == "" {
 		return nil, fmt.Errorf("sheets: credentialsFile and spreadsheetId are required")
@@ -73,7 +67,6 @@ func (c *client) Lookup(ctx context.Context, topic string) (articles.Cluster, er
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	// Range spans topic..title, or topic..keyword when title is disabled.
 	endCol := c.keywordCol
 	wantTitle := c.titleCol != ""
 	if wantTitle {
@@ -147,8 +140,6 @@ func normalize(s string) string {
 	return strings.ToLower(strings.TrimSpace(s))
 }
 
-// columnOffset returns the zero-based offset of col relative to base.
-// Returns -1 when either is empty or not a single-letter reference.
 func columnOffset(base, col string) int {
 	if base == "" || col == "" {
 		return -1

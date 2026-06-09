@@ -29,8 +29,6 @@ import (
 
 const itAuthSecret = "test-secret"
 
-// itAuthSeedUser inserts a user with the given bcrypt-hashed password directly,
-// since UserRepository only exposes FindByEmail.
 func itAuthSeedUser(t *testing.T, pool *pgxpool.Pool, email, password string) {
 	t.Helper()
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)

@@ -107,8 +107,6 @@ func (h *ApiTokensHandler) DeleteApiToken(w http.ResponseWriter, r *http.Request
 	response.NoContent(w)
 }
 
-// currentUser pulls the authenticated user id from the request context (set by
-// the BearerAuth middleware) and writes 401/503 on failure.
 func (h *ApiTokensHandler) currentUser(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
 	if h.svc == nil {
 		problem.Write(w, http.StatusServiceUnavailable, "database unavailable")

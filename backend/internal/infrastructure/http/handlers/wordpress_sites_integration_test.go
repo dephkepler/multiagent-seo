@@ -23,8 +23,6 @@ import (
 	"multiagent-seo/pkg/config"
 )
 
-// authMW is nil so secured routes are reachable without a token: this exercises
-// CRUD against a real DB, not authentication.
 func itWPServer(t *testing.T, pool *pgxpool.Pool) *httptest.Server {
 	t.Helper()
 	repo := postgres.NewWordpressSiteRepository(pool, "test-enc-key")
@@ -92,7 +90,6 @@ func TestWordpressSitesCRUD_Integration(t *testing.T) {
 	pool := testsupport.NewTestDB(t, baseConnStr)
 	srv := itWPServer(t, pool)
 
-	// CREATE
 	createResp := itWPDo(t, srv, http.MethodPost, "/wordpress-sites", oapigen.CreateWordpressSiteRequest{
 		Alias:       "blog",
 		Url:         "https://blog.example.com",
@@ -112,7 +109,6 @@ func TestWordpressSitesCRUD_Integration(t *testing.T) {
 	}
 	id := created.Id.String()
 
-	// LIST contains it
 	listResp := itWPDo(t, srv, http.MethodGet, "/wordpress-sites", nil)
 	if listResp.StatusCode != http.StatusOK {
 		t.Fatalf("list status = %d, want 200 (body=%s)", listResp.StatusCode, itWPBody(t, listResp))
@@ -123,7 +119,6 @@ func TestWordpressSitesCRUD_Integration(t *testing.T) {
 		t.Fatalf("list = %+v, want exactly the created site", list)
 	}
 
-	// GET by id
 	getResp := itWPDo(t, srv, http.MethodGet, "/wordpress-sites/"+id, nil)
 	if getResp.StatusCode != http.StatusOK {
 		t.Fatalf("get status = %d, want 200 (body=%s)", getResp.StatusCode, itWPBody(t, getResp))
@@ -134,7 +129,6 @@ func TestWordpressSitesCRUD_Integration(t *testing.T) {
 		t.Fatalf("get returned %+v, want created site", fetched)
 	}
 
-	// PATCH alias
 	newAlias := "renamed-blog"
 	patchResp := itWPDo(t, srv, http.MethodPatch, "/wordpress-sites/"+id, oapigen.UpdateWordpressSiteRequest{
 		Alias: &newAlias,
@@ -151,7 +145,6 @@ func TestWordpressSitesCRUD_Integration(t *testing.T) {
 		t.Fatalf("patch changed an absent field: url=%q", patched.Url)
 	}
 
-	// Re-GET confirms persistence
 	reGetResp := itWPDo(t, srv, http.MethodGet, "/wordpress-sites/"+id, nil)
 	if reGetResp.StatusCode != http.StatusOK {
 		t.Fatalf("re-get status = %d, want 200", reGetResp.StatusCode)
@@ -162,14 +155,12 @@ func TestWordpressSitesCRUD_Integration(t *testing.T) {
 		t.Fatalf("re-get alias = %q, want persisted %q", reFetched.Alias, newAlias)
 	}
 
-	// DELETE
 	delResp := itWPDo(t, srv, http.MethodDelete, "/wordpress-sites/"+id, nil)
 	if delResp.StatusCode != http.StatusNoContent {
 		t.Fatalf("delete status = %d, want 204 (body=%s)", delResp.StatusCode, itWPBody(t, delResp))
 	}
 	delResp.Body.Close()
 
-	// GET after delete → 404
 	goneResp := itWPDo(t, srv, http.MethodGet, "/wordpress-sites/"+id, nil)
 	defer goneResp.Body.Close()
 	if goneResp.StatusCode != http.StatusNotFound {

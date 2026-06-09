@@ -1,7 +1,3 @@
-// Package articles is the application-layer use-case orchestrating the article
-// generation pipeline over the articles domain ports. It owns no infrastructure:
-// every dependency is a domain port injected via the constructor, and request
-// defaults arrive as a config-agnostic Defaults struct.
 package articles
 
 import (
@@ -18,56 +14,42 @@ import (
 	"multiagent-seo/pkg/jobrunner"
 )
 
-// ErrNoCluster signals the TopicSource returned no keywords for the topic; a
-// missing cluster almost always means a typo or an un-seeded topic, so we abort
-// before spending LLM tokens. The HTTP layer maps it to 404.
 var ErrNoCluster = errors.New("no keyword cluster for topic")
 
-// Publish guard errors mirror the legacy sentinels so the HTTP layer can map
-// them to precise status codes.
 var (
 	ErrArticleNotFound  = errors.New("article not found")
 	ErrAlreadyPublished = errors.New("article already published")
 	ErrNoDraftToPublish = errors.New("article has no draft to publish")
 )
 
-// Defaults carries the per-request fallbacks ported from config. The Service
-// takes these as a value struct (not pkg/config) so the application layer stays
-// config-agnostic and unit-testable.
 type Defaults struct {
-	MinWords    int
-	MaxWords    int
-	Language    string
-	Provider    string
-	Model       string
-	AIThreshold float64
-	MaxCycles   int
-	SERPLimit   int
-	// SiteTopic and ExtraRules are the article-wide prompt defaults.
-	SiteTopic  string
-	ExtraRules string
-	// IncludeImages is the default when the request omits it (true when an
-	// ImageResolver is wired). A nil resolver still strips placeholders.
+	MinWords      int
+	MaxWords      int
+	Language      string
+	Provider      string
+	Model         string
+	AIThreshold   float64
+	MaxCycles     int
+	SERPLimit     int
+	SiteTopic     string
+	ExtraRules    string
 	IncludeImages bool
 }
 
-// GenerateRequest is the use-case input. Zero values fall back to Defaults.
-// SiteID selects the WordPress site; the legacy free-form Site string is gone.
 type GenerateRequest struct {
-	Keyword     string
-	SiteID      uuid.UUID
-	MinWords    int
-	MaxWords    int
-	MaxTokens   int
-	Language    string
-	SiteTopic   string
-	ExtraRules  string
-	Provider    string
-	Model       string
-	AutoPublish bool
-	MaxCycles   int
-	AIThreshold float64
-	// Pointers distinguish "omitted" from "explicit false".
+	Keyword                 string
+	SiteID                  uuid.UUID
+	MinWords                int
+	MaxWords                int
+	MaxTokens               int
+	Language                string
+	SiteTopic               string
+	ExtraRules              string
+	Provider                string
+	Model                   string
+	AutoPublish             bool
+	MaxCycles               int
+	AIThreshold             float64
 	IncludeImages           *bool
 	IncludeImageAttribution *bool
 }
@@ -114,8 +96,6 @@ func NewService(
 	}
 }
 
-// spec is the per-request settings merged with defaults plus the resolved
-// cluster and LLM client — the legacy resolvedJob without infra wiring.
 type spec struct {
 	keyword          string
 	siteID           uuid.UUID
@@ -136,9 +116,6 @@ type spec struct {
 	autoPublish      bool
 }
 
-// GenerateResult is the synchronous outcome of Generate: the freshly-created
-// article plus the resolved cluster and model info, so the caller learns the
-// targeted keywords/title and which model is running before it starts polling.
 type GenerateResult struct {
 	Article        articles.Article
 	TargetKeywords []string
@@ -147,9 +124,6 @@ type GenerateResult struct {
 	Model          string
 }
 
-// Generate resolves the spec, creates the article in "generating" state, then
-// dispatches the pipeline through the JobRunner and returns immediately
-// (202-style). A test using SyncRunner sees runGeneration complete first.
 func (s *Service) Generate(ctx context.Context, req GenerateRequest) (GenerateResult, error) {
 	settings, err := s.resolve(ctx, req)
 	if err != nil {
@@ -201,6 +175,12 @@ func (s *Service) resolve(ctx context.Context, req GenerateRequest) (spec, error
 		attribution = *req.IncludeImageAttribution
 	}
 
+	provider := pickStr(req.Provider, s.defaults.Provider)
+	model := req.Model
+	if model == "" && provider == s.defaults.Provider {
+		model = s.defaults.Model
+	}
+
 	settings := spec{
 		keyword:          req.Keyword,
 		siteID:           req.SiteID,
@@ -209,8 +189,8 @@ func (s *Service) resolve(ctx context.Context, req GenerateRequest) (spec, error
 		language:         pickStr(req.Language, s.defaults.Language),
 		siteTopic:        pickStr(req.SiteTopic, s.defaults.SiteTopic),
 		extraRules:       pickStr(req.ExtraRules, s.defaults.ExtraRules),
-		provider:         pickStr(req.Provider, s.defaults.Provider),
-		model:            pickStr(req.Model, s.defaults.Model),
+		provider:         provider,
+		model:            model,
 		maxCycles:        pickInt(req.MaxCycles, s.defaults.MaxCycles),
 		aiThreshold:      pickFloat(req.AIThreshold, s.defaults.AIThreshold),
 		includeImages:    includeImages,
@@ -228,7 +208,6 @@ func (s *Service) resolve(ctx context.Context, req GenerateRequest) (spec, error
 	}
 	settings.cluster = cluster
 
-	// ~3 tokens/word + 200 overhead. 0 means "no cap" (Groq) / provider default.
 	if req.MaxTokens > 0 {
 		settings.maxTokens = req.MaxTokens
 	} else if settings.maxWords > 0 {
@@ -243,9 +222,6 @@ func (s *Service) resolve(ctx context.Context, req GenerateRequest) (spec, error
 	return settings, nil
 }
 
-// runGeneration runs the 5-step pipeline. Unexported and synchronous so a test
-// can drive it through a SyncRunner. On any fatal step it marks the article
-// failed via a fresh context, since the job context may already be cancelled.
 func (s *Service) runGeneration(ctx context.Context, log *slog.Logger, articleID int64, settings spec) {
 	checkPassed, err := s.pipeline(ctx, log, articleID, settings)
 	if err != nil {
@@ -262,16 +238,12 @@ func (s *Service) runGeneration(ctx context.Context, log *slog.Logger, articleID
 		if !checkPassed {
 			log.WarnContext(ctx, "auto-publish blocked: originality check failed")
 		} else {
-			// Publish logs its own failure with article context; don't double-log.
 			_, _ = s.Publish(ctx, articleID)
 		}
 	}
 }
 
-// pipeline is the 5 steps; returns whether the originality check passed.
 func (s *Service) pipeline(ctx context.Context, log *slog.Logger, articleID int64, settings spec) (bool, error) {
-	// Step 1/5: SERP competitors. Non-fatal: a lookup error falls back to empty
-	// competitor data and the article still generates.
 	log.DebugContext(ctx, "step 1/5: serp competitors", "limit", s.defaults.SERPLimit)
 	serpData, err := s.serp.GetSERP(ctx, settings.keyword, settings.language, s.defaults.SERPLimit)
 	if err != nil {
@@ -310,12 +282,9 @@ func (s *Service) pipeline(ctx context.Context, log *slog.Logger, articleID int6
 	if seoTitle != "" || seoDesc != "" {
 		log.DebugContext(ctx, "seo fields extracted", "seo_title", seoTitle, "seo_desc", seoDesc)
 	} else {
-		// Empty means the model omitted SEO fields or the labelled trailer didn't parse.
 		log.DebugContext(ctx, "no seo fields extracted")
 	}
 
-	// A nil resolver makes RenderHTML strip [IMG] placeholders, mirroring the
-	// legacy pexels-nil behaviour.
 	var resolver articles.ImageResolver
 	if settings.includeImages {
 		resolver = s.images
@@ -365,8 +334,6 @@ func (s *Service) pipeline(ctx context.Context, log *slog.Logger, articleID int6
 	return checkPassed, nil
 }
 
-// checkAndHumanize runs the check→humanize loop up to maxCycles, persisting each
-// CheckResult. Returns the (possibly rewritten) content and the last check.
 func (s *Service) checkAndHumanize(ctx context.Context, log *slog.Logger, articleID int64, settings spec, content string) (string, *articles.CheckResult) {
 	maxCycles := settings.maxCycles
 	if maxCycles <= 0 {
@@ -377,9 +344,6 @@ func (s *Service) checkAndHumanize(ctx context.Context, log *slog.Logger, articl
 		threshold = s.defaults.AIThreshold
 	}
 	if threshold <= 0 {
-		// A zero threshold makes the AIScore<threshold check always false, so the
-		// loop would humanize to maxCycles and publish as-is. Fall back to the
-		// conventional 0.8 when config left it unset.
 		threshold = 0.8
 	}
 
@@ -422,8 +386,6 @@ func (s *Service) checkAndHumanize(ctx context.Context, log *slog.Logger, articl
 	return content, last
 }
 
-// Publish promotes an existing draft live. Mirrors the legacy publishArticle
-// status guards and maps domain errors to the use-case sentinels.
 func (s *Service) Publish(ctx context.Context, articleID int64) (articles.Article, error) {
 	article, err := s.repo.Get(ctx, articleID)
 	if err != nil {
@@ -476,7 +438,6 @@ func (s *Service) List(ctx context.Context) ([]articles.Article, error) {
 	return arts, nil
 }
 
-// Get fetches one article, mapping the domain not-found to the use-case sentinel.
 func (s *Service) Get(ctx context.Context, id int64) (articles.Article, error) {
 	article, err := s.repo.Get(ctx, id)
 	if err != nil {

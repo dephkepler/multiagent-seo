@@ -1,7 +1,3 @@
-// Package pexels is an infrastructure adapter that resolves [IMG | ...]
-// placeholders into real Pexels stock photos, implementing the domain
-// articles.ImageResolver port. resolver.go maps client results to
-// articles.Photo and defers relevance scoring to articles.PickRelevant.
 package pexels
 
 import (
@@ -20,8 +16,8 @@ type Photo struct {
 	URL             string
 	Photographer    string
 	PhotographerURL string
-	SourceURL       string // Pexels page URL, used for attribution
-	Alt             string // Pexels-provided alt text — used by callers for relevance scoring
+	SourceURL       string
+	Alt             string
 }
 
 type Client struct {
@@ -34,7 +30,6 @@ func newClient(apiKey string) *Client {
 	return newClientWithBaseURL(apiKey, defaultBaseURL)
 }
 
-// newClientWithBaseURL is the test seam letting httptest.Server stand in for Pexels.
 func newClientWithBaseURL(apiKey, baseURL string) *Client {
 	return &Client{
 		apiKey:  apiKey,
@@ -57,9 +52,6 @@ type searchResponse struct {
 	} `json:"photos"`
 }
 
-// SearchN returns up to n landscape candidates for query so callers can
-// score them locally (e.g. reject photos whose alt text shares no tokens
-// with the article keyword). Photos with no usable src URL are dropped.
 func (c *Client) SearchN(ctx context.Context, query string, n int) ([]Photo, error) {
 	if n < 1 {
 		n = 1
@@ -71,7 +63,6 @@ func (c *Client) SearchN(ctx context.Context, query string, n int) ([]Photo, err
 	if err != nil {
 		return nil, fmt.Errorf("pexels new request: %w", err)
 	}
-	// Pexels expects the bare key in Authorization (no "Bearer ").
 	req.Header.Set("Authorization", c.apiKey)
 
 	resp, err := c.http.Do(req)
@@ -85,14 +76,12 @@ func (c *Client) SearchN(ctx context.Context, query string, n int) ([]Photo, err
 	}
 
 	var body searchResponse
-	// Cap the body so a hostile/huge response can't be read fully into memory.
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&body); err != nil {
 		return nil, fmt.Errorf("decode pexels response: %w", err)
 	}
 
 	out := make([]Photo, 0, len(body.Photos))
 	for _, p := range body.Photos {
-		// Prefer "landscape" (blog-friendly aspect); some photos omit it.
 		imgURL := p.Src.Landscape
 		if imgURL == "" {
 			imgURL = p.Src.Large

@@ -1,4 +1,3 @@
-// Package wordpress implements articles.Publisher against the WordPress REST API.
 package wordpress
 
 import (
@@ -14,16 +13,10 @@ import (
 	"multiagent-seo/internal/domain/articles"
 )
 
-// maxResponseBytes guards against a misbehaving proxy or server; real WP
-// REST replies we use are tiny JSON objects.
 const maxResponseBytes = 1 << 20
 
-// maxLoggedBodyBytes caps the response body we put in error logs so a large
-// error page can't flood the log lines.
 const maxLoggedBodyBytes = 4 << 10
 
-// Publisher targets one site: creds are bound at construction so each
-// generate job gets its own Publisher rather than a shared config map.
 type Publisher struct {
 	url         string
 	username    string
@@ -62,7 +55,6 @@ type wpResponse struct {
 	Link string `json:"link"`
 }
 
-// truncate returns at most max bytes of b as a string, marking when cut.
 func truncate(b []byte, max int) string {
 	if len(b) <= max {
 		return string(b)
@@ -70,7 +62,6 @@ func truncate(b []byte, max int) string {
 	return string(b[:max]) + "...(truncated)"
 }
 
-// do issues the request with Basic Auth and decodes into out (may be nil).
 func (p *Publisher) do(ctx context.Context, method, url string, body any, wantStatus int, out any) error {
 	buf, err := json.Marshal(body)
 	if err != nil {
@@ -106,13 +97,10 @@ func (p *Publisher) do(ctx context.Context, method, url string, body any, wantSt
 		"duration_ms", time.Since(start).Milliseconds(),
 	)
 
-	// Cap reads so a runaway response can't blow memory.
 	limited := io.LimitReader(resp.Body, maxResponseBytes)
 
 	if resp.StatusCode != wantStatus {
 		b, _ := io.ReadAll(limited)
-		// Distinguishes 401 (bad app password) from 404/5xx; body is truncated
-		// so a large error page can't flood the log.
 		p.log.ErrorContext(ctx, "wordpress request returned unexpected status",
 			"site_id", p.siteID,
 			"method", method,
@@ -154,10 +142,6 @@ func (p *Publisher) CreateDraft(ctx context.Context, post articles.Post) (int64,
 	return result.ID, editURL, nil
 }
 
-// seoMeta returns Yoast (and Rank Math) compatible meta keys. WP silently
-// ignores meta keys the active SEO plugin doesn't register, so sending
-// both vendors is harmless if only one is installed (or neither — then
-// the meta block is a no-op).
 func seoMeta(post articles.Post) map[string]any {
 	if post.SEOTitle == "" && post.SEODesc == "" {
 		return nil

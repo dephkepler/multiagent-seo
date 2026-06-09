@@ -8,7 +8,6 @@ import (
 	"multiagent-seo/internal/oapigen"
 )
 
-// The spec is static for the process lifetime, so marshal it once.
 var (
 	specOnce  sync.Once
 	specBytes []byte
@@ -50,8 +49,6 @@ func handleLandingPage(w http.ResponseWriter, _ *http.Request) {
 	_, _ = w.Write([]byte(landingPageHTML))
 }
 
-// swaggerUIHTML points at the same-origin /openapi.json so "Try it out"
-// requests target whichever host opened /docs.
 const swaggerUIHTML = `<!DOCTYPE html>
 <html lang="en">
 <head>

@@ -13,16 +13,8 @@ import (
 	"strings"
 )
 
-// nonceRe pulls the WP REST nonce out of the inline wpApiSettings JS that
-// /wp-admin/profile.php embeds — it's the same nonce wp-admin uses to call its
-// own REST API, and WordPress accepts it on application-passwords.
 var nonceRe = regexp.MustCompile(`wpApiSettings\s*=\s*\{[^}]*"nonce":"([a-zA-Z0-9]+)"`)
 
-// IssueAppPassword performs the same form login as Login and, while still
-// holding the session cookies, asks WordPress to mint a fresh Application
-// Password for the linkbuilding tool. The returned string is the new
-// app-password (24 chars in 6 space-separated groups) that the caller stores
-// for future REST API calls via Basic Auth.
 func (a *Authenticator) IssueAppPassword(ctx context.Context, donorURL, login, password string) (string, error) {
 	base := strings.TrimRight(strings.TrimSpace(donorURL), "/")
 	u, err := url.Parse(base)
@@ -83,13 +75,11 @@ func (a *Authenticator) IssueAppPassword(ctx context.Context, donorURL, login, p
 		return "", fmt.Errorf("login failed (no wordpress_logged_in cookie set)")
 	}
 
-	// Step 2: pull the REST API nonce out of the profile page.
 	nonce, err := fetchNonce(ctx, client, origin.String()+"/wp-admin/profile.php")
 	if err != nil {
 		return "", fmt.Errorf("fetch nonce: %w", err)
 	}
 
-	// Step 3: ask WordPress for a new application password.
 	appPwd, err := createAppPassword(ctx, client, origin.String(), nonce, "multiagent-seo-backlinks")
 	if err != nil {
 		return "", fmt.Errorf("create app password: %w", err)

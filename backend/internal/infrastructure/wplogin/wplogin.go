@@ -1,7 +1,3 @@
-// Package wplogin is an infrastructure adapter that logs into a WordPress site
-// by POSTing credentials to wp-login.php, implementing the domain
-// linkbuilding.SiteAuthenticator port. A login is treated as successful only
-// when WordPress sets the wordpress_logged_in_* auth cookie.
 package wplogin
 
 import (
@@ -36,9 +32,6 @@ func New(log *slog.Logger) *Authenticator {
 	return &Authenticator{
 		timeout: 20 * time.Second,
 		log:     log,
-		// Sites in the network often run self-signed or incomplete-chain certs;
-		// we own them and only need to log in, so don't let TLS verification
-		// turn a reachable site into a false "unreachable".
 		transport: &http.Transport{
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // G402: own-network login tool
 		},
@@ -60,9 +53,6 @@ func (a *Authenticator) Login(ctx context.Context, cred linkbuilding.SiteCredent
 		return res, nil
 	}
 
-	// If the credential carries a path (a custom slug or …/something.php) it's a
-	// renamed/hidden login — use it as-is; a bare site URL gets the standard
-	// wp-login.php under its origin.
 	loginURL := origin.String() + "/wp-login.php"
 	if strings.Trim(u.Path, "/") != "" {
 		loginURL = base
@@ -73,12 +63,9 @@ func (a *Authenticator) Login(ctx context.Context, cred linkbuilding.SiteCredent
 	if err != nil {
 		return res, fmt.Errorf("wplogin cookiejar: %w", err)
 	}
-	// WordPress rejects the login unless it sees its own cookie-check cookie.
 	jar.SetCookies(origin, []*http.Cookie{{Name: "wordpress_test_cookie", Value: "WP Cookie check"}})
 	client := &http.Client{Jar: jar, Timeout: a.timeout, Transport: a.transport}
 
-	// GET the form first: it seeds cookies/nonces and lets us spot a captcha
-	// before posting — a math captcha we can solve, a real one we can't.
 	form, status, err := a.fetchLoginForm(ctx, client, loginURL)
 	if err != nil {
 		if ctx.Err() != nil {
@@ -99,8 +86,6 @@ func (a *Authenticator) Login(ctx context.Context, cred linkbuilding.SiteCredent
 		return res, nil
 	}
 
-	// An extra, unrecognized input in the login form is a challenge we couldn't
-	// solve (e.g. a worded riddle or unsupported math) — flag it if login fails.
 	unsolvedChallenge := !form.hasMath && form.answerField != ""
 	if unsolvedChallenge {
 		a.log.WarnContext(ctx, "captcha not bypassed", "url", base, "reason", "unrecognized challenge field", "field", form.answerField)
@@ -129,8 +114,6 @@ func (a *Authenticator) Login(ctx context.Context, cred linkbuilding.SiteCredent
 
 	resp, err := client.Do(req)
 	if err != nil {
-		// A cancelled/expired job context aborts the whole run; an ordinary
-		// network failure is just this site's verdict, not a reason to stop.
 		if ctx.Err() != nil {
 			return res, ctx.Err()
 		}
@@ -160,7 +143,6 @@ func (a *Authenticator) Login(ctx context.Context, cred linkbuilding.SiteCredent
 		res.Status = "captcha (unsolved)"
 		a.log.WarnContext(ctx, "login failed", "url", base, "reason", "unsolved challenge field "+form.answerField)
 	default:
-		// Surface WordPress's own error text so the log says why it failed.
 		res.Status = "login failed"
 		reason := loginError(bytes.NewReader(body))
 		if reason == "" {

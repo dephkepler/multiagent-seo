@@ -14,7 +14,7 @@ func TestNewPoolPingFailure(t *testing.T) {
 
 	cfg := config.DatabaseConfig{
 		Host:     "127.0.0.1",
-		Port:     "1", // closed port: connect succeeds lazily, Ping fails
+		Port:     "1",
 		User:     "postgres",
 		Password: "postgres",
 		Dbname:   "contentflow",

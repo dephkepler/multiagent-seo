@@ -12,7 +12,6 @@ import (
 	"multiagent-seo/internal/infrastructure/llm/transport"
 )
 
-// No model-name validation: unknown models surface as a 4xx from the provider.
 var providers = map[string]func(apiKey, model string, log *slog.Logger) *transport.Client{
 	"groq":      groq.New,
 	"claude":    claude.New,
@@ -40,7 +39,6 @@ func New(provider, apiKey, model string, log *slog.Logger) (articles.LLMClient, 
 	return &client{transport: ctor(apiKey, model, log)}, nil
 }
 
-// Sorted so error messages are deterministic across map-iteration order.
 func supportedProviders() string {
 	names := make([]string, 0, len(providers))
 	for name := range providers {

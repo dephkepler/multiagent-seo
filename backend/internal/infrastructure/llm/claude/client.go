@@ -17,7 +17,6 @@ const (
 	anthropicVersion = "2023-06-01"
 	providerName     = "claude"
 
-	// Anthropic's Messages API requires max_tokens; sized for a full article draft.
 	defaultMaxTokens = 4096
 )
 

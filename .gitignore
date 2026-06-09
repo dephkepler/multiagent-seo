@@ -12,3 +12,7 @@
 # Root-level env (per-service .env stays under backend/, frontend/, etc.)
 /.env
 /.env.local
+
+# Service docs that embed real secrets — never commit
+/doc/credentials.md
+/doc/

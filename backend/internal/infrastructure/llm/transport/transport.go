@@ -1,6 +1,3 @@
-// Package transport executes provider-agnostic LLM HTTP calls with retries,
-// logging, bounded reads, and error classification. Provider-specific wire
-// formats live behind the Codec interface.
 package transport
 
 import (
@@ -17,16 +14,12 @@ import (
 	"multiagent-seo/internal/infrastructure/llm/usage"
 )
 
-// Cap on response read; provider JSON is tiny, so 1 MiB guards against runaway bodies.
 const maxResponseBytes = 1 << 20
 
-// Cap on the error-body snippet so logs/errors don't carry up to maxResponseBytes.
 const maxErrorBodyBytes = 4 << 10
 
-// Per-attempt HTTP timeout; retry.Do may make several attempts within the caller's deadline.
 const requestTimeout = 180 * time.Second
 
-// BuildRequest is called once per retry so each attempt gets a fresh Request bound to ctx.
 type Codec interface {
 	Provider() string
 	BuildRequest(ctx context.Context, prompt string, maxTokens int) (*http.Request, error)
@@ -41,7 +34,6 @@ type Client struct {
 	retryCfg   retry.Config
 }
 
-// model is logged for observability only; the codec controls what goes on the wire.
 func New(codec Codec, model string, log *slog.Logger) *Client {
 	if log == nil {
 		log = slog.Default()
@@ -55,7 +47,6 @@ func New(codec Codec, model string, log *slog.Logger) *Client {
 	}
 }
 
-// Implements retry.HTTPStatusError; status 0 means transport-level failure.
 type httpError struct {
 	provider   string
 	status     int
@@ -74,8 +65,6 @@ func (e *httpError) HTTPStatus() int { return e.status }
 
 func (e *httpError) RetryAfter() (time.Duration, bool) { return e.retryAfter, e.retryAfter > 0 }
 
-// parseRetryAfter reads a Retry-After header. Providers like Groq send it as
-// (possibly fractional) seconds on a 429; an HTTP-date form is ignored.
 func parseRetryAfter(h http.Header) time.Duration {
 	v := h.Get("Retry-After")
 	if v == "" {
@@ -87,7 +76,6 @@ func parseRetryAfter(h http.Header) time.Duration {
 	return 0
 }
 
-// truncateBody caps an error-response snippet at maxErrorBodyBytes.
 func truncateBody(body []byte) string {
 	if len(body) <= maxErrorBodyBytes {
 		return string(body)
@@ -95,7 +83,6 @@ func truncateBody(body []byte) string {
 	return string(body[:maxErrorBodyBytes]) + "...(truncated)"
 }
 
-// isTruncated reports whether a provider stop/finish reason indicates a max_tokens cutoff.
 func isTruncated(reason string) bool {
 	return reason == "max_tokens" || reason == "length"
 }
@@ -151,8 +138,6 @@ func (c *Client) Complete(ctx context.Context, prompt string, maxTokens int) (st
 	latency := time.Since(start)
 
 	if err != nil {
-		// Terminal 4xx is a caller/config fault (bad model/input), not a service
-		// failure; log Warn. Retryable-exhausted/5xx/transport (status 0) → Error.
 		logFailure := c.log.ErrorContext
 		var he retry.HTTPStatusError
 		if errors.As(err, &he) {

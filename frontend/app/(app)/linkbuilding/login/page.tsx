@@ -15,7 +15,6 @@ interface LoginAccepted {
 
 export default function AutoLoginPage() {
   const [sheet, setSheet] = useState('WEBSITES')
-  // Empty input = no topic filter, log into every D=yes donor.
   const [topics, setTopics] = useState('')
 
   const run = useMutation({
