@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -64,51 +65,69 @@ func (d *Discoverer) Discover(ctx context.Context, siteURL string, limit int) ([
 	if err != nil {
 		return nil, err
 	}
+	host := hostOf(origin)
 
-	if urls := d.fromSitemap(ctx, origin, limit); len(urls) > 0 {
-		d.log.InfoContext(ctx, "posts discovered", "site", siteURL, "source", "sitemap", "count", len(urls), "urls", urls)
+	urls, smErr := d.fromSitemap(ctx, origin, limit)
+	if len(urls) > 0 {
+		d.log.InfoContext(ctx, "posts discovered", "host", host, "source", "sitemap", "count", len(urls))
 		return urls, nil
 	}
-	if urls := d.fromWPRest(ctx, origin, limit); len(urls) > 0 {
-		d.log.InfoContext(ctx, "posts discovered", "site", siteURL, "source", "wp-rest", "count", len(urls), "urls", urls)
+	urls, restErr := d.fromWPRest(ctx, origin, limit)
+	if len(urls) > 0 {
+		d.log.InfoContext(ctx, "posts discovered", "host", host, "source", "wp-rest", "count", len(urls))
 		return urls, nil
 	}
-	d.log.InfoContext(ctx, "posts discover empty", "site", siteURL)
+
+	// Neither source produced posts. Distinguish a genuinely post-less site
+	// (return nil,nil) from a site we could not reach or parse at all, so the
+	// caller does not silently treat a fetch/parse failure as "no posts".
+	if err := errors.Join(smErr, restErr); err != nil {
+		return nil, fmt.Errorf("discover posts for %s: %w", host, err)
+	}
+	d.log.InfoContext(ctx, "posts discover empty", "host", host)
 	return nil, nil
 }
 
-func (d *Discoverer) fromSitemap(ctx context.Context, origin string, limit int) []string {
+func (d *Discoverer) fromSitemap(ctx context.Context, origin string, limit int) ([]string, error) {
+	var errs []error
 	for _, path := range []string{"/wp-sitemap.xml", "/sitemap.xml", "/sitemap_index.xml"} {
-		urls := d.parseSitemap(ctx, origin+path, limit, 0)
+		urls, err := d.parseSitemap(ctx, origin+path, limit, 0)
 		if len(urls) > 0 {
-			return urls
+			return urls, nil
+		}
+		if err != nil {
+			errs = append(errs, err)
 		}
 	}
-	return nil
+	return nil, errors.Join(errs...)
 }
 
-func (d *Discoverer) parseSitemap(ctx context.Context, smURL string, limit, depth int) []string {
+func (d *Discoverer) parseSitemap(ctx context.Context, smURL string, limit, depth int) ([]string, error) {
 	if depth > 2 {
-		return nil
+		return nil, nil
 	}
 	body, err := d.fetch(ctx, smURL)
 	if err != nil {
-		return nil
+		// A missing sitemap candidate (404) is expected probing; surface the
+		// error so an unreachable host is distinguishable from "no posts".
+		return nil, fmt.Errorf("fetch sitemap %s: %w", hostOf(smURL), err)
 	}
 
 	var idx sitemapIndex
 	if err := xml.Unmarshal(body, &idx); err == nil && len(idx.Sitemaps) > 0 {
 		sort.Slice(idx.Sitemaps, func(i, j int) bool { return idx.Sitemaps[i].LastMod > idx.Sitemaps[j].LastMod })
+		var errs []error
 		for _, sm := range idx.Sitemaps {
 			loc := strings.TrimSpace(sm.Loc)
-			if loc == "" {
+			if loc == "" || !looksLikePostsSitemap(loc) {
 				continue
 			}
-			if !looksLikePostsSitemap(loc) {
-				continue
+			urls, err := d.parseSitemap(ctx, loc, limit, depth+1)
+			if len(urls) > 0 {
+				return urls, nil
 			}
-			if urls := d.parseSitemap(ctx, loc, limit, depth+1); len(urls) > 0 {
-				return urls
+			if err != nil {
+				errs = append(errs, err)
 			}
 		}
 		for _, sm := range idx.Sitemaps {
@@ -116,16 +135,23 @@ func (d *Discoverer) parseSitemap(ctx context.Context, smURL string, limit, dept
 			if loc == "" {
 				continue
 			}
-			if urls := d.parseSitemap(ctx, loc, limit, depth+1); len(urls) > 0 {
-				return urls
+			urls, err := d.parseSitemap(ctx, loc, limit, depth+1)
+			if len(urls) > 0 {
+				return urls, nil
+			}
+			if err != nil {
+				errs = append(errs, err)
 			}
 		}
-		return nil
+		return nil, errors.Join(errs...)
 	}
 
 	var us urlSet
 	if err := xml.Unmarshal(body, &us); err != nil || len(us.URLs) == 0 {
-		return nil
+		// Fetched a body that is neither a sitemap index nor a urlset: a
+		// graceful miss for this candidate path, not a transport failure.
+		d.log.DebugContext(ctx, "sitemap not parseable", "host", hostOf(smURL), "bytes", len(body))
+		return nil, nil
 	}
 	sort.Slice(us.URLs, func(i, j int) bool { return us.URLs[i].LastMod > us.URLs[j].LastMod })
 
@@ -140,20 +166,20 @@ func (d *Discoverer) parseSitemap(ctx context.Context, smURL string, limit, dept
 			break
 		}
 	}
-	return out
+	return out, nil
 }
 
-func (d *Discoverer) fromWPRest(ctx context.Context, origin string, limit int) []string {
+func (d *Discoverer) fromWPRest(ctx context.Context, origin string, limit int) ([]string, error) {
 	u := fmt.Sprintf("%s/wp-json/wp/v2/posts?per_page=%d&orderby=date&order=desc&_fields=link", origin, limit)
 	body, err := d.fetch(ctx, u)
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("fetch wp-rest %s: %w", hostOf(origin), err)
 	}
 	var arr []struct {
 		Link string `json:"link"`
 	}
 	if err := json.Unmarshal(body, &arr); err != nil {
-		return nil
+		return nil, fmt.Errorf("decode wp-rest %s: %w", hostOf(origin), err)
 	}
 	out := make([]string, 0, len(arr))
 	for _, p := range arr {
@@ -161,7 +187,7 @@ func (d *Discoverer) fromWPRest(ctx context.Context, origin string, limit int) [
 			out = append(out, p.Link)
 		}
 	}
-	return out
+	return out, nil
 }
 
 func (d *Discoverer) fetch(ctx context.Context, rawURL string) ([]byte, error) {
@@ -178,7 +204,11 @@ func (d *Discoverer) fetch(ctx context.Context, rawURL string) ([]byte, error) {
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("status %d", resp.StatusCode)
 	}
-	return io.ReadAll(io.LimitReader(resp.Body, maxBody))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBody))
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+	return body, nil
 }
 
 type sitemapIndex struct {
@@ -203,6 +233,15 @@ func originOf(rawURL string) (string, error) {
 		return "", fmt.Errorf("invalid url %q", rawURL)
 	}
 	return u.Scheme + "://" + u.Host, nil
+}
+
+// hostOf returns just the host of rawURL for logging/error context, keeping
+// full site URLs (paths, query params) out of logs and persisted error text.
+func hostOf(rawURL string) string {
+	if u, err := url.Parse(strings.TrimSpace(rawURL)); err == nil && u.Host != "" {
+		return u.Host
+	}
+	return ""
 }
 
 func looksLikePostsSitemap(loc string) bool {

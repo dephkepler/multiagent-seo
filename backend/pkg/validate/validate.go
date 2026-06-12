@@ -20,7 +20,9 @@ func init() {
 		return name
 	})
 
-	_ = v.RegisterValidation("nonzero_uuid", func(fl validator.FieldLevel) bool {
+	// A registration failure means the nonzero_uuid tag is silently inert and
+	// every UUID passes — fail loudly at startup rather than bypass validation.
+	if err := v.RegisterValidation("nonzero_uuid", func(fl validator.FieldLevel) bool {
 		field := fl.Field()
 		if field.Kind() != reflect.Array || field.Len() != 16 {
 			return false
@@ -31,7 +33,9 @@ func init() {
 			}
 		}
 		return false
-	})
+	}); err != nil {
+		panic(fmt.Sprintf("register nonzero_uuid validator: %v", err))
+	}
 }
 
 type FieldError struct {

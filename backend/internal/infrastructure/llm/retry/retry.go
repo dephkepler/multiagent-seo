@@ -83,7 +83,7 @@ func Do(ctx context.Context, cfg Config, log *slog.Logger, provider string, fn f
 				}
 				delay = ra
 			}
-			log.InfoContext(ctx, "llm retry backoff",
+			log.WarnContext(ctx, "llm call attempt failed, retrying after backoff",
 				"provider", provider,
 				"attempt", attempt,
 				"delay_ms", delay.Milliseconds(),
@@ -98,6 +98,7 @@ func Do(ctx context.Context, cfg Config, log *slog.Logger, provider string, fn f
 		}
 
 		if err := ctx.Err(); err != nil {
+			log.DebugContext(ctx, "llm retry loop aborted by context", "provider", provider, "err", err)
 			return err
 		}
 

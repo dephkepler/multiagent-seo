@@ -23,6 +23,9 @@ func NewPool(ctx context.Context, cfg config.DatabaseConfig) (*pgxpool.Pool, err
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
 
-	log.Info().Str("host", cfg.Host).Str("dbname", cfg.Dbname).Msg("connected to database")
+	log.Info().
+		Str("host", cfg.Host).
+		Str("dbname", cfg.Dbname).
+		Msg("connected to database")
 	return pool, nil
 }

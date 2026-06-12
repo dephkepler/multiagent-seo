@@ -120,7 +120,6 @@ func (f *Fetcher) Fetch(ctx context.Context, rawURL string) (linkbuilding.Page, 
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		f.log.WarnContext(ctx, "webfetch non-2xx", "url", rawURL, "status", resp.StatusCode)
 		return linkbuilding.Page{}, fmt.Errorf("webfetch %s: status %d", rawURL, resp.StatusCode)
 	}
 

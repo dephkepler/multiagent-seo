@@ -2,7 +2,6 @@ package transport
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -52,6 +51,9 @@ type httpError struct {
 	status     int
 	body       string
 	retryAfter time.Duration
+	// cause preserves the original transport/IO error so callers can use
+	// errors.Is/As to inspect net.Timeout, context.Canceled, etc.
+	cause error
 }
 
 func (e *httpError) Error() string {
@@ -60,6 +62,8 @@ func (e *httpError) Error() string {
 	}
 	return fmt.Sprintf("%s returned %d: %s", e.provider, e.status, e.body)
 }
+
+func (e *httpError) Unwrap() error { return e.cause }
 
 func (e *httpError) HTTPStatus() int { return e.status }
 
@@ -112,14 +116,14 @@ func (c *Client) Complete(ctx context.Context, prompt string, maxTokens int) (st
 
 		resp, doErr := c.httpClient.Do(req)
 		if doErr != nil {
-			return &httpError{provider: provider, status: 0, body: doErr.Error()}
+			return &httpError{provider: provider, status: 0, body: doErr.Error(), cause: doErr}
 		}
 		defer resp.Body.Close()
 
 		lastStatus = resp.StatusCode
 		body, readErr := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
 		if readErr != nil {
-			return &httpError{provider: provider, status: resp.StatusCode, body: readErr.Error()}
+			return &httpError{provider: provider, status: resp.StatusCode, body: readErr.Error(), cause: readErr}
 		}
 
 		if resp.StatusCode != http.StatusOK {
@@ -138,22 +142,8 @@ func (c *Client) Complete(ctx context.Context, prompt string, maxTokens int) (st
 	latency := time.Since(start)
 
 	if err != nil {
-		logFailure := c.log.ErrorContext
-		var he retry.HTTPStatusError
-		if errors.As(err, &he) {
-			if s := he.HTTPStatus(); s >= 400 && s < 500 {
-				logFailure = c.log.WarnContext
-			}
-		}
-		logFailure(ctx, "llm call done",
-			"provider", provider,
-			"model", c.model,
-			"status", lastStatus,
-			"latency_ms", latency.Milliseconds(),
-			"input_tokens", u.InputTokens,
-			"output_tokens", u.OutputTokens,
-			"err", err,
-		)
+		// Wrap-and-return only; the request handler logs at the boundary and
+		// the retry layer already logs each failed attempt.
 		return "", usage.Usage{}, fmt.Errorf("%s request failed (model %s): %w", provider, c.model, err)
 	}
 

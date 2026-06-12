@@ -68,7 +68,7 @@ func (c *codec) ParseResponse(body []byte) (string, usage.Usage, error) {
 		return "", usage.Usage{}, fmt.Errorf("decode response: %w", err)
 	}
 	if len(result.Choices) == 0 {
-		return "", usage.Usage{}, fmt.Errorf("groq returned empty response")
+		return "", usage.Usage{}, fmt.Errorf("groq returned empty response: got %d choices, response length %d bytes", len(result.Choices), len(body))
 	}
 	return result.Choices[0].Message.Content, usage.Usage{
 		InputTokens:  result.Usage.PromptTokens,
