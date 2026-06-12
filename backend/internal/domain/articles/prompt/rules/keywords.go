@@ -33,6 +33,10 @@ var (
 		ID:   "keywords.target_natural_spread",
 		Body: "Spread target keywords across different sections — do not cluster them in one paragraph",
 	}
+	KeywordsNotBold = Rule{
+		ID:   "keywords.not_bold",
+		Body: "Never bold, italicise, or otherwise emphasise the keywords in the body — keep them as plain text",
+	}
 )
 
 func KeywordsGroup() Group {
@@ -47,6 +51,7 @@ func KeywordsGroup() Group {
 			LSICountInBrief,
 			TargetKeywordsAllUsed,
 			TargetKeywordsNaturalSpread,
+			KeywordsNotBold,
 		},
 	}
 }

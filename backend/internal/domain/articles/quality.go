@@ -37,11 +37,24 @@ func QualityFloor(in QualityInput) (bool, []string) {
 		reasons = append(reasons, "too few H2")
 	}
 
+	if !startsWithH1(in.Content) {
+		reasons = append(reasons, "does not start with H1")
+	}
+	if !hasFAQ(in.Content) {
+		reasons = append(reasons, "missing FAQ section")
+	}
+
 	low := strings.ToLower(in.Content)
 	for _, kw := range in.Keywords {
 		kw = strings.TrimSpace(strings.ToLower(kw))
-		if kw != "" && !strings.Contains(low, kw) {
+		if kw == "" {
+			continue
+		}
+		if !strings.Contains(low, kw) {
 			reasons = append(reasons, "missing keyword: "+kw)
+		}
+		if strings.Contains(low, "**"+kw+"**") {
+			reasons = append(reasons, "keyword is bold: "+kw)
 		}
 	}
 
@@ -56,6 +69,27 @@ func QualityFloor(in QualityInput) (bool, []string) {
 	}
 
 	return len(reasons) == 0, reasons
+}
+
+func startsWithH1(content string) bool {
+	for _, line := range strings.Split(content, "\n") {
+		t := strings.TrimSpace(line)
+		if t == "" {
+			continue
+		}
+		return strings.HasPrefix(t, "# ") && !strings.HasPrefix(t, "## ")
+	}
+	return false
+}
+
+func hasFAQ(content string) bool {
+	for _, line := range strings.Split(strings.ToLower(content), "\n") {
+		t := strings.TrimSpace(line)
+		if strings.HasPrefix(t, "## ") && (strings.Contains(t, "faq") || strings.Contains(t, "frequently asked")) {
+			return true
+		}
+	}
+	return false
 }
 
 func countH2(content string) int {

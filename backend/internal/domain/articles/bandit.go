@@ -75,6 +75,18 @@ func variantLowerBound(s PromptVariantStat) float64 {
 	return lb
 }
 
+func variantUpperBound(s PromptVariantStat) float64 {
+	a := 1 + s.SumReward
+	b := 1 + s.SumComplement
+	mean := a / (a + b)
+	variance := (a * b) / ((a + b) * (a + b) * (a + b + 1))
+	ub := mean + 1.2816*math.Sqrt(variance)
+	if ub > 1 {
+		return 1
+	}
+	return ub
+}
+
 func ShouldPromote(stats []PromptVariantStat, minSamples int) (promote int64, retire int64, ok bool) {
 	bar := -1.0
 	var champion int64
@@ -101,4 +113,27 @@ func ShouldPromote(stats []PromptVariantStat, minSamples int) (promote int64, re
 		return 0, 0, false
 	}
 	return best, champion, true
+}
+
+func ShouldRetire(stats []PromptVariantStat, minSamples int) []int64 {
+	championMean := -1.0
+	for _, s := range stats {
+		if s.Variant.Status == VariantChampion {
+			championMean = variantMean(s)
+		}
+	}
+	if championMean < 0 {
+		return nil
+	}
+
+	var retire []int64
+	for _, s := range stats {
+		if s.Variant.Status != VariantCandidate || s.Samples < minSamples {
+			continue
+		}
+		if variantUpperBound(s) < championMean {
+			retire = append(retire, s.Variant.ID)
+		}
+	}
+	return retire
 }

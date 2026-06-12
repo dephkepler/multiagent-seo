@@ -67,6 +67,34 @@ func TestShouldPromote(t *testing.T) {
 	})
 }
 
+func TestShouldRetire(t *testing.T) {
+	champion := PromptVariantStat{Variant: PromptVariant{ID: 1, Status: VariantChampion}, Samples: 100, SumReward: 50, SumComplement: 50}
+
+	t.Run("retires clearly weaker candidate", func(t *testing.T) {
+		weak := PromptVariantStat{Variant: PromptVariant{ID: 2, Status: VariantCandidate}, Samples: 100, SumReward: 10, SumComplement: 90}
+		got := ShouldRetire([]PromptVariantStat{champion, weak}, canaryFloor)
+		if len(got) != 1 || got[0] != 2 {
+			t.Errorf("want [2], got %v", got)
+		}
+	})
+
+	t.Run("keeps candidate with too few samples", func(t *testing.T) {
+		weakFew := PromptVariantStat{Variant: PromptVariant{ID: 2, Status: VariantCandidate}, Samples: 5, SumReward: 0, SumComplement: 5}
+		if got := ShouldRetire([]PromptVariantStat{champion, weakFew}, canaryFloor); len(got) != 0 {
+			t.Errorf("too few samples must not retire, got %v", got)
+		}
+	})
+
+	t.Run("keeps competitive candidate", func(t *testing.T) {
+		good := PromptVariantStat{Variant: PromptVariant{ID: 2, Status: VariantCandidate}, Samples: 100, SumReward: 80, SumComplement: 20}
+		if got := ShouldRetire([]PromptVariantStat{champion, good}, canaryFloor); len(got) != 0 {
+			t.Errorf("competitive candidate must not retire, got %v", got)
+		}
+	})
+}
+
+const canaryFloor = 10
+
 func TestThompsonPickExploresUncertain(t *testing.T) {
 	rng := rand.New(rand.NewPCG(5, 9))
 	stats := []PromptVariantStat{

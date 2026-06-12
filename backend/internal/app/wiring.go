@@ -62,11 +62,11 @@ func newTopics(ctx context.Context, cfg config.Config, log *slog.Logger) domaina
 func newChecker(cfg config.Config, log *slog.Logger) domainarticles.ContentChecker {
 	c, err := checker.New(checker.Config{
 		Provider:    cfg.Checker.Provider,
-		Email:       cfg.Checker.Email,
+		Email:       cfg.Checker.Copyleaks.Email,
 		APIKey:      cfg.Checker.APIKey,
 		Model:       cfg.Checker.Model,
 		AIThreshold: cfg.Checker.AIThreshold,
-		Sandbox:     cfg.Checker.Sandbox,
+		Sandbox:     cfg.Checker.Copyleaks.Sandbox,
 	}, log)
 	if err != nil {
 		log.Info("checker init failed, using mock", "provider", cfg.Checker.Provider, "err", err)

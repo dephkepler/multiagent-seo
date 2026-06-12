@@ -14,17 +14,9 @@ import (
 	"sync/atomic"
 	"time"
 	"unicode"
-)
 
-type Result struct {
-	AIScore          float64  `json:"ai_score"`
-	PlagiarismScore  float64  `json:"plagiarism_score"`
-	Original         bool     `json:"original"`
-	Provider         string   `json:"provider"`
-	Issues           []string `json:"issues,omitempty"`
-	SentencesFlagged []string `json:"sentences_flagged,omitempty"`
-	ReportURL        string   `json:"report_url,omitempty"`
-}
+	"multiagent-seo/internal/domain/articles"
+)
 
 const (
 	defaultModel    = "Hello-SimpleAI/chatgpt-detector-roberta"
@@ -72,7 +64,7 @@ type label struct {
 	Score float64 `json:"score"`
 }
 
-func (c *Client) Check(ctx context.Context, content string) (*Result, error) {
+func (c *Client) Check(ctx context.Context, content string) (*articles.CheckResult, error) {
 	input := content
 	if len(input) > maxInputChars {
 		input = input[:maxInputChars]
@@ -83,7 +75,7 @@ func (c *Client) Check(ctx context.Context, content string) (*Result, error) {
 		return nil, err
 	}
 
-	res := &Result{
+	res := &articles.CheckResult{
 		AIScore:         round2(aiScore),
 		PlagiarismScore: 0,
 		Original:        aiScore < c.aiThreshold,

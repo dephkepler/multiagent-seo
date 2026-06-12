@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -133,6 +134,56 @@ func (r *PromptRepository) SelectionStats(ctx context.Context, stage string, sin
 		return nil, fmt.Errorf("selection stats: %w", err)
 	}
 	return out, nil
+}
+
+func (r *PromptRepository) WorstOutcomes(ctx context.Context, variantID int64, since time.Time, limit int) ([]articles.PromptFailure, error) {
+	const q = `
+		SELECT o.article_id, o.ai_score, a.check_result
+		FROM prompt_outcomes o
+		JOIN articles a ON a.id = o.article_id
+		WHERE o.variant_id = @variant
+		  AND o.created_at >= @since
+		  AND o.ai_score IS NOT NULL
+		ORDER BY o.ai_score DESC
+		LIMIT @limit`
+
+	rows, err := r.db.Query(ctx, q, pgx.NamedArgs{
+		"variant": variantID,
+		"since":   since,
+		"limit":   limit,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("worst outcomes: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]articles.PromptFailure, 0)
+	for rows.Next() {
+		var f articles.PromptFailure
+		var checkResult []byte
+		if err := rows.Scan(&f.ArticleID, &f.AIScore, &checkResult); err != nil {
+			return nil, fmt.Errorf("scan worst outcome: %w", err)
+		}
+		f.Flagged = flaggedFromCheckResult(checkResult)
+		out = append(out, f)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("worst outcomes: %w", err)
+	}
+	return out, nil
+}
+
+func flaggedFromCheckResult(raw []byte) []string {
+	if len(raw) == 0 {
+		return nil
+	}
+	var cr struct {
+		SentencesFlagged []string `json:"sentences_flagged"`
+	}
+	if err := json.Unmarshal(raw, &cr); err != nil {
+		return nil
+	}
+	return cr.SentencesFlagged
 }
 
 func (r *PromptRepository) SetVariantStatus(ctx context.Context, id int64, status articles.VariantStatus) error {

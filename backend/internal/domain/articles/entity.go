@@ -133,3 +133,9 @@ type PromptVariantStat struct {
 	SumReward     float64       // sum of rewards for this variant
 	SumComplement float64       // sum of (1 - reward) for this variant
 }
+
+type PromptFailure struct {
+	ArticleID int64    // the article whose text scored as AI-written
+	AIScore   float64  // the article's AI-detector score (higher = more machine-like)
+	Flagged   []string // the AI-flagged sentences from the article (detector's sentences_flagged)
+}

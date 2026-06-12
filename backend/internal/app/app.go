@@ -35,6 +35,8 @@ import (
 
 const promoteInterval = 6 * time.Hour
 
+const evolveInterval = 7 * 24 * time.Hour
+
 func Run(ctx context.Context, cfg config.Config) error {
 	slogLog := logger.NewSlog()
 	slog.SetDefault(slogLog)
@@ -110,6 +112,9 @@ func Run(ctx context.Context, cfg config.Config) error {
 
 	if articlesSvc != nil {
 		schedule(ctx, promoteInterval, articlesSvc.PromotePrompts)
+		if cfg.Prompt.EvolveEnabled {
+			schedule(ctx, evolveInterval, articlesSvc.GenerateCandidate)
+		}
 	}
 
 	var verifier domainauth.TokenVerifier = jwtSvc
