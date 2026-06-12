@@ -2,6 +2,7 @@ package articles
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 
 	"github.com/google/uuid"
@@ -10,9 +11,10 @@ import (
 var ErrNotFound = errors.New("article not found")
 
 type CreateArticle struct {
-	Keyword string
-	SiteID  uuid.UUID
-	Site    string
+	Keyword       string
+	SiteID        uuid.UUID
+	Site          string
+	RequestParams json.RawMessage
 }
 
 type ArticleRepository interface {

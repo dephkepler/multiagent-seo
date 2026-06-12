@@ -37,9 +37,11 @@ type Article struct {
 
 	CompetitorData json.RawMessage
 	CheckResult    json.RawMessage
+	RequestParams  json.RawMessage
 
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+	PublishedAt *time.Time
 }
 
 type RevisionSource string

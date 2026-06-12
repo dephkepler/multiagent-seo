@@ -37,16 +37,17 @@ func NewArticleRepository(pool *pgxpool.Pool) *ArticleRepository {
 
 func (r *ArticleRepository) Create(ctx context.Context, in articles.CreateArticle) (int64, error) {
 	const q = `
-		INSERT INTO articles (keyword, site_id, site, status)
-		VALUES (@keyword, @site_id, @site, @status)
+		INSERT INTO articles (keyword, site_id, site, status, request_params)
+		VALUES (@keyword, @site_id, @site, @status, @request_params)
 		RETURNING id`
 
 	var id int64
 	err := r.db.QueryRow(ctx, q, pgx.NamedArgs{
-		"keyword": in.Keyword,
-		"site_id": in.SiteID,
-		"site":    in.Site,
-		"status":  articles.StatusGenerating,
+		"keyword":        in.Keyword,
+		"site_id":        in.SiteID,
+		"site":           in.Site,
+		"status":         articles.StatusGenerating,
+		"request_params": in.RequestParams,
 	}).Scan(&id)
 	if err != nil {
 		return 0, fmt.Errorf("create article: %w", mapPGError(err))
@@ -61,8 +62,8 @@ func (r *ArticleRepository) Get(ctx context.Context, id int64) (*articles.Articl
 		       COALESCE(wp_edit_url, ''),
 		       COALESCE(wp_post_url, ''),
 		       images_requested, images_resolved, images_skipped,
-		       competitor_data, check_result,
-		       created_at, updated_at
+		       competitor_data, check_result, request_params,
+		       created_at, updated_at, published_at
 		FROM articles WHERE id = @id`
 
 	row := r.db.QueryRow(ctx, q, pgx.NamedArgs{"id": id})
@@ -143,7 +144,7 @@ func (r *ArticleRepository) FailOrphanedGenerating(ctx context.Context) (int64, 
 func (r *ArticleRepository) MarkPublished(ctx context.Context, id int64, postURL string) error {
 	const q = `
 		UPDATE articles
-		SET status = @status, wp_post_url = @wp_post_url, updated_at = NOW()
+		SET status = @status, wp_post_url = @wp_post_url, published_at = NOW(), updated_at = NOW()
 		WHERE id = @id`
 
 	return r.exec(ctx, "mark published", q, pgx.NamedArgs{
@@ -287,8 +288,10 @@ func scanArticleFull(row pgx.Row) (articles.Article, error) {
 		&a.ImagesSkipped,
 		&a.CompetitorData,
 		&a.CheckResult,
+		&a.RequestParams,
 		&a.CreatedAt,
 		&a.UpdatedAt,
+		&a.PublishedAt,
 	)
 	a.SiteID = siteID.UUID
 	if err != nil {

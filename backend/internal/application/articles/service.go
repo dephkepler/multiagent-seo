@@ -2,6 +2,7 @@ package articles
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -130,6 +131,19 @@ type GenerateResult struct {
 	Model          string
 }
 
+type articleRequestParams struct {
+	MinWords      int     `json:"min_words"`
+	MaxWords      int     `json:"max_words"`
+	MaxTokens     int     `json:"max_tokens"`
+	MaxCycles     int     `json:"max_cycles"`
+	AIThreshold   float64 `json:"ai_threshold"`
+	Provider      string  `json:"provider"`
+	Model         string  `json:"model"`
+	Language      string  `json:"language"`
+	AutoPublish   bool    `json:"auto_publish"`
+	IncludeImages bool    `json:"include_images"`
+}
+
 func (s *Service) Generate(ctx context.Context, req GenerateRequest) (GenerateResult, error) {
 	settings, err := s.resolve(ctx, req)
 	if err != nil {
@@ -139,9 +153,26 @@ func (s *Service) Generate(ctx context.Context, req GenerateRequest) (GenerateRe
 		return GenerateResult{}, fmt.Errorf("resolve generation settings (keyword=%q site_id=%s): %w", req.Keyword, req.SiteID, err)
 	}
 
+	reqParams, err := json.Marshal(articleRequestParams{
+		MinWords:      settings.minWords,
+		MaxWords:      settings.maxWords,
+		MaxTokens:     settings.maxTokens,
+		MaxCycles:     settings.maxCycles,
+		AIThreshold:   settings.aiThreshold,
+		Provider:      settings.provider,
+		Model:         settings.model,
+		Language:      settings.language,
+		AutoPublish:   settings.autoPublish,
+		IncludeImages: settings.includeImages,
+	})
+	if err != nil {
+		return GenerateResult{}, fmt.Errorf("marshal request params: %w", err)
+	}
+
 	id, err := s.repo.Create(ctx, articles.CreateArticle{
-		Keyword: settings.keyword,
-		SiteID:  settings.siteID,
+		Keyword:       settings.keyword,
+		SiteID:        settings.siteID,
+		RequestParams: reqParams,
 	})
 	if err != nil {
 		return GenerateResult{}, fmt.Errorf("create article: %w", err)
