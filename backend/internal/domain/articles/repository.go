@@ -27,4 +27,7 @@ type ArticleRepository interface {
 	SaveImageStats(ctx context.Context, id int64, requested, resolved, skipped int) error
 	SaveCompetitorData(ctx context.Context, id int64, data any) error
 	SaveCheckResult(ctx context.Context, id int64, result any) error
+
+	SaveRevision(ctx context.Context, rev Revision) (int, error)
+	SaveEvent(ctx context.Context, ev GenerationEvent) error
 }

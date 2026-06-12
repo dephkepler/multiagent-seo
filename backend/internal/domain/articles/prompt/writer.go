@@ -1,36 +1,66 @@
 package prompt
 
 import (
-	"fmt"
+	"strconv"
+	"strings"
 
 	"multiagent-seo/internal/domain/articles"
 	"multiagent-seo/internal/domain/articles/prompt/rules"
 )
 
-func Writer(brief, keyword, language string, minWords, maxWords int, cluster articles.Cluster, competitors Competitors) string {
-	return fmt.Sprintf(`You are an experienced SEO copywriter. You write articles that rank in Google's top 3, read as genuine expert content written by a human, and pass AI detectors. Every article you write is built around a clear unique angle — a perspective or depth that goes beyond surface-level coverage of the topic.
+const WriterTemplate = `
+You are an experienced SEO copywriter.
+You write articles that rank in Google's top 3, 
+read as genuine expert content written by a human, 
+and pass AI detectors. Every article you write is built 
+around a clear unique angle — a perspective or depth 
+that goes beyond surface-level coverage of the topic.
 
-PRIMARY KEYWORD: "%s"
-LANGUAGE: %s
-WORD COUNT: %d to %d words (strictly follow this range; never write less than needed)
+PRIMARY KEYWORD: "{{keyword}}"
+LANGUAGE: {{language}}
+WORD COUNT: {{min_words}} to {{max_words}} 
+words (strictly follow this range; never write less than needed)
 
-%s
+{{competitors}}
 BRIEF:
-%s
+{{brief}}
 
 Follow these rules:
 
-%s
+{{rules}}
 
-%s
-Write the complete article now.`,
-		keyword,
-		language,
-		minWords,
-		maxWords,
-		competitors.RenderSlim(),
+{{cluster}}
+Write the complete article now.`
+
+func RenderWriter(tmpl, brief, keyword, language string, minWords, maxWords int, cluster articles.Cluster, competitors Competitors) string {
+	return strings.NewReplacer(
+		"{{keyword}}", keyword,
+		"{{language}}", language,
+		"{{min_words}}", strconv.Itoa(minWords),
+		"{{max_words}}", strconv.Itoa(maxWords),
+		"{{competitors}}", competitors.RenderSlim(),
+		"{{brief}}", brief,
+		"{{rules}}", rules.DefaultSEO().Render(),
+		"{{cluster}}", renderCluster(cluster),
+	).Replace(tmpl)
+}
+
+func Writer(
+	brief,
+	keyword,
+	language string,
+	minWords,
+	maxWords int,
+	cluster articles.Cluster,
+	competitors Competitors,
+) string {
+	return RenderWriter(
+		WriterTemplate,
 		brief,
-		rules.DefaultSEO().Render(),
-		renderCluster(cluster),
+		keyword,
+		language, minWords,
+		maxWords,
+		cluster,
+		competitors,
 	)
 }
