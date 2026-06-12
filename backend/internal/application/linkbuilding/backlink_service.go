@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand"
+	"regexp"
 	"strings"
 	"time"
 
@@ -180,7 +181,7 @@ func (s *BacklinkService) placeAll(ctx context.Context, log *slog.Logger, sheet 
 		err := s.placements.WritePlacementStatus(writeCtx, sheet, pending)
 		cancel()
 		if err != nil {
-			log.ErrorContext(ctx, "write placement status failed", "err", err)
+			log.ErrorContext(ctx, "write placement status failed", "reason", sanitizeReason(err.Error()), "unpersisted", len(pending))
 			return false
 		}
 		pending = pending[:0]
@@ -216,7 +217,11 @@ func (s *BacklinkService) placeAll(ctx context.Context, log *slog.Logger, sheet 
 		}
 	}
 
-	flush()
+	if !flush() {
+		// flush() already logged the write failure with detail; suppress the success
+		// "done" log so the run is not reported as complete with results unpersisted.
+		return
+	}
 	log.InfoContext(ctx, "backlink placement done", "processed", processed)
 }
 
@@ -225,40 +230,48 @@ func (s *BacklinkService) placeOne(ctx context.Context, log *slog.Logger, c doma
 
 	donor, ok, err := s.donors.Get(ctx, c.BaseURL)
 	if err != nil {
-		log.WarnContext(ctx, "donor stage failed", "stage", "load app password", "url", c.BaseURL, "err", err)
-		res.Status = "failed: load app password: " + truncReason(err.Error())
+		reason := sanitizeReason(err.Error())
+		log.WarnContext(ctx, "donor stage failed", "stage", "load app password", "url", c.BaseURL, "reason", reason)
+		res.Status = "failed: load app password: " + reason
 		return res
 	}
 	if !ok {
 		appPwd, err := s.issuer.IssueAppPassword(ctx, c.BaseURL, c.Login, c.Password)
 		if err != nil {
-			log.WarnContext(ctx, "donor stage failed", "stage", "issue app password", "url", c.BaseURL, "err", err)
-			res.Status = "failed: issue app password: " + truncReason(err.Error())
+			reason := sanitizeReason(err.Error())
+			log.WarnContext(ctx, "donor stage failed", "stage", "issue app password", "url", c.BaseURL, "reason", reason)
+			res.Status = "failed: issue app password: " + reason
 			return res
 		}
 		donor = domain.DonorCredential{DonorURL: c.BaseURL, Login: c.Login, AppPassword: appPwd}
 		if err := s.donors.Save(ctx, donor); err != nil {
-			log.WarnContext(ctx, "save donor credential failed", "url", c.BaseURL, "err", err)
+			reason := sanitizeReason(err.Error())
+			log.ErrorContext(ctx, "donor stage failed", "stage", "persist credential", "url", c.BaseURL, "reason", reason)
+			res.Status = "failed: persist credential: " + reason
+			return res
 		}
 	}
 
 	post, err := s.editor.LatestPost(ctx, donor)
 	if err != nil {
-		log.WarnContext(ctx, "donor stage failed", "stage", "latest post", "url", c.BaseURL, "err", err)
-		res.Status = "failed: latest post: " + truncReason(err.Error())
+		reason := sanitizeReason(err.Error())
+		log.WarnContext(ctx, "donor stage failed", "stage", "latest post", "url", c.BaseURL, "reason", reason)
+		res.Status = "failed: latest post: " + reason
 		return res
 	}
 
 	ins, err := placer.Place(ctx, post.Content, targetURL)
 	if err != nil {
-		log.WarnContext(ctx, "donor stage failed", "stage", "llm", "url", c.BaseURL, "err", err)
-		res.Status = "failed: llm: " + truncReason(err.Error())
+		reason := sanitizeReason(err.Error())
+		log.WarnContext(ctx, "donor stage failed", "stage", "llm", "url", c.BaseURL, "reason", reason)
+		res.Status = "failed: llm: " + reason
 		return res
 	}
 
 	if err := s.editor.UpdatePostContent(ctx, donor, post.ID, ins.ModifiedHTML); err != nil {
-		log.WarnContext(ctx, "donor stage failed", "stage", "update post", "url", c.BaseURL, "err", err)
-		res.Status = "failed: update post: " + truncReason(err.Error())
+		reason := sanitizeReason(err.Error())
+		log.WarnContext(ctx, "donor stage failed", "stage", "update post", "url", c.BaseURL, "reason", reason)
+		res.Status = "failed: update post: " + reason
 		return res
 	}
 
@@ -287,7 +300,20 @@ func (s *BacklinkService) jitter() time.Duration {
 	return s.minDelay + time.Duration(rand.Int63n(int64(s.maxDelay-s.minDelay)))
 }
 
-func truncReason(s string) string {
+var (
+	// HTTP response snippets embedded by lower layers (e.g. issuer/editor) can carry
+	// auth/captcha detail; drop everything from the snippet marker onward.
+	bodySnippetRe = regexp.MustCompile(`(?is)\b(body|response|snippet)\b.*`)
+	// Common credential-bearing query/JSON fragments.
+	credPatternRe = regexp.MustCompile(`(?i)(app[_-]?password|password|secret|token|authorization|api[_-]?key)\s*[=:]\s*\S+`)
+)
+
+// sanitizeReason strips HTTP response bodies and credential-bearing fragments out
+// of an error string before it is logged or persisted to the sheet (res.Status).
+func sanitizeReason(s string) string {
+	s = bodySnippetRe.ReplaceAllString(s, "[redacted body]")
+	s = credPatternRe.ReplaceAllString(s, "[redacted credential]")
+	s = strings.TrimSpace(s)
 	const max = 120
 	if len(s) <= max {
 		return s
