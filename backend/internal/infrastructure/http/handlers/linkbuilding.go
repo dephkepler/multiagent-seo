@@ -54,6 +54,8 @@ func (h *LinkbuildingHandler) QualifyWebsites(w http.ResponseWriter, r *http.Req
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 	var body oapigen.QualifyRequest
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		log := logger.New(r.Context(), "handlers.linkbuilding")
+		log.Debug().Err(err).Msg("decode qualify body")
 		problem.Write(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
@@ -75,7 +77,7 @@ func (h *LinkbuildingHandler) QualifyWebsites(w http.ResponseWriter, r *http.Req
 			problem.Write(w, http.StatusBadRequest, err.Error())
 		default:
 			log := logger.New(r.Context(), "handlers.linkbuilding")
-			log.Error().Err(err).Msg("internal error")
+			log.Error().Err(err).Str("op", "qualify_websites").Msg("internal error")
 			problem.Write(w, http.StatusInternalServerError, "internal error")
 		}
 		return
@@ -95,6 +97,8 @@ func (h *LinkbuildingHandler) LoginToSites(w http.ResponseWriter, r *http.Reques
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 	var body oapigen.SiteLoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		log := logger.New(r.Context(), "handlers.linkbuilding")
+		log.Debug().Err(err).Msg("decode login body")
 		problem.Write(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
@@ -110,7 +114,7 @@ func (h *LinkbuildingHandler) LoginToSites(w http.ResponseWriter, r *http.Reques
 			problem.Write(w, http.StatusBadRequest, err.Error())
 		default:
 			log := logger.New(r.Context(), "handlers.linkbuilding")
-			log.Error().Err(err).Msg("internal error")
+			log.Error().Err(err).Str("op", "login_to_sites").Msg("internal error")
 			problem.Write(w, http.StatusInternalServerError, "internal error")
 		}
 		return
@@ -130,6 +134,8 @@ func (h *LinkbuildingHandler) PlaceBacklinks(w http.ResponseWriter, r *http.Requ
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 	var body oapigen.PlaceBacklinksRequest
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		log := logger.New(r.Context(), "handlers.linkbuilding")
+		log.Debug().Err(err).Msg("decode place backlinks body")
 		problem.Write(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
@@ -151,7 +157,7 @@ func (h *LinkbuildingHandler) PlaceBacklinks(w http.ResponseWriter, r *http.Requ
 			problem.Write(w, http.StatusBadRequest, err.Error())
 		default:
 			log := logger.New(r.Context(), "handlers.linkbuilding")
-			log.Error().Err(err).Msg("internal error")
+			log.Error().Err(err).Str("op", "place_backlinks").Msg("internal error")
 			problem.Write(w, http.StatusInternalServerError, "internal error")
 		}
 		return
