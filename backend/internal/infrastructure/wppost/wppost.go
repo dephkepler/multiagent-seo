@@ -57,25 +57,28 @@ func (c *Client) LatestPost(ctx context.Context, cred linkbuilding.DonorCredenti
 		return linkbuilding.DonorPost{}, fmt.Errorf("wppost list: %w", err)
 	}
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	if err != nil {
+		return linkbuilding.DonorPost{}, fmt.Errorf("wppost list read response: %w", err)
+	}
 
 	if resp.StatusCode != http.StatusOK {
 		return linkbuilding.DonorPost{}, fmt.Errorf("wppost list status %d: %s", resp.StatusCode, snippet(body))
 	}
 
-	var arr []struct {
+	var posts []struct {
 		ID      int64         `json:"id"`
 		Title   renderedField `json:"title"`
 		Content renderedField `json:"content"`
 		Link    string        `json:"link"`
 	}
-	if err := json.Unmarshal(body, &arr); err != nil {
+	if err := json.Unmarshal(body, &posts); err != nil {
 		return linkbuilding.DonorPost{}, fmt.Errorf("wppost decode list: %w", err)
 	}
-	if len(arr) == 0 {
+	if len(posts) == 0 {
 		return linkbuilding.DonorPost{}, fmt.Errorf("wppost: no published posts")
 	}
-	p := arr[0]
+	p := posts[0]
 	return linkbuilding.DonorPost{
 		ID:        p.ID,
 		Title:     p.Title.Rendered,
@@ -110,7 +113,10 @@ func (c *Client) UpdatePostContent(ctx context.Context, cred linkbuilding.DonorC
 		return fmt.Errorf("wppost update: %w", err)
 	}
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return fmt.Errorf("wppost update read response: %w", err)
+	}
 	if resp.StatusCode/100 != 2 {
 		return fmt.Errorf("wppost update status %d: %s", resp.StatusCode, snippet(body))
 	}

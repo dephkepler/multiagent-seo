@@ -67,12 +67,12 @@ func (c *Client) SearchN(ctx context.Context, query string, n int) ([]Photo, err
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("pexels request: %w", err)
+		return nil, fmt.Errorf("pexels search request for query %q: %w", query, err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("pexels status %d", resp.StatusCode)
+		return nil, fmt.Errorf("pexels api returned status %d for query %q", resp.StatusCode, query)
 	}
 
 	var body searchResponse

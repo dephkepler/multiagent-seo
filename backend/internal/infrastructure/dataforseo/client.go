@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -64,12 +65,17 @@ func (s *serpSubItem) UnmarshalJSON(b []byte) error {
 	return json.Unmarshal(b, (*alias)(s))
 }
 
-func subItems(raw json.RawMessage) []serpSubItem {
+// parseSubItems distinguishes "no nested data" (empty raw) from "parse failed":
+// the latter is logged so a malformed PAA/featured-snippet section is not
+// silently returned as empty. parseSERPResponse tolerates the dropped items,
+// so DEBUG is the right level.
+func parseSubItems(raw json.RawMessage) []serpSubItem {
 	if len(raw) == 0 {
 		return nil
 	}
 	var out []serpSubItem
 	if err := json.Unmarshal(raw, &out); err != nil {
+		slog.Default().Debug("dataforseo: failed to parse serp subitems", "err", err)
 		return nil
 	}
 	return out
@@ -102,12 +108,12 @@ func (c *RealClient) GetSERP(ctx context.Context, keyword, languageCode string, 
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("dataforseo request: %w", err)
+		return nil, fmt.Errorf("dataforseo request for keyword %q: %w", keyword, err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("dataforseo status %d", resp.StatusCode)
+		return nil, fmt.Errorf("dataforseo api returned status %d for keyword %q", resp.StatusCode, keyword)
 	}
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
@@ -123,44 +129,44 @@ func parseSERPResponse(body []byte, keyword string, limit int) (*articles.Compet
 		return nil, fmt.Errorf("decode dataforseo response: %w", err)
 	}
 
-	data := &articles.CompetitorData{
+	out := &articles.CompetitorData{
 		Keyword:  keyword,
 		SerpDate: time.Now().Format("2006-01-02"),
 		Results:  []articles.SERPItem{},
 	}
 
 	if len(result.Tasks) == 0 || len(result.Tasks[0].Result) == 0 {
-		return data, nil
+		return out, nil
 	}
 
 	for _, item := range result.Tasks[0].Result[0].Items {
 		switch item.Type {
 		case "organic":
-			if len(data.Results) >= limit {
+			if len(out.Results) >= limit {
 				continue
 			}
-			data.Results = append(data.Results, articles.SERPItem{
+			out.Results = append(out.Results, articles.SERPItem{
 				Rank:        item.RankAbsolute,
 				URL:         item.URL,
 				Title:       item.Title,
 				Description: item.Description,
 			})
 		case "people_also_ask":
-			for _, sub := range subItems(item.Items) {
+			for _, sub := range parseSubItems(item.Items) {
 				if sub.Title == "" {
 					continue
 				}
-				data.PAA = append(data.PAA, sub.Title)
+				out.PAA = append(out.PAA, sub.Title)
 			}
 		case "featured_snippet", "answer_box":
-			if data.FeaturedSnippet != nil {
+			if out.FeaturedSnippet != nil {
 				continue
 			}
-			for _, sub := range subItems(item.Items) {
+			for _, sub := range parseSubItems(item.Items) {
 				if sub.Title == "" {
 					continue
 				}
-				data.FeaturedSnippet = &articles.FeaturedSnippet{
+				out.FeaturedSnippet = &articles.FeaturedSnippet{
 					Title:       sub.Title,
 					Description: sub.Description,
 				}
@@ -169,7 +175,7 @@ func parseSERPResponse(body []byte, keyword string, limit int) (*articles.Compet
 		}
 	}
 
-	return data, nil
+	return out, nil
 }
 
 type MockClient struct{}

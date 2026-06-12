@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"fmt"
 	"net/http"
+	"runtime/debug"
 	"time"
 
 	chiMiddleware "github.com/go-chi/chi/v5/middleware"
@@ -56,7 +57,7 @@ func RequestLogger(next http.Handler) http.Handler {
 				event = log.Info()
 			}
 			if rec != nil {
-				event = event.Interface("panic", rec)
+				event = event.Interface("panic", rec).Bytes("stack", debug.Stack())
 			}
 			event.
 				Str("method", r.Method).
@@ -76,6 +77,9 @@ func RequestLogger(next http.Handler) http.Handler {
 
 func generateID() string {
 	b := make([]byte, 16)
-	_, _ = rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		// Entropy source failed; fall back to a time-based id so tracing stays unique.
+		return fmt.Sprintf("%x", time.Now().UnixNano())
+	}
 	return fmt.Sprintf("%x", b)
 }

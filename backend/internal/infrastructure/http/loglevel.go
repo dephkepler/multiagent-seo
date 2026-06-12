@@ -1,6 +1,7 @@
 package http
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 
@@ -8,9 +9,22 @@ import (
 	"multiagent-seo/pkg/logger"
 )
 
-func handleGetLogLevel(w http.ResponseWriter, _ *http.Request) {
+func writeLevelJSON(ctx context.Context, w http.ResponseWriter) {
+	log := logger.New(ctx, "admin")
+	b, err := json.Marshal(map[string]string{"level": logger.CurrentLevel()})
+	if err != nil {
+		problem.Write(w, http.StatusInternalServerError, "internal error")
+		log.Error().Err(err).Msg("marshal log level response failed")
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]string{"level": logger.CurrentLevel()})
+	if _, err := w.Write(b); err != nil {
+		log.Error().Err(err).Msg("write log level response failed")
+	}
+}
+
+func handleGetLogLevel(w http.ResponseWriter, r *http.Request) {
+	writeLevelJSON(r.Context(), w)
 }
 
 func handleSetLogLevel(w http.ResponseWriter, r *http.Request) {
@@ -27,6 +41,5 @@ func handleSetLogLevel(w http.ResponseWriter, r *http.Request) {
 	}
 	l := logger.New(r.Context(), "admin")
 	l.Info().Str("level", logger.CurrentLevel()).Msg("log level changed")
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]string{"level": logger.CurrentLevel()})
+	writeLevelJSON(r.Context(), w)
 }

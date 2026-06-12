@@ -44,20 +44,16 @@ func (p *Placer) Place(ctx context.Context, html, targetURL string) (linkbuildin
 
 	anchor, original, modified, err := parseReply(reply)
 	if err != nil {
-		p.log.WarnContext(ctx, "backlink llm parse failed", "err", err, "reply_head", head(reply, 500), "target_url", targetURL)
-		return linkbuilding.BacklinkInsertion{}, err
+		return linkbuilding.BacklinkInsertion{}, fmt.Errorf("backlink llm parse: %w (reply head: %s)", err, head(reply, 300))
 	}
 	if !strings.Contains(modified, targetURL) {
-		p.log.WarnContext(ctx, "backlink llm omitted target url", "target_url", targetURL, "reply_head", head(reply, 500))
-		return linkbuilding.BacklinkInsertion{}, fmt.Errorf("backlink llm: target URL missing from modified paragraph")
+		return linkbuilding.BacklinkInsertion{}, fmt.Errorf("backlink llm: target URL missing from modified paragraph (reply head: %s)", head(reply, 300))
 	}
 	if !strings.Contains(html, original) {
-		p.log.WarnContext(ctx, "backlink llm original not in source", "original_head", head(original, 300))
-		return linkbuilding.BacklinkInsertion{}, fmt.Errorf("backlink llm: original paragraph not found verbatim in source html (model paraphrased)")
+		return linkbuilding.BacklinkInsertion{}, fmt.Errorf("backlink llm: original paragraph not found verbatim in source html, model paraphrased (original head: %s)", head(original, 200))
 	}
 
 	full := strings.Replace(html, original, modified, 1)
-	p.log.DebugContext(ctx, "backlink placed", "anchor", anchor, "target_url", targetURL)
 	return linkbuilding.BacklinkInsertion{Anchor: anchor, ModifiedHTML: full}, nil
 }
 

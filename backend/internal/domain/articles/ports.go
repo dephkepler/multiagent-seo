@@ -2,6 +2,7 @@ package articles
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -37,4 +38,13 @@ type Publisher interface {
 
 type PublisherProvider interface {
 	ForSite(ctx context.Context, siteID uuid.UUID) (Publisher, error)
+}
+
+type PromptStore interface {
+	ActiveVariants(ctx context.Context, stage string) ([]PromptVariant, error)
+	InsertVariant(ctx context.Context, v PromptVariant) (int64, error)
+	SetVariantStatus(ctx context.Context, id int64, status VariantStatus) error
+	SaveOutcome(ctx context.Context, o PromptOutcome) error
+	SelectionStats(ctx context.Context, stage string, since time.Time) ([]PromptVariantStat, error)
+	WorstOutcomes(ctx context.Context, variantID int64, since time.Time, limit int) ([]PromptFailure, error)
 }

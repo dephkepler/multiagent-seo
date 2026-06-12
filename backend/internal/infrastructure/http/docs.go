@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"multiagent-seo/internal/oapigen"
+	"multiagent-seo/pkg/logger"
 )
 
 var (
@@ -26,7 +27,7 @@ func openAPISpecJSON() ([]byte, error) {
 	return specBytes, specErr
 }
 
-func handleOpenAPISpec(w http.ResponseWriter, _ *http.Request) {
+func handleOpenAPISpec(w http.ResponseWriter, r *http.Request) {
 	b, err := openAPISpecJSON()
 	if err != nil {
 		http.Error(w, "openapi spec unavailable", http.StatusInternalServerError)
@@ -34,19 +35,28 @@ func handleOpenAPISpec(w http.ResponseWriter, _ *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Cache-Control", "public, max-age=300")
-	_, _ = w.Write(b)
+	if _, err := w.Write(b); err != nil {
+		log := logger.New(r.Context(), "docs")
+		log.Error().Err(err).Msg("write openapi spec failed")
+	}
 }
 
-func handleSwaggerUI(w http.ResponseWriter, _ *http.Request) {
+func handleSwaggerUI(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "public, max-age=300")
-	_, _ = w.Write([]byte(swaggerUIHTML))
+	if _, err := w.Write([]byte(swaggerUIHTML)); err != nil {
+		log := logger.New(r.Context(), "docs")
+		log.Error().Err(err).Msg("write swagger ui failed")
+	}
 }
 
-func handleLandingPage(w http.ResponseWriter, _ *http.Request) {
+func handleLandingPage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "public, max-age=60")
-	_, _ = w.Write([]byte(landingPageHTML))
+	if _, err := w.Write([]byte(landingPageHTML)); err != nil {
+		log := logger.New(r.Context(), "docs")
+		log.Error().Err(err).Msg("write landing page failed")
+	}
 }
 
 const swaggerUIHTML = `<!DOCTYPE html>

@@ -30,13 +30,16 @@ func New(ctx context.Context, credentialsFile, spreadsheetID, sheet, topicCol, k
 	if credentialsFile == "" || spreadsheetID == "" {
 		return nil, fmt.Errorf("sheets: credentialsFile and spreadsheetId are required")
 	}
+	if log == nil {
+		log = slog.Default()
+	}
 
-	data, err := os.ReadFile(credentialsFile)
+	credsJSON, err := os.ReadFile(credentialsFile)
 	if err != nil {
 		return nil, fmt.Errorf("read credentials: %w", err)
 	}
 
-	creds, err := google.CredentialsFromJSON(ctx, data, sheets.SpreadsheetsReadonlyScope)
+	creds, err := google.CredentialsFromJSON(ctx, credsJSON, sheets.SpreadsheetsReadonlyScope)
 	if err != nil {
 		return nil, fmt.Errorf("parse credentials: %w", err)
 	}

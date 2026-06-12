@@ -14,17 +14,9 @@ import (
 	"sync/atomic"
 	"time"
 	"unicode"
-)
 
-type Result struct {
-	AIScore          float64  `json:"ai_score"`
-	PlagiarismScore  float64  `json:"plagiarism_score"`
-	Original         bool     `json:"original"`
-	Provider         string   `json:"provider"`
-	Issues           []string `json:"issues,omitempty"`
-	SentencesFlagged []string `json:"sentences_flagged,omitempty"`
-	ReportURL        string   `json:"report_url,omitempty"`
-}
+	"multiagent-seo/internal/domain/articles"
+)
 
 const (
 	defaultModel    = "Hello-SimpleAI/chatgpt-detector-roberta"
@@ -72,7 +64,7 @@ type label struct {
 	Score float64 `json:"score"`
 }
 
-func (c *Client) Check(ctx context.Context, content string) (*Result, error) {
+func (c *Client) Check(ctx context.Context, content string) (*articles.CheckResult, error) {
 	input := content
 	if len(input) > maxInputChars {
 		input = input[:maxInputChars]
@@ -83,14 +75,17 @@ func (c *Client) Check(ctx context.Context, content string) (*Result, error) {
 		return nil, err
 	}
 
-	res := &Result{
+	res := &articles.CheckResult{
 		AIScore:         round2(aiScore),
 		PlagiarismScore: 0,
 		Original:        aiScore < c.aiThreshold,
 		Provider:        "huggingface:" + c.model,
 	}
 
-	flagged := c.flagSentences(ctx, input)
+	flagged, err := c.flagSentences(ctx, input)
+	if err != nil {
+		return nil, fmt.Errorf("flag sentences: %w", err)
+	}
 	res.SentencesFlagged = flagged
 
 	if !res.Original {
@@ -125,8 +120,11 @@ func (c *Client) score(ctx context.Context, input string) (float64, error) {
 		if doErr != nil {
 			return 0, fmt.Errorf("huggingface request: %w", doErr)
 		}
-		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		respBody, readErr := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 		resp.Body.Close()
+		if readErr != nil {
+			return 0, fmt.Errorf("read response: %w", readErr)
+		}
 
 		if resp.StatusCode == http.StatusServiceUnavailable {
 			c.log.WarnContext(ctx, "huggingface model loading, retrying",
@@ -167,10 +165,10 @@ func (c *Client) score(ctx context.Context, input string) (float64, error) {
 	return aiScore, nil
 }
 
-func (c *Client) flagSentences(ctx context.Context, input string) []string {
+func (c *Client) flagSentences(ctx context.Context, input string) ([]string, error) {
 	sentences := splitSentences(input)
 	if len(sentences) == 0 {
-		return nil
+		return nil, nil
 	}
 	if len(sentences) > maxSentencesScored {
 		sort.SliceStable(sentences, func(i, j int) bool {
@@ -188,6 +186,7 @@ func (c *Client) flagSentences(ctx context.Context, input string) []string {
 	sem := make(chan struct{}, sentenceCallParallel)
 	var wg sync.WaitGroup
 	var failures atomic.Int64
+	var firstErr atomic.Pointer[error]
 	for i, s := range sentences {
 		wg.Add(1)
 		sem <- struct{}{}
@@ -197,6 +196,7 @@ func (c *Client) flagSentences(ctx context.Context, input string) []string {
 			score, err := c.score(ctx, s)
 			if err != nil {
 				failures.Add(1)
+				firstErr.CompareAndSwap(nil, &err)
 				return
 			}
 			results[i] = scored{text: s, score: score}
@@ -204,8 +204,8 @@ func (c *Client) flagSentences(ctx context.Context, input string) []string {
 	}
 	wg.Wait()
 	if n := failures.Load(); n > 0 {
-		c.log.WarnContext(ctx, "huggingface sentence scoring failed for some sentences",
-			"failed", n, "total", len(sentences))
+		err := *firstErr.Load()
+		return nil, fmt.Errorf("scoring failed for %d/%d sentences: %w", n, len(sentences), err)
 	}
 
 	kept := results[:0]
@@ -221,13 +221,13 @@ func (c *Client) flagSentences(ctx context.Context, input string) []string {
 		kept = kept[:maxFlaggedReturned]
 	}
 	if len(kept) == 0 {
-		return nil
+		return nil, nil
 	}
 	out := make([]string, len(kept))
 	for i, r := range kept {
 		out[i] = r.text
 	}
-	return out
+	return out, nil
 }
 
 func splitSentences(text string) []string {
