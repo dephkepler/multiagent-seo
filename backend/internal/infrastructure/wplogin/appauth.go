@@ -69,7 +69,9 @@ func (a *Authenticator) IssueAppPassword(ctx context.Context, donorURL, login, p
 	if err != nil {
 		return "", fmt.Errorf("login post: %w", err)
 	}
-	resp.Body.Close()
+	if err := resp.Body.Close(); err != nil {
+		return "", fmt.Errorf("close login response: %w", err)
+	}
 
 	if !hasLoggedInCookie(jar, origin) {
 		return "", fmt.Errorf("login failed (no wordpress_logged_in cookie set)")
@@ -90,15 +92,18 @@ func (a *Authenticator) IssueAppPassword(ctx context.Context, donorURL, login, p
 func fetchNonce(ctx context.Context, client *http.Client, profileURL string) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, profileURL, nil)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("fetch nonce request: %w", err)
 	}
 	req.Header.Set("User-Agent", userAgent)
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("fetch nonce: %w", err)
 	}
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+	if err != nil {
+		return "", fmt.Errorf("read profile response: %w", err)
+	}
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("profile status %d", resp.StatusCode)
 	}
@@ -111,11 +116,14 @@ func fetchNonce(ctx context.Context, client *http.Client, profileURL string) (st
 
 func createAppPassword(ctx context.Context, client *http.Client, origin, nonce, name string) (string, error) {
 	endpoint := origin + "/wp-json/wp/v2/users/me/application-passwords"
-	bodyJSON, _ := json.Marshal(map[string]string{"name": name})
+	bodyJSON, err := json.Marshal(map[string]string{"name": name})
+	if err != nil {
+		return "", fmt.Errorf("marshal app password request: %w", err)
+	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(string(bodyJSON)))
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("create app password request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", userAgent)
@@ -123,10 +131,13 @@ func createAppPassword(ctx context.Context, client *http.Client, origin, nonce, 
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("create app password: %w", err)
 	}
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return "", fmt.Errorf("read app password response: %w", err)
+	}
 
 	if resp.StatusCode/100 != 2 {
 		return "", fmt.Errorf("status %d: %s", resp.StatusCode, snippet(body))

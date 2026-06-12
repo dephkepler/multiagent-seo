@@ -37,16 +37,17 @@ func NewArticleRepository(pool *pgxpool.Pool) *ArticleRepository {
 
 func (r *ArticleRepository) Create(ctx context.Context, in articles.CreateArticle) (int64, error) {
 	const q = `
-		INSERT INTO articles (keyword, site_id, site, status)
-		VALUES (@keyword, @site_id, @site, @status)
+		INSERT INTO articles (keyword, site_id, site, status, request_params)
+		VALUES (@keyword, @site_id, @site, @status, @request_params)
 		RETURNING id`
 
 	var id int64
 	err := r.db.QueryRow(ctx, q, pgx.NamedArgs{
-		"keyword": in.Keyword,
-		"site_id": in.SiteID,
-		"site":    in.Site,
-		"status":  articles.StatusGenerating,
+		"keyword":        in.Keyword,
+		"site_id":        in.SiteID,
+		"site":           in.Site,
+		"status":         articles.StatusGenerating,
+		"request_params": in.RequestParams,
 	}).Scan(&id)
 	if err != nil {
 		return 0, fmt.Errorf("create article: %w", mapPGError(err))
@@ -61,8 +62,8 @@ func (r *ArticleRepository) Get(ctx context.Context, id int64) (*articles.Articl
 		       COALESCE(wp_edit_url, ''),
 		       COALESCE(wp_post_url, ''),
 		       images_requested, images_resolved, images_skipped,
-		       competitor_data, check_result,
-		       created_at, updated_at
+		       competitor_data, check_result, request_params,
+		       created_at, updated_at, published_at
 		FROM articles WHERE id = @id`
 
 	row := r.db.QueryRow(ctx, q, pgx.NamedArgs{"id": id})
@@ -128,10 +129,22 @@ func (r *ArticleRepository) MarkFailed(ctx context.Context, id int64) error {
 	})
 }
 
+func (r *ArticleRepository) FailOrphanedGenerating(ctx context.Context) (int64, error) {
+	const q = `UPDATE articles SET status = @failed, updated_at = NOW() WHERE status = @generating`
+	tag, err := r.db.Exec(ctx, q, pgx.NamedArgs{
+		"failed":     articles.StatusFailed,
+		"generating": articles.StatusGenerating,
+	})
+	if err != nil {
+		return 0, fmt.Errorf("fail orphaned generating: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}
+
 func (r *ArticleRepository) MarkPublished(ctx context.Context, id int64, postURL string) error {
 	const q = `
 		UPDATE articles
-		SET status = @status, wp_post_url = @wp_post_url, updated_at = NOW()
+		SET status = @status, wp_post_url = @wp_post_url, published_at = NOW(), updated_at = NOW()
 		WHERE id = @id`
 
 	return r.exec(ctx, "mark published", q, pgx.NamedArgs{
@@ -155,8 +168,8 @@ func (r *ArticleRepository) SaveImageStats(ctx context.Context, id int64, reques
 	})
 }
 
-func (r *ArticleRepository) SaveCompetitorData(ctx context.Context, id int64, data any) error {
-	b, err := json.Marshal(data)
+func (r *ArticleRepository) SaveCompetitorData(ctx context.Context, id int64, competitor any) error {
+	b, err := json.Marshal(competitor)
 	if err != nil {
 		return fmt.Errorf("marshal competitor data: %w", err)
 	}
@@ -164,13 +177,58 @@ func (r *ArticleRepository) SaveCompetitorData(ctx context.Context, id int64, da
 	return r.exec(ctx, "save competitor data", q, pgx.NamedArgs{"data": b, "id": id})
 }
 
-func (r *ArticleRepository) SaveCheckResult(ctx context.Context, id int64, result any) error {
-	b, err := json.Marshal(result)
+func (r *ArticleRepository) SaveCheckResult(ctx context.Context, id int64, check any) error {
+	b, err := json.Marshal(check)
 	if err != nil {
 		return fmt.Errorf("marshal check result: %w", err)
 	}
 	const q = `UPDATE articles SET check_result = @result, updated_at = NOW() WHERE id = @id`
 	return r.exec(ctx, "save check result", q, pgx.NamedArgs{"result": b, "id": id})
+}
+
+func (r *ArticleRepository) SaveRevision(ctx context.Context, rev articles.Revision) (int, error) {
+	const q = `
+		INSERT INTO article_revisions
+			(article_id, version, source, content_md, content_html, seo_title, seo_description, word_count)
+		SELECT @article_id, COALESCE(MAX(version), 0) + 1, @source, @content_md, @content_html, @seo_title, @seo_description, @word_count
+		FROM article_revisions WHERE article_id = @article_id
+		RETURNING version`
+
+	var version int
+	err := r.db.QueryRow(ctx, q, pgx.NamedArgs{
+		"article_id":      rev.ArticleID,
+		"source":          string(rev.Source),
+		"content_md":      rev.ContentMD,
+		"content_html":    rev.ContentHTML,
+		"seo_title":       rev.SEOTitle,
+		"seo_description": rev.SEODescription,
+		"word_count":      rev.WordCount,
+	}).Scan(&version)
+	if err != nil {
+		return 0, fmt.Errorf("save revision: %w", mapPGError(err))
+	}
+	return version, nil
+}
+
+func (r *ArticleRepository) SaveEvent(ctx context.Context, ev articles.GenerationEvent) error {
+	const q = `
+		INSERT INTO generation_events
+			(article_id, stage, provider, model, input_tokens, output_tokens, latency_ms, ok)
+		VALUES (@article_id, @stage, @provider, @model, @input_tokens, @output_tokens, @latency_ms, @ok)`
+	_, err := r.db.Exec(ctx, q, pgx.NamedArgs{
+		"article_id":    ev.ArticleID,
+		"stage":         ev.Stage,
+		"provider":      ev.Provider,
+		"model":         ev.Model,
+		"input_tokens":  ev.InputTokens,
+		"output_tokens": ev.OutputTokens,
+		"latency_ms":    ev.LatencyMS,
+		"ok":            ev.OK,
+	})
+	if err != nil {
+		return fmt.Errorf("save generation event: %w", err)
+	}
+	return nil
 }
 
 func (r *ArticleRepository) exec(ctx context.Context, op, q string, args pgx.NamedArgs) error {
@@ -205,7 +263,10 @@ func scanArticle(row pgx.Row) (articles.Article, error) {
 		&a.UpdatedAt,
 	)
 	a.SiteID = siteID.UUID
-	return a, err
+	if err != nil {
+		return a, fmt.Errorf("scan article row: %w", err)
+	}
+	return a, nil
 }
 
 func scanArticleFull(row pgx.Row) (articles.Article, error) {
@@ -227,9 +288,14 @@ func scanArticleFull(row pgx.Row) (articles.Article, error) {
 		&a.ImagesSkipped,
 		&a.CompetitorData,
 		&a.CheckResult,
+		&a.RequestParams,
 		&a.CreatedAt,
 		&a.UpdatedAt,
+		&a.PublishedAt,
 	)
 	a.SiteID = siteID.UUID
-	return a, err
+	if err != nil {
+		return a, fmt.Errorf("scan article row: %w", err)
+	}
+	return a, nil
 }

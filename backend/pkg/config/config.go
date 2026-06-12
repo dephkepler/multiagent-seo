@@ -183,6 +183,13 @@ type CheckerConfig struct {
 	AIThreshold float64 `env:"CHECKER_AI_THRESHOLD" envDefault:"0.8"`
 	Model       string  `env:"CHECKER_MODEL"`
 	MaxCycles   int     `env:"CHECKER_MAX_CYCLES" envDefault:"3"`
+
+	Copyleaks CopyleaksConfig `envPrefix:"CHECKER_COPYLEAKS_"`
+}
+
+type CopyleaksConfig struct {
+	Email   string `env:"EMAIL"`
+	Sandbox bool   `env:"SANDBOX"`
 }
 
 type PexelsConfig struct {
@@ -215,6 +222,11 @@ type Config struct {
 	Pexels     PexelsConfig     `validate:"required"`
 	WordPress  WordPressConfig  `validate:"required"`
 	JWT        JWTConfig        `validate:"required"`
+	Prompt     PromptConfig
+}
+
+type PromptConfig struct {
+	EvolveEnabled bool `env:"PROMPT_EVOLVE_ENABLED" envDefault:"true"`
 }
 
 func Load() (Config, error) {

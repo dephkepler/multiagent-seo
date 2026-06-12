@@ -41,6 +41,8 @@ func (h *ArticlesHandler) GenerateArticle(w http.ResponseWriter, r *http.Request
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 	var body oapigen.GenerateRequest
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		log := logger.New(r.Context(), "handlers.articles")
+		log.Debug().Err(err).Msg("decode generate body")
 		problem.Write(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
@@ -55,7 +57,7 @@ func (h *ArticlesHandler) GenerateArticle(w http.ResponseWriter, r *http.Request
 
 	res, err := h.svc.Generate(r.Context(), toGenerateRequest(body))
 	if err != nil {
-		h.writeError(r.Context(), w, err)
+		h.writeError(r.Context(), w, "generate", err)
 		return
 	}
 	a := res.Article
@@ -92,7 +94,7 @@ func (h *ArticlesHandler) ListArticles(w http.ResponseWriter, r *http.Request) {
 	}
 	arts, err := h.svc.List(r.Context())
 	if err != nil {
-		h.writeError(r.Context(), w, err)
+		h.writeError(r.Context(), w, "list_articles", err)
 		return
 	}
 	out := make([]oapigen.Article, len(arts))
@@ -108,7 +110,7 @@ func (h *ArticlesHandler) GetArticle(w http.ResponseWriter, r *http.Request, id 
 	}
 	article, err := h.svc.Get(r.Context(), id)
 	if err != nil {
-		h.writeError(r.Context(), w, err)
+		h.writeError(r.Context(), w, "get_article", err)
 		return
 	}
 	response.WriteJSON(r.Context(), w, http.StatusOK, toArticle(article))
@@ -120,7 +122,7 @@ func (h *ArticlesHandler) PublishArticle(w http.ResponseWriter, r *http.Request,
 	}
 	article, err := h.svc.Publish(r.Context(), id)
 	if err != nil {
-		h.writeError(r.Context(), w, err)
+		h.writeError(r.Context(), w, "publish_article", err)
 		return
 	}
 	response.WriteJSON(r.Context(), w, http.StatusOK, toArticle(article))
@@ -134,7 +136,7 @@ func (h *ArticlesHandler) unavailable(w http.ResponseWriter) bool {
 	return false
 }
 
-func (h *ArticlesHandler) writeError(ctx context.Context, w http.ResponseWriter, err error) {
+func (h *ArticlesHandler) writeError(ctx context.Context, w http.ResponseWriter, op string, err error) {
 	switch {
 	case errors.Is(err, apparticles.ErrNoCluster):
 		problem.Write(w, http.StatusNotFound, "no keyword cluster for topic")
@@ -146,7 +148,7 @@ func (h *ArticlesHandler) writeError(ctx context.Context, w http.ResponseWriter,
 		problem.Write(w, http.StatusConflict, "article has no draft to publish")
 	default:
 		log := logger.New(ctx, "handlers.articles")
-		log.Error().Err(err).Msg("internal error")
+		log.Error().Err(err).Str("op", op).Msg("internal error")
 		problem.Write(w, http.StatusInternalServerError, "internal error")
 	}
 }

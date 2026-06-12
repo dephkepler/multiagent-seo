@@ -7,7 +7,15 @@ var (
 	}
 	ParagraphFormat = Rule{
 		ID:   "structure.paragraph_format",
-		Body: "Each paragraph: 4 to 7 sentences with varied lengths (mix short and long)",
+		Body: "Each paragraph: 2 to 7 sentences with varied lengths (mix short and long)",
+	}
+	StartsWithH1 = Rule{
+		ID:   "structure.starts_with_h1",
+		Body: "The article must begin with an H1 heading — not with the keyword or a plain sentence",
+	}
+	FAQSection = Rule{
+		ID:   "structure.faq_section",
+		Body: "Include an FAQ section near the end under an H2 heading, with 3-5 question-and-answer pairs",
 	}
 	MaxSentenceLength = Rule{
 		ID:   "structure.max_sentence_length",
@@ -52,6 +60,8 @@ func StructureGroup() Group {
 		Name: "Structure",
 		Rules: []Rule{
 			ArticleLength,
+			StartsWithH1,
+			FAQSection,
 			ParagraphFormat,
 			MaxSentenceLength,
 			ParagraphsAfterHeading,

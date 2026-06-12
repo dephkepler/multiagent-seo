@@ -43,9 +43,11 @@ func (r *fakeRepo) MarkPublished(_ context.Context, id int64, postURL string) er
 	r.arts[id].Status, r.arts[id].WPPostURL = articles.StatusPublished, postURL
 	return nil
 }
-func (r *fakeRepo) SaveImageStats(context.Context, int64, int, int, int) error { return nil }
-func (r *fakeRepo) SaveCompetitorData(context.Context, int64, any) error       { return nil }
-func (r *fakeRepo) SaveCheckResult(context.Context, int64, any) error          { return nil }
+func (r *fakeRepo) SaveImageStats(context.Context, int64, int, int, int) error   { return nil }
+func (r *fakeRepo) SaveCompetitorData(context.Context, int64, any) error         { return nil }
+func (r *fakeRepo) SaveCheckResult(context.Context, int64, any) error            { return nil }
+func (r *fakeRepo) SaveRevision(context.Context, articles.Revision) (int, error) { return 1, nil }
+func (r *fakeRepo) SaveEvent(context.Context, articles.GenerationEvent) error    { return nil }
 
 type fakeLLM struct{}
 
@@ -98,6 +100,7 @@ func TestGenerate_HappyPath(t *testing.T) {
 	repo := &fakeRepo{arts: map[int64]*articles.Article{}}
 	svc := apparticles.NewService(
 		repo, fakeLLMFactory{}, fakeSERP{}, fakeTopics{}, fakeChecker{}, fakeImages{}, fakePubProvider{},
+		nil,
 		jobrunner.NewSyncRunner(),
 		apparticles.Defaults{MinWords: 500, MaxWords: 1000, Language: "en", Provider: "groq", Model: "m", AIThreshold: 0.8, MaxCycles: 2, SERPLimit: 5},
 		nil,
@@ -124,7 +127,7 @@ func TestGenerate_NoClusterAborts(t *testing.T) {
 	repo := &fakeRepo{arts: map[int64]*articles.Article{}}
 	svc := apparticles.NewService(
 		repo, fakeLLMFactory{}, fakeSERP{}, emptyTopics{}, fakeChecker{}, fakeImages{}, fakePubProvider{},
-		jobrunner.NewSyncRunner(), apparticles.Defaults{Language: "en", Provider: "groq", Model: "m"}, nil,
+		nil, jobrunner.NewSyncRunner(), apparticles.Defaults{Language: "en", Provider: "groq", Model: "m"}, nil,
 	)
 	if _, err := svc.Generate(context.Background(), apparticles.GenerateRequest{Keyword: "unknown", SiteID: uuid.New()}); err == nil {
 		t.Fatal("expected error when no cluster found")

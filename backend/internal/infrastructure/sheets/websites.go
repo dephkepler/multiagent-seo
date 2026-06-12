@@ -49,13 +49,16 @@ func newSource(ctx context.Context, credentialsFile, spreadsheetID string, log *
 	if credentialsFile == "" || spreadsheetID == "" {
 		return nil, fmt.Errorf("sheets: credentialsFile and spreadsheetId are required")
 	}
+	if log == nil {
+		log = slog.Default()
+	}
 
-	data, err := os.ReadFile(credentialsFile)
+	credsJSON, err := os.ReadFile(credentialsFile)
 	if err != nil {
 		return nil, fmt.Errorf("read credentials: %w", err)
 	}
 
-	creds, err := google.CredentialsFromJSON(ctx, data, sheets.SpreadsheetsScope)
+	creds, err := google.CredentialsFromJSON(ctx, credsJSON, sheets.SpreadsheetsScope)
 	if err != nil {
 		return nil, fmt.Errorf("parse credentials: %w", err)
 	}
@@ -111,9 +114,9 @@ func (s *websiteSource) WriteResults(ctx context.Context, sheet string, results 
 		return nil
 	}
 
-	data := make([]*sheets.ValueRange, 0, len(results)*2)
+	valueRanges := make([]*sheets.ValueRange, 0, len(results)*2)
 	for _, r := range results {
-		data = append(data, &sheets.ValueRange{
+		valueRanges = append(valueRanges, &sheets.ValueRange{
 			Range: resultRange(sheet, r.Row),
 			Values: [][]any{{
 				r.Topic,
@@ -122,7 +125,7 @@ func (s *websiteSource) WriteResults(ctx context.Context, sheet string, results 
 			}},
 		})
 		if !r.Suitable {
-			data = append(data, &sheets.ValueRange{
+			valueRanges = append(valueRanges, &sheets.ValueRange{
 				Range:  fmt.Sprintf("%s!H%d", sheet, r.Row),
 				Values: [][]any{{""}},
 			})
@@ -131,7 +134,7 @@ func (s *websiteSource) WriteResults(ctx context.Context, sheet string, results 
 
 	req := &sheets.BatchUpdateValuesRequest{
 		ValueInputOption: "RAW",
-		Data:             data,
+		Data:             valueRanges,
 	}
 
 	_, err := s.svc.Spreadsheets.Values.
@@ -175,10 +178,6 @@ func (s *websiteSource) ListCredentials(ctx context.Context, sheet string) ([]li
 	}
 	out, rejectedUnknown, rejectedNotSuitable := parseECredentialsJoin(eResp.Values, aVerdicts)
 
-	included := make([]string, 0, len(out))
-	for _, c := range out {
-		included = append(included, fmt.Sprintf("row=%d topic=%q base=%s", c.Row, c.Topic, c.BaseURL))
-	}
 	s.log.InfoContext(ctx, "sheets credentials list",
 		"sheet", sheet,
 		"a_qualified", len(aVerdicts),
@@ -186,7 +185,6 @@ func (s *websiteSource) ListCredentials(ctx context.Context, sheet string) ([]li
 		"credentials", len(out),
 		"rejected_url_not_in_a", rejectedUnknown,
 		"rejected_not_suitable", rejectedNotSuitable,
-		"included", included,
 	)
 	return out, nil
 }
@@ -196,9 +194,9 @@ func (s *websiteSource) WriteLoginStatus(ctx context.Context, sheet string, resu
 		return nil
 	}
 
-	data := make([]*sheets.ValueRange, 0, len(results))
+	valueRanges := make([]*sheets.ValueRange, 0, len(results))
 	for _, r := range results {
-		data = append(data, &sheets.ValueRange{
+		valueRanges = append(valueRanges, &sheets.ValueRange{
 			Range:  fmt.Sprintf("%s!H%d", sheet, r.Row),
 			Values: [][]any{{r.Status}},
 		})
@@ -206,7 +204,7 @@ func (s *websiteSource) WriteLoginStatus(ctx context.Context, sheet string, resu
 
 	req := &sheets.BatchUpdateValuesRequest{
 		ValueInputOption: "RAW",
-		Data:             data,
+		Data:             valueRanges,
 	}
 
 	_, err := s.svc.Spreadsheets.Values.
@@ -248,13 +246,13 @@ func (s *websiteSource) WritePlacementStatus(ctx context.Context, sheet string, 
 	}
 
 	now := time.Now().UTC().Format("2006-01-02 15:04:05")
-	data := make([]*sheets.ValueRange, 0, len(results))
+	valueRanges := make([]*sheets.ValueRange, 0, len(results))
 	for _, r := range results {
 		entry := fmt.Sprintf("[%s] %s", now, r.Status)
 		if old := existingByRow[r.Row]; old != "" {
 			entry = entry + "\n" + old
 		}
-		data = append(data, &sheets.ValueRange{
+		valueRanges = append(valueRanges, &sheets.ValueRange{
 			Range:  fmt.Sprintf("%s!I%d", sheet, r.Row),
 			Values: [][]any{{entry}},
 		})
@@ -262,7 +260,7 @@ func (s *websiteSource) WritePlacementStatus(ctx context.Context, sheet string, 
 
 	req := &sheets.BatchUpdateValuesRequest{
 		ValueInputOption: "RAW",
-		Data:             data,
+		Data:             valueRanges,
 	}
 	if _, err := s.svc.Spreadsheets.Values.BatchUpdate(s.spreadsheetID, req).Context(ctx).Do(); err != nil {
 		return fmt.Errorf("batch update placement status in %s: %w", sheet, err)
@@ -291,9 +289,9 @@ func (s *websiteSource) ClearStaleStatuses(ctx context.Context, sheet string) er
 		return nil
 	}
 
-	data := make([]*sheets.ValueRange, 0, len(rows))
+	valueRanges := make([]*sheets.ValueRange, 0, len(rows))
 	for _, row := range rows {
-		data = append(data, &sheets.ValueRange{
+		valueRanges = append(valueRanges, &sheets.ValueRange{
 			Range:  fmt.Sprintf("%s!H%d", sheet, row),
 			Values: [][]any{{""}},
 		})
@@ -301,7 +299,7 @@ func (s *websiteSource) ClearStaleStatuses(ctx context.Context, sheet string) er
 
 	req := &sheets.BatchUpdateValuesRequest{
 		ValueInputOption: "RAW",
-		Data:             data,
+		Data:             valueRanges,
 	}
 	if _, err := s.svc.Spreadsheets.Values.BatchUpdate(s.spreadsheetID, req).Context(ctx).Do(); err != nil {
 		return fmt.Errorf("clear stale statuses in %s: %w", sheet, err)

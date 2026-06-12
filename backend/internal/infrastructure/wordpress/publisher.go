@@ -62,7 +62,7 @@ func truncate(b []byte, max int) string {
 	return string(b[:max]) + "...(truncated)"
 }
 
-func (p *Publisher) do(ctx context.Context, method, url string, body any, wantStatus int, out any) error {
+func (p *Publisher) request(ctx context.Context, method, url string, body any, wantStatus int, out any) error {
 	buf, err := json.Marshal(body)
 	if err != nil {
 		return fmt.Errorf("marshal post: %w", err)
@@ -78,13 +78,6 @@ func (p *Publisher) do(ctx context.Context, method, url string, body any, wantSt
 	start := time.Now()
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
-		p.log.ErrorContext(ctx, "wordpress request failed",
-			"site_id", p.siteID,
-			"method", method,
-			"url", url,
-			"duration_ms", time.Since(start).Milliseconds(),
-			"err", err,
-		)
 		return fmt.Errorf("wordpress request: %w", err)
 	}
 	defer resp.Body.Close()
@@ -100,15 +93,11 @@ func (p *Publisher) do(ctx context.Context, method, url string, body any, wantSt
 	limited := io.LimitReader(resp.Body, maxResponseBytes)
 
 	if resp.StatusCode != wantStatus {
-		b, _ := io.ReadAll(limited)
-		p.log.ErrorContext(ctx, "wordpress request returned unexpected status",
-			"site_id", p.siteID,
-			"method", method,
-			"url", url,
-			"status", resp.StatusCode,
-			"body", truncate(b, maxLoggedBodyBytes),
-		)
-		return fmt.Errorf("wordpress returned %d: %s", resp.StatusCode, string(b))
+		b, err := io.ReadAll(limited)
+		if err != nil {
+			return fmt.Errorf("wordpress returned %d, read response: %w", resp.StatusCode, err)
+		}
+		return fmt.Errorf("wordpress returned %d: %s", resp.StatusCode, truncate(b, maxLoggedBodyBytes))
 	}
 
 	if out == nil {
@@ -134,7 +123,7 @@ func (p *Publisher) CreateDraft(ctx context.Context, post articles.Post) (int64,
 
 	url := p.url + "/wp-json/wp/v2/posts"
 	var result wpResponse
-	if err := p.do(ctx, http.MethodPost, url, body, http.StatusCreated, &result); err != nil {
+	if err := p.request(ctx, http.MethodPost, url, body, http.StatusCreated, &result); err != nil {
 		return 0, "", err
 	}
 
@@ -163,7 +152,7 @@ func (p *Publisher) Publish(ctx context.Context, postID int64) (string, error) {
 
 	url := fmt.Sprintf("%s/wp-json/wp/v2/posts/%d", p.url, postID)
 	var result wpResponse
-	if err := p.do(ctx, http.MethodPost, url, body, http.StatusOK, &result); err != nil {
+	if err := p.request(ctx, http.MethodPost, url, body, http.StatusOK, &result); err != nil {
 		return "", err
 	}
 

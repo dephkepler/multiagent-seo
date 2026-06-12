@@ -29,6 +29,10 @@ var (
 		ID:   "style.banned_phrases",
 		Body: `Banned words and phrases: unique, comprehensive, multifaceted, "it should be noted", "it is worth mentioning", thus, aforementioned, "is" (replace with a direct verb), "currently" (replace with a specific year or fact), leverages, utilises, "in today's world", "in conclusion it can be said"`,
 	}
+	NumbersAsDigits = Rule{
+		ID:   "style.numbers_as_digits",
+		Body: `Write numbers and percentages as digits — "67%" not "sixty-seven percent", "5" not "five"`,
+	}
 )
 
 func StyleGroup() Group {
@@ -42,6 +46,7 @@ func StyleGroup() Group {
 			VariedSentenceTypes,
 			SpecificsOverGeneralizations,
 			BannedPhrases,
+			NumbersAsDigits,
 		},
 	}
 }

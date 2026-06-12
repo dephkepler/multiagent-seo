@@ -41,6 +41,8 @@ func (h *ApiTokensHandler) CreateApiToken(w http.ResponseWriter, r *http.Request
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 	var body oapigen.CreateApiTokenRequest
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		log := logger.New(r.Context(), "handlers.apitokens")
+		log.Debug().Err(err).Msg("decode create token body")
 		problem.Write(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
@@ -56,7 +58,7 @@ func (h *ApiTokensHandler) CreateApiToken(w http.ResponseWriter, r *http.Request
 			return
 		}
 		log := logger.New(r.Context(), "handlers.apitokens")
-		log.Error().Err(err).Msg("create token")
+		log.Error().Err(err).Str("op", "create_token").Msg("internal error")
 		problem.Write(w, http.StatusInternalServerError, "internal error")
 		return
 	}
@@ -78,7 +80,7 @@ func (h *ApiTokensHandler) ListApiTokens(w http.ResponseWriter, r *http.Request)
 	tokens, err := h.svc.List(r.Context(), user)
 	if err != nil {
 		log := logger.New(r.Context(), "handlers.apitokens")
-		log.Error().Err(err).Msg("list tokens")
+		log.Error().Err(err).Str("op", "list_tokens").Msg("internal error")
 		problem.Write(w, http.StatusInternalServerError, "internal error")
 		return
 	}
@@ -100,7 +102,7 @@ func (h *ApiTokensHandler) DeleteApiToken(w http.ResponseWriter, r *http.Request
 			return
 		}
 		log := logger.New(r.Context(), "handlers.apitokens")
-		log.Error().Err(err).Msg("revoke token")
+		log.Error().Err(err).Str("op", "revoke_token").Msg("internal error")
 		problem.Write(w, http.StatusInternalServerError, "internal error")
 		return
 	}

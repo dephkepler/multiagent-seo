@@ -2,6 +2,7 @@ package articles
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 
 	"github.com/google/uuid"
@@ -10,9 +11,10 @@ import (
 var ErrNotFound = errors.New("article not found")
 
 type CreateArticle struct {
-	Keyword string
-	SiteID  uuid.UUID
-	Site    string
+	Keyword       string
+	SiteID        uuid.UUID
+	Site          string
+	RequestParams json.RawMessage
 }
 
 type ArticleRepository interface {
@@ -27,4 +29,7 @@ type ArticleRepository interface {
 	SaveImageStats(ctx context.Context, id int64, requested, resolved, skipped int) error
 	SaveCompetitorData(ctx context.Context, id int64, data any) error
 	SaveCheckResult(ctx context.Context, id int64, result any) error
+
+	SaveRevision(ctx context.Context, rev Revision) (int, error)
+	SaveEvent(ctx context.Context, ev GenerationEvent) error
 }

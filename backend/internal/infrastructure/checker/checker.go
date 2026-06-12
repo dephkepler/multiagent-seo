@@ -4,21 +4,9 @@ import (
 	"context"
 	"math/rand"
 	"strings"
+
+	"multiagent-seo/internal/domain/articles"
 )
-
-type Result struct {
-	AIScore          float64  `json:"ai_score"`
-	PlagiarismScore  float64  `json:"plagiarism_score"`
-	Original         bool     `json:"original"`
-	Provider         string   `json:"provider"`
-	Issues           []string `json:"issues,omitempty"`
-	SentencesFlagged []string `json:"sentences_flagged,omitempty"`
-	ReportURL        string   `json:"report_url,omitempty"`
-}
-
-type Client interface {
-	Check(ctx context.Context, content string) (*Result, error)
-}
 
 type MockClient struct {
 	AIThreshold float64
@@ -31,7 +19,7 @@ func NewMock(aiThreshold float64) *MockClient {
 	return &MockClient{AIThreshold: aiThreshold}
 }
 
-func (m *MockClient) Check(_ context.Context, content string) (*Result, error) {
+func (m *MockClient) Check(_ context.Context, content string) (*articles.CheckResult, error) {
 	words := len(strings.Fields(content))
 	sentences := strings.Count(content, ".") + strings.Count(content, "!") + strings.Count(content, "?")
 
@@ -79,7 +67,7 @@ func (m *MockClient) Check(_ context.Context, content string) (*Result, error) {
 		slug = strings.ReplaceAll(strings.ToLower(fields[0]), " ", "-")
 	}
 
-	return &Result{
+	return &articles.CheckResult{
 		AIScore:          round2(aiScore),
 		PlagiarismScore:  round2(plagiarismScore),
 		Original:         aiScore < m.AIThreshold,

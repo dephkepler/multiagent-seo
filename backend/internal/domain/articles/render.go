@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"html"
+	"log/slog"
 	"regexp"
 	"strings"
 
@@ -23,6 +24,7 @@ type RenderOptions struct {
 	Keyword     string
 	Resolver    ImageResolver
 	Attribution bool
+	Log         *slog.Logger
 }
 
 var md = goldmark.New(
@@ -39,7 +41,7 @@ var md = goldmark.New(
 	),
 )
 
-func RenderHTML(ctx context.Context, content string, opts RenderOptions) (string, RenderStats) {
+func RenderHTML(ctx context.Context, content string, opts RenderOptions) (string, RenderStats, error) {
 	var stats RenderStats
 	var stripped string
 
@@ -59,6 +61,9 @@ func RenderHTML(ctx context.Context, content string, opts RenderOptions) (string
 			}
 			img, err := opts.Resolver.Resolve(ctx, opts.Keyword, desc, alt)
 			if err != nil {
+				if opts.Log != nil {
+					opts.Log.DebugContext(ctx, "image resolution failed, skipping placeholder", "keyword", opts.Keyword, "desc", desc, "err", err)
+				}
 				stats.ImagesFailed++
 				return ""
 			}
@@ -74,9 +79,9 @@ func RenderHTML(ctx context.Context, content string, opts RenderOptions) (string
 
 	var buf bytes.Buffer
 	if err := md.Convert([]byte(stripped), &buf); err != nil {
-		return content, stats
+		return "", stats, fmt.Errorf("render markdown: %w", err)
 	}
-	return buf.String(), stats
+	return buf.String(), stats, nil
 }
 
 func renderFigure(img ResolvedImage, alt string, attribution bool) string {

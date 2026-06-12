@@ -5,6 +5,10 @@ type Usage struct {
 	OutputTokens int `json:"output_tokens"`
 }
 
+func (u Usage) Total() int {
+	return u.InputTokens + u.OutputTokens
+}
+
 type SERPItem struct {
 	Rank        int    `json:"rank"`
 	URL         string `json:"url"`

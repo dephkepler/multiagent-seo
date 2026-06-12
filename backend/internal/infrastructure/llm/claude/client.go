@@ -70,7 +70,7 @@ func (c *codec) ParseResponse(body []byte) (string, usage.Usage, error) {
 		return "", usage.Usage{}, fmt.Errorf("decode response: %w", err)
 	}
 	if len(result.Content) == 0 {
-		return "", usage.Usage{}, fmt.Errorf("claude returned empty response")
+		return "", usage.Usage{}, fmt.Errorf("claude returned empty response: got %d content blocks, stop_reason %q", len(result.Content), result.StopReason)
 	}
 	return result.Content[0].Text, usage.Usage{
 		InputTokens:  result.Usage.InputTokens,

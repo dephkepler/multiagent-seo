@@ -153,16 +153,17 @@ func (s *Service) qualifyAll(ctx context.Context, log *slog.Logger, sheet string
 	}()
 
 	batch := make([]domain.Result, 0, resultFlushBatch)
-	flush := func() {
+	flush := func() error {
 		if len(batch) == 0 {
-			return
+			return nil
 		}
 		writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), resultWriteTimeout)
 		defer cancel()
 		if err := s.sites.WriteResults(writeCtx, sheet, batch); err != nil {
-			log.ErrorContext(ctx, "write results failed", "err", err, "batch", len(batch))
+			return fmt.Errorf("write results (batch %d): %w", len(batch), err)
 		}
 		batch = batch[:0]
+		return nil
 	}
 
 	processed := 0
@@ -170,10 +171,16 @@ func (s *Service) qualifyAll(ctx context.Context, log *slog.Logger, sheet string
 		batch = append(batch, res)
 		processed++
 		if len(batch) >= resultFlushBatch {
-			flush()
+			if err := flush(); err != nil {
+				log.ErrorContext(ctx, "website qualification stopped on write failure", "processed", processed, "total", len(sites), "err", err)
+				return
+			}
 		}
 	}
-	flush()
+	if err := flush(); err != nil {
+		log.ErrorContext(ctx, "website qualification final write failed", "processed", processed, "total", len(sites), "err", err)
+		return
+	}
 
 	if ctx.Err() != nil {
 		log.WarnContext(ctx, "website qualification aborted", "processed", processed, "total", len(sites), "err", ctx.Err())
@@ -195,7 +202,15 @@ func (s *Service) qualifyOne(ctx context.Context, log *slog.Logger, w domain.Web
 	}
 
 	sample := home
-	postURLs := s.discoverPosts(ctx, log, w.URL)
+	postURLs, err := s.discoverPosts(ctx, w.URL)
+	if err != nil {
+		if isCanceled(ctx, err) {
+			return domain.Result{}, false
+		}
+		// Graceful degradation: classify on the home page alone when post
+		// discovery fails, but keep the failure distinguishable from "no posts".
+		log.DebugContext(ctx, "posts discover failed, using home page only", "url", w.URL, "err", err)
+	}
 	if len(postURLs) > 0 {
 		extras := s.fetchPosts(ctx, log, w.URL, postURLs)
 		sample = mergePages(home, extras)
@@ -227,18 +242,17 @@ func (s *Service) qualifyOne(ctx context.Context, log *slog.Logger, w domain.Web
 	return res, true
 }
 
-func (s *Service) discoverPosts(ctx context.Context, log *slog.Logger, siteURL string) []string {
+func (s *Service) discoverPosts(ctx context.Context, siteURL string) ([]string, error) {
 	if s.posts == nil {
-		return nil
+		return nil, nil
 	}
 	dCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	urls, err := s.posts.Discover(dCtx, siteURL, maxPostsPerSite)
 	if err != nil {
-		log.WarnContext(ctx, "posts discover failed", "url", siteURL, "err", err)
-		return nil
+		return nil, fmt.Errorf("discover posts: %w", err)
 	}
-	return urls
+	return urls, nil
 }
 
 func (s *Service) fetchPosts(ctx context.Context, log *slog.Logger, siteURL string, urls []string) []domain.Page {

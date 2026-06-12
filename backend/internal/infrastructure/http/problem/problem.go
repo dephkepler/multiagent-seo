@@ -1,9 +1,12 @@
 package problem
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
+
+	"multiagent-seo/pkg/logger"
 )
 
 const contentType = "application/problem+json"
@@ -63,9 +66,24 @@ func (p *Problem) MarshalJSON() ([]byte, error) {
 }
 
 func (p *Problem) WriteTo(w http.ResponseWriter) {
+	// Marshal before committing the status so an encode failure can still fall
+	// back to a minimal static body instead of a half-written response.
+	log := logger.New(context.Background(), "problem")
+	body, err := json.Marshal(p)
+	if err != nil {
+		log.Error().Err(err).Int("status", p.Status).Msg("marshal problem response failed")
+		w.Header().Set("Content-Type", contentType)
+		w.WriteHeader(http.StatusInternalServerError)
+		if _, werr := w.Write([]byte(`{"type":"about:blank","title":"Internal Server Error","status":500}`)); werr != nil {
+			log.Error().Err(werr).Msg("write fallback problem response failed")
+		}
+		return
+	}
 	w.Header().Set("Content-Type", contentType)
 	w.WriteHeader(p.Status)
-	_ = json.NewEncoder(w).Encode(p)
+	if _, err := w.Write(body); err != nil {
+		log.Error().Err(err).Int("status", p.Status).Msg("write problem response failed")
+	}
 }
 
 func Write(w http.ResponseWriter, status int, detail string) {

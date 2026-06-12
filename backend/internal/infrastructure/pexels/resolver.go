@@ -2,6 +2,7 @@ package pexels
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"strings"
 
@@ -30,8 +31,7 @@ func (r *Resolver) Resolve(ctx context.Context, keyword, description, alt string
 
 	photos, err := r.client.SearchN(ctx, query, candidates)
 	if err != nil {
-		r.log.WarnContext(ctx, "pexels search failed", "query", query, "err", err)
-		return articles.ResolvedImage{}, err
+		return articles.ResolvedImage{}, fmt.Errorf("pexels resolve %q: %w", query, err)
 	}
 	if len(photos) == 0 {
 		return articles.ResolvedImage{}, nil

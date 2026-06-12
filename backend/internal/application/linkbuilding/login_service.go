@@ -2,6 +2,7 @@ package linkbuilding
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math/rand"
@@ -130,13 +131,17 @@ func (s *LoginService) loginAll(ctx context.Context, log *slog.Logger, sheet str
 
 		res, err := s.auth.Login(ctx, c)
 		if err != nil {
-			log.WarnContext(ctx, "login aborted (context)", "url", c.BaseURL, "err", err)
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				log.WarnContext(ctx, "login cancelled", "row", c.Row, "err", err)
+			} else {
+				log.ErrorContext(ctx, "login failed", "row", c.Row, "err", err)
+			}
 			break
 		}
 
 		processed++
 		pending = append(pending, res)
-		log.DebugContext(ctx, "site login", "url", c.BaseURL, "ok", res.OK, "status", res.Status)
+		log.DebugContext(ctx, "site login", "row", c.Row, "ok", res.OK, "status", res.Status)
 
 		if len(pending) >= loginWriteChunk {
 			if !flush() {
@@ -145,7 +150,9 @@ func (s *LoginService) loginAll(ctx context.Context, log *slog.Logger, sheet str
 		}
 	}
 
-	flush()
+	if !flush() {
+		return
+	}
 	log.InfoContext(ctx, "site login done", "processed", processed)
 }
 

@@ -71,24 +71,24 @@ func (a *Authenticator) Login(ctx context.Context, cred linkbuilding.SiteCredent
 		if ctx.Err() != nil {
 			return res, ctx.Err()
 		}
-		a.log.WarnContext(ctx, "wplogin unreachable", "url", base, "err", err)
+		a.log.DebugContext(ctx, "wplogin unreachable", "row", cred.Row, "err", err)
 		res.Status = "unreachable"
 		return res, nil
 	}
 	if status == http.StatusNotFound {
 		res.Status = "wp-login.php not found (404)"
-		a.log.WarnContext(ctx, "login failed", "url", base, "reason", "wp-login.php returns 404 — hidden/renamed login path or not WordPress; put the full login URL in the sheet")
+		a.log.DebugContext(ctx, "login failed", "row", cred.Row, "reason", "wp-login.php returns 404 — hidden/renamed login path or not WordPress; put the full login URL in the sheet")
 		return res, nil
 	}
 	if form.recaptcha {
 		res.Status = "captcha (manual: recaptcha)"
-		a.log.WarnContext(ctx, "captcha not bypassed", "url", base, "reason", "reCAPTCHA/hCaptcha needs a browser")
+		a.log.DebugContext(ctx, "captcha not bypassed", "row", cred.Row, "reason", "reCAPTCHA/hCaptcha needs a browser")
 		return res, nil
 	}
 
 	unsolvedChallenge := !form.hasMath && form.answerField != ""
 	if unsolvedChallenge {
-		a.log.WarnContext(ctx, "captcha not bypassed", "url", base, "reason", "unrecognized challenge field", "field", form.answerField)
+		a.log.DebugContext(ctx, "captcha not bypassed", "row", cred.Row, "reason", "unrecognized challenge field", "field", form.answerField)
 	}
 
 	values := url.Values{}
@@ -106,7 +106,8 @@ func (a *Authenticator) Login(ctx context.Context, cred linkbuilding.SiteCredent
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, loginURL, strings.NewReader(values.Encode()))
 	if err != nil {
-		res.Status = "invalid login request"
+		a.log.DebugContext(ctx, "wplogin build login request failed", "row", cred.Row, "err", err)
+		res.Status = "request build failed"
 		return res, nil
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -117,38 +118,46 @@ func (a *Authenticator) Login(ctx context.Context, cred linkbuilding.SiteCredent
 		if ctx.Err() != nil {
 			return res, ctx.Err()
 		}
-		a.log.WarnContext(ctx, "wplogin unreachable", "url", base, "err", err)
+		a.log.DebugContext(ctx, "wplogin unreachable", "row", cred.Row, "err", err)
 		res.Status = "unreachable"
 		return res, nil
 	}
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		if ctx.Err() != nil {
+			return res, ctx.Err()
+		}
+		a.log.DebugContext(ctx, "wplogin read login response failed", "row", cred.Row, "err", err)
+		res.Status = "unreachable"
+		return res, nil
+	}
 
 	switch {
 	case hasLoggedInCookie(jar, origin):
 		res.OK = true
 		if form.hasMath {
 			res.Status = "login ok (captcha solved)"
-			a.log.InfoContext(ctx, "captcha solved", "url", base, "answer", form.mathAnswer)
+			a.log.InfoContext(ctx, "captcha solved", "row", cred.Row, "answer", form.mathAnswer)
 		} else {
 			res.Status = "login ok"
 		}
 	case resp.StatusCode == http.StatusNotFound:
 		res.Status = "wp-login.php not found (404)"
-		a.log.WarnContext(ctx, "login failed", "url", base, "reason", "wp-login.php returns 404 — hidden/renamed login path or not WordPress")
+		a.log.DebugContext(ctx, "login failed", "row", cred.Row, "reason", "wp-login.php returns 404 — hidden/renamed login path or not WordPress")
 	case form.hasMath:
 		res.Status = "login failed (captcha)"
-		a.log.WarnContext(ctx, "login failed", "url", base, "reason", "math captcha answer rejected or bad credentials")
+		a.log.DebugContext(ctx, "login failed", "row", cred.Row, "reason", "math captcha answer rejected or bad credentials")
 	case unsolvedChallenge:
 		res.Status = "captcha (unsolved)"
-		a.log.WarnContext(ctx, "login failed", "url", base, "reason", "unsolved challenge field "+form.answerField)
+		a.log.DebugContext(ctx, "login failed", "row", cred.Row, "reason", "unsolved challenge field "+form.answerField)
 	default:
 		res.Status = "login failed"
 		reason := loginError(bytes.NewReader(body))
 		if reason == "" {
 			reason = "credentials rejected (no error message returned)"
 		}
-		a.log.WarnContext(ctx, "login failed", "url", base, "reason", reason)
+		a.log.DebugContext(ctx, "login failed", "row", cred.Row, "reason", reason)
 	}
 	return res, nil
 }

@@ -40,7 +40,7 @@ func (r *AsyncRunner) Go(parent context.Context, fn func(context.Context)) {
 		defer func() {
 			if rec := recover(); rec != nil {
 				r.log.ErrorContext(ctx, "background job panic",
-					"err", rec,
+					"panic", rec,
 					"stack", string(debug.Stack()),
 				)
 			}
