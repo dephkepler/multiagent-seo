@@ -60,6 +60,7 @@ services:
       CF_CHECKER_MODEL: ${CF_CHECKER_MODEL:-}
       # Self-evolving prompts: off by default in prod; enable only with a real AI checker.
       CF_PROMPT_EVOLVE_ENABLED: ${CF_PROMPT_EVOLVE_ENABLED:-false}
+      CF_PROMPT_HUMAN_WEIGHT: ${CF_PROMPT_HUMAN_WEIGHT:-0.65}
       CF_PEXELS_API_KEY: ${CF_PEXELS_API_KEY:-}
       CF_JWT_TTL: ${CF_JWT_TTL:-24h}
     volumes:

@@ -29,7 +29,9 @@ func (r *fakeRepo) Get(_ context.Context, id int64) (*articles.Article, error) {
 	cp := *a
 	return &cp, nil
 }
-func (r *fakeRepo) List(context.Context) ([]articles.Article, error) { return nil, nil }
+func (r *fakeRepo) List(context.Context, int, int) ([]articles.Article, int, error) {
+	return nil, 0, nil
+}
 func (r *fakeRepo) UpdateDraft(_ context.Context, id, wpPostID int64, editURL string) error {
 	a := r.arts[id]
 	a.Status, a.WPPostID, a.WPEditURL = articles.StatusDraft, wpPostID, editURL
@@ -41,6 +43,12 @@ func (r *fakeRepo) MarkFailed(_ context.Context, id int64) error {
 }
 func (r *fakeRepo) MarkPublished(_ context.Context, id int64, postURL string) error {
 	r.arts[id].Status, r.arts[id].WPPostURL = articles.StatusPublished, postURL
+	return nil
+}
+func (r *fakeRepo) SetHumanRating(_ context.Context, id int64, rating *bool) error {
+	if a := r.arts[id]; a != nil {
+		a.HumanRating = rating
+	}
 	return nil
 }
 func (r *fakeRepo) SaveImageStats(context.Context, int64, int, int, int) error   { return nil }

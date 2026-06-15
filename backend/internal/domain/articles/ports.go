@@ -47,4 +47,5 @@ type PromptStore interface {
 	SaveOutcome(ctx context.Context, o PromptOutcome) error
 	SelectionStats(ctx context.Context, stage string, since time.Time) ([]PromptVariantStat, error)
 	WorstOutcomes(ctx context.Context, variantID int64, since time.Time, limit int) ([]PromptFailure, error)
+	UpdateOutcomeReward(ctx context.Context, articleID int64, stage string, human *float64, weight float64) error
 }

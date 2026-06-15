@@ -42,6 +42,8 @@ type Article struct {
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 	PublishedAt *time.Time
+
+	HumanRating *bool // copywriter 👍/👎; nil = not rated
 }
 
 type RevisionSource string
