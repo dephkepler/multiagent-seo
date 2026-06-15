@@ -34,6 +34,7 @@ func articleDefaults(cfg config.Config) apparticles.Defaults {
 		SiteTopic:     cfg.Article.SiteTopic,
 		ExtraRules:    cfg.Article.ExtraRules,
 		IncludeImages: cfg.Pexels.Enabled,
+		HumanWeight:   cfg.Prompt.HumanWeight,
 	}
 }
 

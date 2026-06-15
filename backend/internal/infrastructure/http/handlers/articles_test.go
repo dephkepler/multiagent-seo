@@ -42,8 +42,8 @@ func (s *fakeGenerateService) Publish(context.Context, int64) (articles.Article,
 	return articles.Article{ID: 1, Status: articles.StatusPublished}, nil
 }
 
-func (s *fakeGenerateService) List(context.Context) ([]articles.Article, error) {
-	return s.arts, nil
+func (s *fakeGenerateService) List(context.Context, int, int) ([]articles.Article, int, error) {
+	return s.arts, len(s.arts), nil
 }
 
 func (s *fakeGenerateService) Get(context.Context, int64) (articles.Article, error) {
@@ -52,6 +52,7 @@ func (s *fakeGenerateService) Get(context.Context, int64) (articles.Article, err
 	}
 	return articles.Article{ID: 1, Keyword: "x", Status: articles.StatusDraft}, nil
 }
+func (s *fakeGenerateService) RateArticle(context.Context, int64, *bool) error { return nil }
 
 func newArticlesRouter(svc *fakeGenerateService) http.Handler {
 	healthHandler := handlers.NewHealthHandler(apphealth.NewService(domainhealth.NewService(stubRepo{})))

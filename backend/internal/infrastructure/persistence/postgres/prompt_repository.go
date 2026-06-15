@@ -186,6 +186,27 @@ func flaggedFromCheckResult(raw []byte) []string {
 	return cr.SentencesFlagged
 }
 
+func (r *PromptRepository) UpdateOutcomeReward(ctx context.Context, articleID int64, stage string, human *float64, weight float64) error {
+	const q = `
+		UPDATE prompt_outcomes
+		SET reward = CASE
+			WHEN @human::float8 IS NULL THEN (1 - ai_score)
+			WHEN ai_score IS NULL THEN @human::float8
+			ELSE @weight::float8 * @human::float8 + (1 - @weight::float8) * (1 - ai_score)
+		END
+		WHERE article_id = @article_id AND stage = @stage`
+	_, err := r.db.Exec(ctx, q, pgx.NamedArgs{
+		"human":      human,
+		"weight":     weight,
+		"article_id": articleID,
+		"stage":      stage,
+	})
+	if err != nil {
+		return fmt.Errorf("update outcome reward: %w", err)
+	}
+	return nil
+}
+
 func (r *PromptRepository) SetVariantStatus(ctx context.Context, id int64, status articles.VariantStatus) error {
 	const q = `UPDATE prompt_variants SET status = @status WHERE id = @id`
 	tag, err := r.db.Exec(ctx, q, pgx.NamedArgs{"status": status, "id": id})

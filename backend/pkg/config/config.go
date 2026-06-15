@@ -226,7 +226,8 @@ type Config struct {
 }
 
 type PromptConfig struct {
-	EvolveEnabled bool `env:"PROMPT_EVOLVE_ENABLED" envDefault:"true"`
+	EvolveEnabled bool    `env:"PROMPT_EVOLVE_ENABLED" envDefault:"true"`
+	HumanWeight   float64 `env:"PROMPT_HUMAN_WEIGHT" envDefault:"0.65"`
 }
 
 func Load() (Config, error) {

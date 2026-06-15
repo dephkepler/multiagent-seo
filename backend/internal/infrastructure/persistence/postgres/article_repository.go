@@ -63,7 +63,7 @@ func (r *ArticleRepository) Get(ctx context.Context, id int64) (*articles.Articl
 		       COALESCE(wp_post_url, ''),
 		       images_requested, images_resolved, images_skipped,
 		       competitor_data, check_result, request_params,
-		       created_at, updated_at, published_at
+		       created_at, updated_at, published_at, human_rating
 		FROM articles WHERE id = @id`
 
 	row := r.db.QueryRow(ctx, q, pgx.NamedArgs{"id": id})
@@ -77,19 +77,31 @@ func (r *ArticleRepository) Get(ctx context.Context, id int64) (*articles.Articl
 	return &a, nil
 }
 
-func (r *ArticleRepository) List(ctx context.Context) ([]articles.Article, error) {
+func (r *ArticleRepository) List(ctx context.Context, limit, offset int) ([]articles.Article, int, error) {
+	if limit <= 0 {
+		limit = 25
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	var total int
+	if err := r.db.QueryRow(ctx, `SELECT count(*) FROM articles`).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count articles: %w", err)
+	}
+
 	const q = `
 		SELECT id, keyword, site_id, site, status,
 		       COALESCE(wp_post_id, 0),
 		       COALESCE(wp_edit_url, ''),
 		       COALESCE(wp_post_url, ''),
 		       images_requested, images_resolved, images_skipped,
-		       created_at, updated_at
-		FROM articles ORDER BY created_at DESC`
+		       created_at, updated_at, human_rating
+		FROM articles ORDER BY created_at DESC LIMIT @limit OFFSET @offset`
 
-	rows, err := r.db.Query(ctx, q)
+	rows, err := r.db.Query(ctx, q, pgx.NamedArgs{"limit": limit, "offset": offset})
 	if err != nil {
-		return nil, fmt.Errorf("list articles: %w", err)
+		return nil, 0, fmt.Errorf("list articles: %w", err)
 	}
 	defer rows.Close()
 
@@ -97,14 +109,14 @@ func (r *ArticleRepository) List(ctx context.Context) ([]articles.Article, error
 	for rows.Next() {
 		a, err := scanArticle(rows)
 		if err != nil {
-			return nil, fmt.Errorf("scan article: %w", err)
+			return nil, 0, fmt.Errorf("scan article: %w", err)
 		}
 		list = append(list, a)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("list articles: %w", err)
+		return nil, 0, fmt.Errorf("list articles: %w", err)
 	}
-	return list, nil
+	return list, total, nil
 }
 
 func (r *ArticleRepository) UpdateDraft(ctx context.Context, id, wpPostID int64, editURL string) error {
@@ -152,6 +164,11 @@ func (r *ArticleRepository) MarkPublished(ctx context.Context, id int64, postURL
 		"wp_post_url": postURL,
 		"id":          id,
 	})
+}
+
+func (r *ArticleRepository) SetHumanRating(ctx context.Context, id int64, rating *bool) error {
+	const q = `UPDATE articles SET human_rating = @rating WHERE id = @id`
+	return r.exec(ctx, "set human rating", q, pgx.NamedArgs{"rating": rating, "id": id})
 }
 
 func (r *ArticleRepository) SaveImageStats(ctx context.Context, id int64, requested, resolved, skipped int) error {
@@ -261,6 +278,7 @@ func scanArticle(row pgx.Row) (articles.Article, error) {
 		&a.ImagesSkipped,
 		&a.CreatedAt,
 		&a.UpdatedAt,
+		&a.HumanRating,
 	)
 	a.SiteID = siteID.UUID
 	if err != nil {
@@ -292,6 +310,7 @@ func scanArticleFull(row pgx.Row) (articles.Article, error) {
 		&a.CreatedAt,
 		&a.UpdatedAt,
 		&a.PublishedAt,
+		&a.HumanRating,
 	)
 	a.SiteID = siteID.UUID
 	if err != nil {

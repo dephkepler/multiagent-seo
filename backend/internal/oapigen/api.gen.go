@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -44,6 +45,27 @@ func (e HealthResponseStatus) Valid() bool {
 	}
 }
 
+// Defines values for RateArticleRequestRating.
+const (
+	Dislike RateArticleRequestRating = "dislike"
+	Like    RateArticleRequestRating = "like"
+	None    RateArticleRequestRating = "none"
+)
+
+// Valid indicates whether the value is a known member of the RateArticleRequestRating enum.
+func (e RateArticleRequestRating) Valid() bool {
+	switch e {
+	case Dislike:
+		return true
+	case Like:
+		return true
+	case None:
+		return true
+	default:
+		return false
+	}
+}
+
 // ApiToken defines model for ApiToken.
 type ApiToken struct {
 	CreatedAt time.Time          `json:"createdAt"`
@@ -66,6 +88,7 @@ type Article struct {
 	CheckResult     *json.RawMessage    `json:"check_result,omitempty"`
 	CompetitorData  *json.RawMessage    `json:"competitor_data,omitempty"`
 	CreatedAt       time.Time           `json:"created_at"`
+	HumanRating     *bool               `json:"human_rating,omitempty"`
 	Id              int64               `json:"id"`
 	ImagesRequested *int                `json:"images_requested,omitempty"`
 	ImagesResolved  *int                `json:"images_resolved,omitempty"`
@@ -78,6 +101,12 @@ type Article struct {
 	WpEditUrl       *string             `json:"wp_edit_url,omitempty"`
 	WpPostId        *int64              `json:"wp_post_id,omitempty"`
 	WpPostUrl       *string             `json:"wp_post_url,omitempty"`
+}
+
+// ArticleList defines model for ArticleList.
+type ArticleList struct {
+	Items []Article `json:"items"`
+	Total int64     `json:"total"`
 }
 
 // CreateApiTokenRequest defines model for CreateApiTokenRequest.
@@ -198,6 +227,14 @@ type QualifyRequest struct {
 	Sheet    string  `json:"sheet" validate:"required,min=1"`
 }
 
+// RateArticleRequest defines model for RateArticleRequest.
+type RateArticleRequest struct {
+	Rating RateArticleRequestRating `json:"rating"`
+}
+
+// RateArticleRequestRating defines model for RateArticleRequest.Rating.
+type RateArticleRequestRating string
+
 // SiteLoginAccepted defines model for SiteLoginAccepted.
 type SiteLoginAccepted struct {
 	Sheet       string `json:"sheet"`
@@ -254,8 +291,17 @@ type Unauthorized = ErrorResponse
 // bearerAuthContextKey is the context key for bearerAuth security scheme
 type bearerAuthContextKey string
 
+// ListArticlesParams defines parameters for ListArticles.
+type ListArticlesParams struct {
+	Limit  *int `form:"limit,omitempty" json:"limit,omitempty"`
+	Offset *int `form:"offset,omitempty" json:"offset,omitempty"`
+}
+
 // CreateApiTokenJSONRequestBody defines body for CreateApiToken for application/json ContentType.
 type CreateApiTokenJSONRequestBody = CreateApiTokenRequest
+
+// RateArticleJSONRequestBody defines body for RateArticle for application/json ContentType.
+type RateArticleJSONRequestBody = RateArticleRequest
 
 // LoginJSONRequestBody defines body for Login for application/json ContentType.
 type LoginJSONRequestBody = LoginRequest
@@ -289,15 +335,18 @@ type ServerInterface interface {
 	// Revoke an API token
 	// (DELETE /api-tokens/{id})
 	DeleteApiToken(w http.ResponseWriter, r *http.Request, id openapi_types.UUID)
-	// List articles
+	// List articles (paginated, newest first)
 	// (GET /articles)
-	ListArticles(w http.ResponseWriter, r *http.Request)
+	ListArticles(w http.ResponseWriter, r *http.Request, params ListArticlesParams)
 	// Get an article
 	// (GET /articles/{id})
 	GetArticle(w http.ResponseWriter, r *http.Request, id int64)
 	// Publish a draft article
 	// (POST /articles/{id}/publish)
 	PublishArticle(w http.ResponseWriter, r *http.Request, id int64)
+	// Rate an article (copywriter 👍/👎)
+	// (POST /articles/{id}/rating)
+	RateArticle(w http.ResponseWriter, r *http.Request, id int64)
 	// Authenticate and receive a JWT
 	// (POST /auth/login)
 	Login(w http.ResponseWriter, r *http.Request)
@@ -358,9 +407,9 @@ func (_ Unimplemented) DeleteApiToken(w http.ResponseWriter, r *http.Request, id
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// List articles
+// List articles (paginated, newest first)
 // (GET /articles)
-func (_ Unimplemented) ListArticles(w http.ResponseWriter, r *http.Request) {
+func (_ Unimplemented) ListArticles(w http.ResponseWriter, r *http.Request, params ListArticlesParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -373,6 +422,12 @@ func (_ Unimplemented) GetArticle(w http.ResponseWriter, r *http.Request, id int
 // Publish a draft article
 // (POST /articles/{id}/publish)
 func (_ Unimplemented) PublishArticle(w http.ResponseWriter, r *http.Request, id int64) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Rate an article (copywriter 👍/👎)
+// (POST /articles/{id}/rating)
+func (_ Unimplemented) RateArticle(w http.ResponseWriter, r *http.Request, id int64) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -532,14 +587,46 @@ func (siw *ServerInterfaceWrapper) DeleteApiToken(w http.ResponseWriter, r *http
 // ListArticles operation middleware
 func (siw *ServerInterfaceWrapper) ListArticles(w http.ResponseWriter, r *http.Request) {
 
+	var err error
+	_ = err
+
 	ctx := r.Context()
 
 	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
 
 	r = r.WithContext(ctx)
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListArticlesParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", r.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "offset"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "offset", Err: err})
+		}
+		return
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.ListArticles(w, r)
+		siw.Handler.ListArticles(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -604,6 +691,38 @@ func (siw *ServerInterfaceWrapper) PublishArticle(w http.ResponseWriter, r *http
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.PublishArticle(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RateArticle operation middleware
+func (siw *ServerInterfaceWrapper) RateArticle(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64"})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RateArticle(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1009,6 +1128,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Post(options.BaseURL+"/articles/{id}/publish", wrapper.PublishArticle)
 	})
 	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/articles/{id}/rating", wrapper.RateArticle)
+	})
+	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/auth/login", wrapper.Login)
 	})
 	r.Group(func(r chi.Router) {
@@ -1148,13 +1270,14 @@ func (response DeleteApiToken404ApplicationProblemPlusJSONResponse) VisitDeleteA
 }
 
 type ListArticlesRequestObject struct {
+	Params ListArticlesParams
 }
 
 type ListArticlesResponseObject interface {
 	VisitListArticlesResponse(w http.ResponseWriter) error
 }
 
-type ListArticles200JSONResponse []Article
+type ListArticles200JSONResponse ArticleList
 
 func (response ListArticles200JSONResponse) VisitListArticlesResponse(w http.ResponseWriter) error {
 
@@ -1256,6 +1379,39 @@ func (response PublishArticle409ApplicationProblemPlusJSONResponse) VisitPublish
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RateArticleRequestObject struct {
+	Id   int64 `json:"id"`
+	Body *RateArticleJSONRequestBody
+}
+
+type RateArticleResponseObject interface {
+	VisitRateArticleResponse(w http.ResponseWriter) error
+}
+
+type RateArticle204Response struct {
+}
+
+func (response RateArticle204Response) VisitRateArticleResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type RateArticle404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response RateArticle404ApplicationProblemPlusJSONResponse) VisitRateArticleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -1749,7 +1905,7 @@ type StrictServerInterface interface {
 	// Revoke an API token
 	// (DELETE /api-tokens/{id})
 	DeleteApiToken(ctx context.Context, request DeleteApiTokenRequestObject) (DeleteApiTokenResponseObject, error)
-	// List articles
+	// List articles (paginated, newest first)
 	// (GET /articles)
 	ListArticles(ctx context.Context, request ListArticlesRequestObject) (ListArticlesResponseObject, error)
 	// Get an article
@@ -1758,6 +1914,9 @@ type StrictServerInterface interface {
 	// Publish a draft article
 	// (POST /articles/{id}/publish)
 	PublishArticle(ctx context.Context, request PublishArticleRequestObject) (PublishArticleResponseObject, error)
+	// Rate an article (copywriter 👍/👎)
+	// (POST /articles/{id}/rating)
+	RateArticle(ctx context.Context, request RateArticleRequestObject) (RateArticleResponseObject, error)
 	// Authenticate and receive a JWT
 	// (POST /auth/login)
 	Login(ctx context.Context, request LoginRequestObject) (LoginResponseObject, error)
@@ -1907,8 +2066,10 @@ func (sh *strictHandler) DeleteApiToken(w http.ResponseWriter, r *http.Request, 
 }
 
 // ListArticles operation middleware
-func (sh *strictHandler) ListArticles(w http.ResponseWriter, r *http.Request) {
+func (sh *strictHandler) ListArticles(w http.ResponseWriter, r *http.Request, params ListArticlesParams) {
 	var request ListArticlesRequestObject
+
+	request.Params = params
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.ListArticles(ctx, request.(ListArticlesRequestObject))
@@ -1975,6 +2136,39 @@ func (sh *strictHandler) PublishArticle(w http.ResponseWriter, r *http.Request, 
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(PublishArticleResponseObject); ok {
 		if err := validResponse.VisitPublishArticleResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RateArticle operation middleware
+func (sh *strictHandler) RateArticle(w http.ResponseWriter, r *http.Request, id int64) {
+	var request RateArticleRequestObject
+
+	request.Id = id
+
+	var body RateArticleJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RateArticle(ctx, request.(RateArticleRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RateArticle")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RateArticleResponseObject); ok {
+		if err := validResponse.VisitRateArticleResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -2330,56 +2524,59 @@ func (sh *strictHandler) UpdateWordpressSite(w http.ResponseWriter, r *http.Requ
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"5Fttj9s28v8qhP5/IAlOXm/a9Npz0Re7ySbd66bZ7iYXFEFg0NLYYk2RCknZ6wYG7kPcJ7xPcuCDZEmm",
-	"5IddOzncq6zFp+FvfjMczjCfg4inGWfAlAwGnwMBMuNMgvlxjuMb+JSDVPpXxJkCZv7EWUZJhBXhrJ8J",
-	"PqKQ/uUPyZluk1ECKdZ//b+AcTAI/q+/WqJvW2X/QggubtxiwXK5DIMYZCRIpicNBsElm2FKYiScAMsw",
-	"eM7ZmJLoCwhTrIzmRCUI7ohUhE2QAMlzEYEW7leuXvKcxccX7sZJgRhXaGxkWIbBO4ZzlXBB/oQvINNr",
-	"IqVGiAtEnCJHgAUIpPgUWKBHuMn0WmcZeWu+Dz4HmeAZCEUsBSMBWEF8ZgQfc5FiFQyCGCvoKZJCEAZq",
-	"kUEwCKQShE30zklc65vnJPZ1YzgF3XGtIRMwJneepmUYaDYSoRH9EJhpzSzlmLAi78dyTT76AyLD4GKf",
-	"z22vr3u7YaAKnewBhB27ERChSETBA0QC0XQoQObUYMFySvFI91Qih+ZMYXDXm/Ce+6i5fHKD569BSjwx",
-	"1qk5DIooLoYxVvghZrT7GuL9VUWY+uuzVT/CFExAmI4pnoAcOt9nidLRS3I629BJTkmWtfWZwmLORezl",
-	"gCQKWhuGfvK1QFsZq7DKpXfaPIt3xnWeDSEmapgL6p1zng0zLtVwa/yLAf4JffQvICz3VmNIbVs+O7AO",
-	"oXAPlUO3bhV+I9Zc5TgjvYjHMAHWgzslcE/hiRlk3C/WWizFDlPCfnoapvjup6enp9aBV7dk1mmX8z0X",
-	"cSZAyluioFVYTAmWB5E21EfYNZbSz9p9VzAze1W+x4x6HjOfBHEAtX3z3XfrarOI2z1UVq7D5VNr/Twf",
-	"fG5GGC+fo+9/OP0euWgBxaAwodL4+6rK7XevDRImFWZRiy9p+oOKLSqiqH+U/bDJPO34cg3f9l8BA6Ht",
-	"L4og6zqXD+Ptu9xvymOgLec2n5EYxFfhtW1TqwOW+WRiDrJhhzaxmIAaOjDMMkRBKjtUH2Ah8GIfh9zF",
-	"gnaHRoYqESATTqvKYnk6sorEueLDLB9RIpNKhxHnFDDTPYyJD0VOQbZYSUTzGIbm1B5ipQQZ5dYKWyOW",
-	"yvS14XK7Ma3su59/co6aYjbJdcjkJTe+G0aLqA5GxTB0u4kjO9pLsniaCets3t+0htsE3bvjZ69Fen7F",
-	"MxJt9m0VkjupfMT+GTBVSdW913m9smtgearn5dNA3+gmAsdQnbNigMQeadu4wobQpT2a3j6Br/iEtAdB",
-	"kHrPmD3oamfS8mWHCCYa+7arVdbq2HqbquAuIwLkLvfDLS9xxX1ttYJPvGuKIzjH0ZQSNpXt56VMAFSr",
-	"+cjhpxxy/22kSRYzUWPYZslayVMafT3CeTMDIUgMSCWAYhjjnCp0dfUamf5ozAVSCZFI5AxxRhcn6CWm",
-	"VKIRjqZIcd11eH72/Jery19/Gb5+8+LiCj3mwnw2v56geQIMQZqpxYlPS1WXs6VoxZAdpbu+efOPyxcX",
-	"N6WAxYemjHCH00yfHEFEcR57yVXqedX5/cX57eXbi9sH8IeVsNxFB8bNuSijDtO1PnYj9O7mCvEx4gz0",
-	"PxoyHQY/kmhe3FnMHPJH06YBAhYjAZpGUo+WJo2mewJTiDCkEqyQ0mdoHZREqUwO+v2M4kWWUwknCqIk",
-	"CCungiAPAUJxkzBngvQQxPyBKXpJ+Rw9RaYfwpTyeY8SqU7Qe61XCSo07EAxZ1xINE+4BBRxmqcMnaMU",
-	"qygBWYFOAnocYQk9wiQwSRSZwROEBSAlCMQ1OD4ESuAZUG2be4Zthak3Ve2z9t9yTMl4sY8DmsNoTx/U",
-	"HNkhWHsM6SQerrR5HwzvZVMRZrFp7hQmDByvIeJpCiLSjgDi3CaQdViNJWFcXyBgro/1xIQbxhC4Dk3G",
-	"WCa251gjHCW7cCQ8pMf+7d3Z1eXL379Oh10I99/or1sMqEl+nwHdEgUmCPqagotSqFa7Pt5B+D9xCviU",
-	"8M6kUI+Ue+Splj9Ti8MlHxtLmKmB6UAj9icP7pmaXK33kLlJH1BlcnJdh9J6zHtXvVougdvWw3wZo+J+",
-	"1l2xqvFva+Itw7022cWGLet+rvCwy7KOZ51xbCd7vPC2JqeLXVYhqsq9rgXt6SHKBVGL2yiB1EJvC8xn",
-	"uUpWv14We/j7+7eBKzkbHE3ralc6mLeUJWzM173r2SW6vXiDXBEdTWyqkHCGMoqVRsoECTa5GTy33Ywn",
-	"Pru+DMJgBkLamU5Pnp6cavh4BgxnJBgE356cnnxrEgMqMTvpa8tbJb4m9mTRNDNrXsbBILgiUhX1Ig1r",
-	"7eHGN6enHTX/9Vp/6au7iv5lkX7dha/V/3/nuUA40mcFchupai0YfKjr68PH5ccwkHmaYrFwu0MLPcnZ",
-	"9aWbAT1OQeEYK2wOsCfmqqD90YdAd3JIfNSxGZcexOo1tsBSFKQ65/FiJ7S6QPIX8hoRkRI5LNdU9vTB",
-	"hGg+M/C9aLFN6N///BeSeGaDVYMzYnweIqJQhNkjhUaABOiTfgYxoljZ3OkzSzCfEOWu+pXnQzsp38qG",
-	"MFspHz3W8kmIBCikA2dQuWAQ21CGswha6bAMq/bU/0zipbVvCtaB11nywnyvsaSmpWee8hjM+BRii8uz",
-	"zbiUT4V2QsWuUkOlwwKwwCkoENLMS7SY2r0UDzUG1ifXKRlW6LXp/PxoYLWvNzY4qaLTUXyUe0+yhYs6",
-	"oxQVGwgRgzlIhcZE7MpW46rwapOlRopPjoLuZ0lAL2CvoMDrvnBthZIHlRWAB+TyK1CayLjcqge0hyRx",
-	"W+21TmOjmn6lfncMAdpOq2srxpdlgxNiL9+mB/xt84DyUedOBHKCIYxigceqm0lGx7lK+lRf4Y1ivZCb",
-	"G/6B4oJa9mCrcOD0odduf62pMQam9OyFqnc83vWQp5uH1B6lGoWXGq3KgLDJyUegw0eMbOxeKlYTwirV",
-	"heHQrtLyZUfFjB5euc2XA1vp95sHX77MmHlU/Gp1YymycD+ijFOKXl28RXUXaPKTrkq7LxkOdnT8lkMO",
-	"lcPDCLu6j7V7AJuW/rPr6P3ZdTmgLTZq8R5N3YKYkQh0lGtFNlnw706//TIyFK8A0GM4mZwgff0aYQko",
-	"ZwJwlOir+5OGKdv5kXnCW9GH/ey0QQmbjnJCY8ImW/nlt/yWKBdFPrwFryV4j2zC61lvj1ZMh6r5guhJ",
-	"osDZqtbWXBClgJWFBHNrMhnVQ1/arvgEEeaWfM9FfC1ASmRS64gSqS+bWnorziOJIgGxdviYuuxzNXi+",
-	"ImyKzh0/fJTJKI6gNyrq/e3kqb8LOBB9/I8PjsyhlrcZvrBO90yBqQaZTEnAw6YqkR5JdOkUdnBOGTkR",
-	"RoWatSCuMMFzscYywpB2SUjmxNTrbYnjkTRpC6mQIcgOHPtka7nt3HLF3veuLnwgcjVKykdmVbPS7qGT",
-	"7eKmr1DK/u8NaWpFX84xuQ1YMqCihr/ukjYwI5fmGtiR6Hhnehwjy2GqKFumOKzcu2c0crcbT9hdPqXp",
-	"Wdp3gVIrlxwHnXqFZkuYGGc9mxKMrTfZA7KGP6qAt2qxMGxKUte3cMhMtbeceuR0dUNhrcnqvS8jB0tD",
-	"nMUxwg29d6rdYz5bZqTXKbEpLW3HHTotfcvHylnOblCErdewDVs9PR7xCg9y6FTobrgdPrlvapFRsq4d",
-	"zxuMA7mnjtceR06fbWSJFTX++nIlVrAdPZRZQMwKdjUMAqeAuCDmIirtCzceSfR4zsVUIh3+sQVKuFT9",
-	"jAv1xNX7B0E/WIZrkyk8sY9NbJ/iRW2aU0XwBJjqSeAnP0RAqX1cq7fnRG9OdkVmwPRGbO4Qx8T8MkkI",
-	"ubIMl4RYF6aSf7RpJDfAILvefQWcqxcQNkH25WpltSa8Hgwu3pSZrMqrAr2J1cQVaYqc1vpML3R823Px",
-	"LfpUjclX4+uR7fokV5xNepTMIDYXQh0EmnLjFBaVbVWKjcuPy/8EAAD//w==",
+	"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",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

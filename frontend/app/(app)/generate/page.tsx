@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
 import { Button } from '@/components/ui/button'
@@ -39,6 +39,7 @@ interface Article {
   updated_at?: string
   wp_edit_url?: string
   wp_post_id?: number
+  human_rating?: boolean | null
 }
 
 // Статусы, после которых статья больше не меняется — на них опрос /articles можно остановить.
@@ -46,6 +47,8 @@ const TERMINAL_STATUSES = ['draft', 'published', 'failed']
 
 export default function GeneratePage() {
   const qc = useQueryClient()
+  const [page, setPage] = useState(0)
+  const [pageSize, setPageSize] = useState(25)
   const [form, setForm] = useState<GenerateRequest>({
     keyword: '',
     site_id: '',
@@ -73,11 +76,10 @@ export default function GeneratePage() {
   }, [siteOptions, form.site_id])
 
   const articles = useQuery({
-    queryKey: ['articles'],
-    queryFn: () => api<Article[] | { items: Article[] }>('/articles'),
+    queryKey: ['articles', page, pageSize],
+    queryFn: () => api<{ items: Article[]; total: number }>(`/articles?limit=${pageSize}&offset=${page * pageSize}`),
     refetchInterval: (query) => {
-      const data = query.state.data
-      const list: Article[] = Array.isArray(data) ? data : data?.items || []
+      const list = query.state.data?.items || []
       const busy = list.some((a) => !TERMINAL_STATUSES.includes(a.status))
       return busy ? 5_000 : false
     },
@@ -85,8 +87,11 @@ export default function GeneratePage() {
     // and the busy-poll above covers generations. Without this the 1s elapsed
     // timer's re-renders trip the global 30s staleTime into background refetches.
     staleTime: Infinity,
+    placeholderData: keepPreviousData,
   })
-  const items: Article[] = Array.isArray(articles.data) ? articles.data : (articles.data as any)?.items || []
+  const items: Article[] = articles.data?.items || []
+  const total = articles.data?.total || 0
+  const totalPages = Math.max(1, Math.ceil(total / pageSize))
   const busy = items.some((a) => !TERMINAL_STATUSES.includes(a.status))
 
   const create = useMutation({
@@ -105,6 +110,13 @@ export default function GeneratePage() {
       toast.success('Publish queued')
       qc.invalidateQueries({ queryKey: ['articles'] })
     },
+    onError: (e: Error) => toast.error(e.message),
+  })
+
+  const rate = useMutation({
+    mutationFn: ({ id, rating }: { id: number; rating: 'like' | 'dislike' | 'none' }) =>
+      api(`/articles/${id}/rating`, { method: 'POST', body: JSON.stringify({ rating }) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['articles'] }),
     onError: (e: Error) => toast.error(e.message),
   })
 
@@ -194,9 +206,23 @@ export default function GeneratePage() {
       <Card>
         <div className='mb-4 flex items-center justify-between'>
           <h2 className='text-base font-semibold'>Articles</h2>
-          <Button variant='secondary' size='sm' onClick={() => articles.refetch()}>
-            Refresh
-          </Button>
+          <div className='flex items-center gap-2'>
+            <select
+              value={pageSize}
+              onChange={(e) => {
+                setPageSize(+e.target.value)
+                setPage(0)
+              }}
+              className='rounded border border-gray-200 px-2 py-1 text-sm'
+            >
+              <option value={25}>25 / page</option>
+              <option value={50}>50 / page</option>
+              <option value={100}>100 / page</option>
+            </select>
+            <Button variant='secondary' size='sm' onClick={() => articles.refetch()}>
+              Refresh
+            </Button>
+          </div>
         </div>
         <div className='overflow-x-auto'>
           <table className='w-full text-sm'>
@@ -208,13 +234,14 @@ export default function GeneratePage() {
                 <th className='py-2 pr-4'>Status</th>
                 <th className='py-2 pr-4'>Created</th>
                 <th className='py-2 pr-4'>Elapsed</th>
+                <th className='py-2 pr-4'>Rating</th>
                 <th className='py-2'>WordPress</th>
               </tr>
             </thead>
             <tbody>
               {items.length === 0 && (
                 <tr>
-                  <td colSpan={7} className='py-6 text-center text-gray-400'>
+                  <td colSpan={8} className='py-6 text-center text-gray-400'>
                     {articles.isLoading ? 'Loading…' : 'No articles yet'}
                   </td>
                 </tr>
@@ -233,6 +260,9 @@ export default function GeneratePage() {
                     </td>
                     <td className='py-2 pr-4 text-gray-500'>{new Date(a.created_at).toLocaleString()}</td>
                     <td className='py-2 pr-4 text-gray-500'>{elapsed}</td>
+                    <td className='py-2 pr-4'>
+                      <RatingButtons rating={a.human_rating} onRate={(r) => rate.mutate({ id: a.id, rating: r })} disabled={rate.isPending} />
+                    </td>
                     <td className='py-2'>
                       <WpActions article={a} siteUrl={site?.url} onPublish={(id) => publish.mutate(id)} publishing={publish.isPending} />
                     </td>
@@ -241,6 +271,28 @@ export default function GeneratePage() {
               })}
             </tbody>
           </table>
+        </div>
+        <div className='mt-4 flex items-center justify-between text-sm text-gray-500'>
+          <span>{total} total</span>
+          <div className='flex items-center gap-3'>
+            <button
+              onClick={() => setPage((p) => Math.max(0, p - 1))}
+              disabled={page === 0}
+              className='hover:underline disabled:opacity-40'
+            >
+              ← Prev
+            </button>
+            <span>
+              Page {page + 1} / {totalPages}
+            </span>
+            <button
+              onClick={() => setPage((p) => p + 1)}
+              disabled={page + 1 >= totalPages}
+              className='hover:underline disabled:opacity-40'
+            >
+              Next →
+            </button>
+          </div>
         </div>
       </Card>
     </div>
@@ -298,6 +350,37 @@ function WpActions({
           publish
         </button>
       )}
+    </span>
+  )
+}
+
+function RatingButtons({
+  rating,
+  onRate,
+  disabled,
+}: {
+  rating?: boolean | null
+  onRate: (rating: 'like' | 'dislike' | 'none') => void
+  disabled: boolean
+}) {
+  return (
+    <span className='space-x-1 text-base'>
+      <button
+        onClick={() => onRate(rating === true ? 'none' : 'like')}
+        disabled={disabled}
+        title={rating === true ? 'Remove like' : 'Like'}
+        className={`transition ${rating === true ? 'opacity-100' : 'opacity-30 hover:opacity-100'} disabled:opacity-20`}
+      >
+        👍
+      </button>
+      <button
+        onClick={() => onRate(rating === false ? 'none' : 'dislike')}
+        disabled={disabled}
+        title={rating === false ? 'Remove dislike' : 'Dislike'}
+        className={`transition ${rating === false ? 'opacity-100' : 'opacity-30 hover:opacity-100'} disabled:opacity-20`}
+      >
+        👎
+      </button>
     </span>
   )
 }
