@@ -22,8 +22,9 @@ import (
 type generateService interface {
 	Generate(ctx context.Context, req apparticles.GenerateRequest) (apparticles.GenerateResult, error)
 	Publish(ctx context.Context, id int64) (articles.Article, error)
-	List(ctx context.Context) ([]articles.Article, error)
+	List(ctx context.Context, limit, offset int) ([]articles.Article, int, error)
 	Get(ctx context.Context, id int64) (articles.Article, error)
+	RateArticle(ctx context.Context, id int64, rating *bool) error
 }
 
 type ArticlesHandler struct {
@@ -88,20 +89,27 @@ func (h *ArticlesHandler) GenerateArticle(w http.ResponseWriter, r *http.Request
 	response.WriteJSON(r.Context(), w, http.StatusAccepted, accepted)
 }
 
-func (h *ArticlesHandler) ListArticles(w http.ResponseWriter, r *http.Request) {
+func (h *ArticlesHandler) ListArticles(w http.ResponseWriter, r *http.Request, params oapigen.ListArticlesParams) {
 	if h.unavailable(w) {
 		return
 	}
-	arts, err := h.svc.List(r.Context())
+	limit, offset := 25, 0
+	if params.Limit != nil {
+		limit = *params.Limit
+	}
+	if params.Offset != nil {
+		offset = *params.Offset
+	}
+	arts, total, err := h.svc.List(r.Context(), limit, offset)
 	if err != nil {
 		h.writeError(r.Context(), w, "list_articles", err)
 		return
 	}
-	out := make([]oapigen.Article, len(arts))
+	items := make([]oapigen.Article, len(arts))
 	for i, a := range arts {
-		out[i] = toArticle(a)
+		items[i] = toArticle(a)
 	}
-	response.WriteJSON(r.Context(), w, http.StatusOK, out)
+	response.WriteJSON(r.Context(), w, http.StatusOK, oapigen.ArticleList{Items: items, Total: int64(total)})
 }
 
 func (h *ArticlesHandler) GetArticle(w http.ResponseWriter, r *http.Request, id int64) {
@@ -126,6 +134,31 @@ func (h *ArticlesHandler) PublishArticle(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	response.WriteJSON(r.Context(), w, http.StatusOK, toArticle(article))
+}
+
+func (h *ArticlesHandler) RateArticle(w http.ResponseWriter, r *http.Request, id int64) {
+	if h.unavailable(w) {
+		return
+	}
+	var body oapigen.RateArticleRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		problem.Write(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	var rating *bool
+	switch body.Rating {
+	case oapigen.Like:
+		v := true
+		rating = &v
+	case oapigen.Dislike:
+		v := false
+		rating = &v
+	}
+	if err := h.svc.RateArticle(r.Context(), id, rating); err != nil {
+		h.writeError(r.Context(), w, "rate_article", err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *ArticlesHandler) unavailable(w http.ResponseWriter) bool {
@@ -178,11 +211,12 @@ func toGenerateRequest(body oapigen.GenerateRequest) apparticles.GenerateRequest
 
 func toArticle(a articles.Article) oapigen.Article {
 	out := oapigen.Article{
-		Id:        a.ID,
-		Keyword:   a.Keyword,
-		Status:    string(a.Status),
-		CreatedAt: a.CreatedAt,
-		UpdatedAt: a.UpdatedAt,
+		Id:          a.ID,
+		Keyword:     a.Keyword,
+		Status:      string(a.Status),
+		CreatedAt:   a.CreatedAt,
+		UpdatedAt:   a.UpdatedAt,
+		HumanRating: a.HumanRating,
 	}
 	if a.SiteID != uuid.Nil {
 		site := a.SiteID

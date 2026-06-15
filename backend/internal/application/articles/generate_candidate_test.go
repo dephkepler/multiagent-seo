@@ -18,9 +18,10 @@ type fakePromptStore struct {
 	statsErr  error
 	failures  []articles.PromptFailure
 	failErr   error
-	insertErr error
-	inserted  []articles.PromptVariant
-	statuses  map[int64]articles.VariantStatus
+	insertErr  error
+	inserted   []articles.PromptVariant
+	statuses   map[int64]articles.VariantStatus
+	lastReward *rewardUpdate
 }
 
 func (f *fakePromptStore) ActiveVariants(context.Context, string) ([]articles.PromptVariant, error) {
@@ -46,6 +47,17 @@ func (f *fakePromptStore) SelectionStats(context.Context, string, time.Time) ([]
 }
 func (f *fakePromptStore) WorstOutcomes(context.Context, int64, time.Time, int) ([]articles.PromptFailure, error) {
 	return f.failures, f.failErr
+}
+type rewardUpdate struct {
+	articleID int64
+	stage     string
+	human     *float64
+	weight    float64
+}
+
+func (f *fakePromptStore) UpdateOutcomeReward(_ context.Context, articleID int64, stage string, human *float64, weight float64) error {
+	f.lastReward = &rewardUpdate{articleID, stage, human, weight}
+	return nil
 }
 
 func evolveServiceWith(ps articles.PromptStore, f articles.LLMFactory) *apparticles.Service {

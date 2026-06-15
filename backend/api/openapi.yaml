@@ -271,16 +271,25 @@ paths:
       security:
         - bearerAuth: [ ]
       tags: [ Articles ]
-      summary: List articles
+      summary: List articles (paginated, newest first)
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 25
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
       responses:
         "200":
-          description: All articles, newest first
+          description: A page of articles, newest first
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/Article"
+                $ref: "#/components/schemas/ArticleList"
 
   /articles/{id}:
     parameters:
@@ -331,6 +340,32 @@ paths:
           $ref: "#/components/responses/NotFound"
         "409":
           $ref: "#/components/responses/Conflict"
+
+  /articles/{id}/rating:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+    post:
+      operationId: rateArticle
+      security:
+        - bearerAuth: [ ]
+      tags: [ Articles ]
+      summary: Rate an article (copywriter 👍/👎)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RateArticleRequest"
+      responses:
+        "204":
+          description: Rated
+        "404":
+          $ref: "#/components/responses/NotFound"
 
   /linkbuilding/qualify:
     post:
@@ -435,6 +470,24 @@ components:
             $ref: "#/components/schemas/ErrorResponse"
 
   schemas:
+    ArticleList:
+      type: object
+      required: [ items, total ]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Article"
+        total:
+          type: integer
+          format: int64
+    RateArticleRequest:
+      type: object
+      required: [ rating ]
+      properties:
+        rating:
+          type: string
+          enum: [ like, dislike, none ]
     QualifyRequest:
       type: object
       required: [ sheet, accepted_topics ]
@@ -656,6 +709,9 @@ components:
         updated_at:
           type: string
           format: date-time
+        human_rating:
+          type: boolean
+          nullable: true
 
     LoginRequest:
       type: object

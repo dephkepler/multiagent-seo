@@ -38,6 +38,7 @@ type Defaults struct {
 	SiteTopic     string
 	ExtraRules    string
 	IncludeImages bool
+	HumanWeight   float64
 }
 
 type GenerateRequest struct {
@@ -455,6 +456,32 @@ func (s *Service) GenerateCandidate(ctx context.Context) {
 	s.log.InfoContext(ctx, "evolve: generated new candidate", "id", id, "parent", champion.ID, "failures", len(failures))
 }
 
+func (s *Service) RateArticle(ctx context.Context, articleID int64, rating *bool) error {
+	if err := s.repo.SetHumanRating(ctx, articleID, rating); err != nil {
+		return fmt.Errorf("set human rating: %w", err)
+	}
+	if s.prompts == nil {
+		return nil
+	}
+
+	var human *float64
+	if rating != nil {
+		v := 0.0
+		if *rating {
+			v = 1.0
+		}
+		human = &v
+	}
+	weight := s.defaults.HumanWeight
+	if weight <= 0 || weight > 1 {
+		weight = 0.65
+	}
+	if err := s.prompts.UpdateOutcomeReward(ctx, articleID, articles.PromptStageWriter, human, weight); err != nil {
+		return fmt.Errorf("update outcome reward: %w", err)
+	}
+	return nil
+}
+
 func (s *Service) recordWriterOutcome(
 	ctx context.Context,
 	log *slog.Logger,
@@ -860,12 +887,12 @@ func (s *Service) publish(ctx context.Context, log *slog.Logger, articleID int64
 	return *updated, nil
 }
 
-func (s *Service) List(ctx context.Context) ([]articles.Article, error) {
-	arts, err := s.repo.List(ctx)
+func (s *Service) List(ctx context.Context, limit, offset int) ([]articles.Article, int, error) {
+	arts, total, err := s.repo.List(ctx, limit, offset)
 	if err != nil {
-		return nil, fmt.Errorf("list articles: %w", err)
+		return nil, 0, fmt.Errorf("list articles: %w", err)
 	}
-	return arts, nil
+	return arts, total, nil
 }
 
 func (s *Service) Get(ctx context.Context, id int64) (articles.Article, error) {
