@@ -44,10 +44,3 @@ implementations in `infrastructure/persistence/postgres/<feature>_repository.go`
   compose env in gitignored `devops/.env`. Migrations are run from the host, not
   as a compose service.
 
-## Reference
-
-For full conventions (OpenAPI validation-tag flow, logger `module` naming,
-RFC 7807 responses, and the RLS/multi-tenancy pattern if we ever adopt it) see:
-
-- `/Users/user/work/GO2/go2-zero-backend/AGENTS.md`
-- `/Users/user/work/GO2/go2-zero-backend/CLAUDE.md`
