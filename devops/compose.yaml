@@ -17,8 +17,21 @@ services:
       timeout: 3s
       retries: 20
 
-  # Migrations are applied separately (host: `make migrate-up`), not as a compose
-  # service — matches the reference, whose compose holds only infra services.
+  # Runs all pending DB migrations on every `up`, then exits. The app waits for it
+  # to finish, so schema is always in sync with the deployed code — no manual step.
+  migrate:
+    image: migrate/migrate
+    volumes:
+      - ../backend/migrations:/migrations
+    command:
+      - -path=/migrations
+      - -database=postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
+      - up
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
   app:
     build:
       context: ../backend
@@ -69,6 +82,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
 
   frontend:
     build:
