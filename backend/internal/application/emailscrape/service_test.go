@@ -62,7 +62,7 @@ func TestScrapeEmails_HomeAndContactPage(t *testing.T) {
 		{Row: 2, URL: "http://b.com"},
 	}}
 	fetcher := &fakeFetcher{pages: map[string]domain.Page{
-		"http://a.com":         {URL: "http://a.com", HTML: `info@a.com <a href="/contact">c</a>`, Links: []string{"/contact"}},
+		"http://a.com":         {URL: "http://a.com", HTML: `info@a.com <a href="/contact">c</a>`, Links: []domain.Link{{Href: "/contact"}}},
 		"http://a.com/contact": {URL: "http://a.com/contact", HTML: `sales@a.com`},
 		"http://b.com":         {URL: "http://b.com", HTML: `nothing useful here`},
 	}}

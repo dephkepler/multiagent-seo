@@ -19,8 +19,13 @@ type EmailRecord struct {
 	SourcePage string
 }
 
+type Link struct {
+	Href string
+	Text string
+}
+
 type Page struct {
 	URL   string
 	HTML  string
-	Links []string
+	Links []Link
 }

@@ -22,7 +22,7 @@ const (
 	maxConcurrentSites = 15
 	resultFlushBatch   = 50
 	resultWriteTimeout = 30 * time.Second
-	maxContactPages    = 4
+	maxContactPages    = 8
 	perHostRPS         = 1.0
 	perHostBurst       = 1
 	maxStatusReason    = 200
@@ -31,8 +31,11 @@ const (
 var ErrNoSheet = errors.New("sheet name is required")
 
 var contactKeywords = []string{
-	"contact", "kontakt", "contacto", "contatti", "about", "über", "uber",
-	"impressum", "legal", "privacy", "datenschutz",
+	"contact", "kontakt", "kontakty", "contato", "contacto", "contatti", "contacter",
+	"about", "über", "uber", "impressum", "imprint", "legal", "mentions", "aviso",
+	"privacy", "datenschutz",
+	// visible-text keywords (matched against anchor text, often non-latin)
+	"контакт", "связ", "о нас", "о компании", "реквизит",
 }
 
 type Service struct {
@@ -224,11 +227,11 @@ func pickContactLinks(page domain.Page, max int) []string {
 	}
 	seen := make(map[string]struct{})
 	var out []string
-	for _, href := range page.Links {
-		if !containsAny(strings.ToLower(href), contactKeywords) {
+	for _, link := range page.Links {
+		if !containsAny(strings.ToLower(link.Href), contactKeywords) && !containsAny(strings.ToLower(link.Text), contactKeywords) {
 			continue
 		}
-		ref, err := url.Parse(href)
+		ref, err := url.Parse(link.Href)
 		if err != nil {
 			continue
 		}

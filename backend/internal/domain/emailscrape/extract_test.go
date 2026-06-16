@@ -1,6 +1,7 @@
 package emailscrape
 
 import (
+	"encoding/hex"
 	"slices"
 	"testing"
 )
@@ -44,5 +45,25 @@ func TestExtractEmails(t *testing.T) {
 				t.Errorf("ExtractEmails() = %v, want %v", got, c.want)
 			}
 		})
+	}
+}
+
+func TestExtractEmails_Obfuscated(t *testing.T) {
+	got := ExtractEmails("write to info [at] firma [dot] de please")
+	if !slices.Contains(got, "info@firma.de") {
+		t.Errorf("got %v, want contains info@firma.de", got)
+	}
+}
+
+func TestExtractEmails_Cloudflare(t *testing.T) {
+	const email = "hi@firm.de"
+	key := byte(0x42)
+	enc := []byte{key}
+	for i := 0; i < len(email); i++ {
+		enc = append(enc, email[i]^key)
+	}
+	html := `<a class="__cf_email__" data-cfemail="` + hex.EncodeToString(enc) + `">[email&#160;protected]</a>`
+	if got := ExtractEmails(html); !slices.Contains(got, email) {
+		t.Errorf("got %v, want contains %s", got, email)
 	}
 }

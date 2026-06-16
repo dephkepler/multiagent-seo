@@ -77,19 +77,17 @@ func (f *Fetcher) Fetch(ctx context.Context, rawURL string) (emailscrape.Page, e
 	return emailscrape.Page{URL: rawURL, HTML: string(body), Links: extractLinks(string(body))}, nil
 }
 
-func extractLinks(body string) []string {
+func extractLinks(body string) []emailscrape.Link {
 	root, err := html.Parse(strings.NewReader(body))
 	if err != nil {
 		return nil
 	}
-	var links []string
+	var links []emailscrape.Link
 	var walk func(n *html.Node)
 	walk = func(n *html.Node) {
 		if n.Type == html.ElementNode && n.Data == "a" {
-			for _, a := range n.Attr {
-				if a.Key == "href" {
-					links = append(links, a.Val)
-				}
+			if href, ok := attr(n, "href"); ok && href != "" {
+				links = append(links, emailscrape.Link{Href: href, Text: nodeText(n)})
 			}
 		}
 		for c := n.FirstChild; c != nil; c = c.NextSibling {
@@ -98,4 +96,28 @@ func extractLinks(body string) []string {
 	}
 	walk(root)
 	return links
+}
+
+func attr(n *html.Node, key string) (string, bool) {
+	for _, a := range n.Attr {
+		if a.Key == key {
+			return a.Val, true
+		}
+	}
+	return "", false
+}
+
+func nodeText(n *html.Node) string {
+	var b strings.Builder
+	var walk func(*html.Node)
+	walk = func(n *html.Node) {
+		if n.Type == html.TextNode {
+			b.WriteString(n.Data)
+		}
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			walk(c)
+		}
+	}
+	walk(n)
+	return strings.TrimSpace(b.String())
 }
