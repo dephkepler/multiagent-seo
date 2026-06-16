@@ -42,6 +42,20 @@ interface Article {
   human_rating?: boolean | null
 }
 
+interface ArticleDetail extends Article {
+  published_at?: string
+  ai_score?: number
+  reward?: number
+  quality_ok?: boolean
+  humanize_cycles?: number
+  tokens?: number
+  images_requested?: number
+  images_resolved?: number
+  images_skipped?: number
+  request_params?: Record<string, any>
+  check_result?: Record<string, any>
+}
+
 // Статусы, после которых статья больше не меняется — на них опрос /articles можно остановить.
 const TERMINAL_STATUSES = ['draft', 'published', 'failed']
 
@@ -49,6 +63,9 @@ export default function GeneratePage() {
   const qc = useQueryClient()
   const [page, setPage] = useState(0)
   const [pageSize, setPageSize] = useState(25)
+  const [massMode, setMassMode] = useState(false)
+  const [count, setCount] = useState(30)
+  const [infoId, setInfoId] = useState<number | null>(null)
   const [form, setForm] = useState<GenerateRequest>({
     keyword: '',
     site_id: '',
@@ -120,6 +137,33 @@ export default function GeneratePage() {
     onError: (e: Error) => toast.error(e.message),
   })
 
+  const batch = useMutation({
+    mutationFn: (body: { count: number } & Partial<GenerateRequest>) =>
+      api<{ count: number; article_ids: number[] }>('/generate/batch', { method: 'POST', body: JSON.stringify(body) }),
+    onSuccess: (res) => {
+      toast.success(`Queued ${res.count} articles`)
+      qc.invalidateQueries({ queryKey: ['articles'] })
+    },
+    onError: (e: Error) => toast.error(e.message),
+  })
+
+  const detail = useQuery({
+    queryKey: ['article', infoId],
+    queryFn: () => api<ArticleDetail>(`/articles/${infoId}`),
+    enabled: infoId != null,
+    staleTime: 0,
+    refetchOnMount: 'always',
+  })
+
+  useEffect(() => {
+    if (infoId == null) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setInfoId(null)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [infoId])
+
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
     if (!busy) return
@@ -136,16 +180,44 @@ export default function GeneratePage() {
   return (
     <div className='space-y-6'>
       <Card>
+        <div className='mb-4 flex items-center gap-2 text-sm'>
+          <button
+            type='button'
+            onClick={() => setMassMode(false)}
+            className={`rounded px-3 py-1 ${!massMode ? 'bg-sky-100 text-sky-800 font-medium' : 'text-gray-500 hover:bg-gray-100'}`}
+          >
+            Single
+          </button>
+          <button
+            type='button'
+            onClick={() => setMassMode(true)}
+            className={`rounded px-3 py-1 ${massMode ? 'bg-sky-100 text-sky-800 font-medium' : 'text-gray-500 hover:bg-gray-100'}`}
+          >
+            Mass
+          </button>
+        </div>
         <form
           onSubmit={(e) => {
             e.preventDefault()
-            create.mutate(form)
+            if (massMode) {
+              const { keyword, ...shared } = form
+              const n = Math.max(1, Math.min(100, Math.floor(count) || 1))
+              batch.mutate({ count: n, ...shared })
+            } else {
+              create.mutate(form)
+            }
           }}
           className='grid grid-cols-1 gap-4 md:grid-cols-3 lg:grid-cols-5'
         >
-          <Field label='Keyword' className='md:col-span-2'>
-            <Input value={form.keyword} onChange={(e) => on('keyword', e.target.value)} required />
-          </Field>
+          {massMode ? (
+            <Field label='Number of articles' className='md:col-span-2'>
+              <Input type='number' min={1} max={100} value={count} onChange={(e) => setCount(+e.target.value)} required />
+            </Field>
+          ) : (
+            <Field label='Keyword' className='md:col-span-2'>
+              <Input value={form.keyword} onChange={(e) => on('keyword', e.target.value)} required />
+            </Field>
+          )}
           <Field label='Site' className='md:col-span-2'>
             <Select value={form.site_id} onChange={(e) => on('site_id', e.target.value)} required disabled={sites.isLoading}>
               {siteOptions.length === 0 && <option value=''>{sites.isLoading ? 'Loading…' : 'No sites configured'}</option>}
@@ -196,8 +268,8 @@ export default function GeneratePage() {
             </Select>
           </Field>
           <div className='md:col-span-3 lg:col-span-5 flex justify-center pt-2'>
-            <Button type='submit' disabled={create.isPending} className='px-10'>
-              {create.isPending ? 'Queuing…' : 'Create'}
+            <Button type='submit' disabled={create.isPending || batch.isPending} className='px-10'>
+              {massMode ? (batch.isPending ? 'Queuing…' : `Generate ${count}`) : create.isPending ? 'Queuing…' : 'Create'}
             </Button>
           </div>
         </form>
@@ -252,7 +324,11 @@ export default function GeneratePage() {
                 const elapsed = fmtElapsed(a.created_at, a.updated_at, now, terminal)
                 return (
                   <tr key={String(a.id)} className='border-t border-gray-100'>
-                    <td className='py-2 pr-4 text-gray-500'>{a.id}</td>
+                    <td className='py-2 pr-4'>
+                      <button onClick={() => setInfoId(a.id)} className='text-sky-700 hover:underline' title='Info'>
+                        {a.id}
+                      </button>
+                    </td>
                     <td className='py-2 pr-4'>{a.keyword}</td>
                     <td className='py-2 pr-4 text-gray-500'>{site?.alias || '—'}</td>
                     <td className='py-2 pr-4'>
@@ -295,6 +371,83 @@ export default function GeneratePage() {
           </div>
         </div>
       </Card>
+
+      {infoId != null && (
+        <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4' onClick={() => setInfoId(null)}>
+          <div
+            className='max-h-[85vh] w-full max-w-2xl overflow-auto rounded-lg bg-white p-6 shadow-xl'
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className='mb-4 flex items-center justify-between'>
+              <h3 className='text-base font-semibold'>Article #{infoId}</h3>
+              <button onClick={() => setInfoId(null)} className='text-gray-400 hover:text-gray-700'>
+                ✕
+              </button>
+            </div>
+            {detail.isLoading ? (
+              <p className='text-gray-400'>Loading…</p>
+            ) : detail.data ? (
+              <InfoBody a={detail.data} />
+            ) : (
+              <p className='text-rose-600'>Failed to load</p>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function InfoBody({ a }: { a: ArticleDetail }) {
+  const rp = a.request_params || {}
+  const flagged: string[] = (a.check_result?.sentences_flagged as string[]) || []
+  const Row = ({ k, v }: { k: string; v: React.ReactNode }) =>
+    v == null || v === '' ? null : (
+      <div className='flex justify-between gap-4 border-b border-gray-50 py-1'>
+        <span className='text-gray-500'>{k}</span>
+        <span className='text-right'>{v}</span>
+      </div>
+    )
+  return (
+    <div className='space-y-4 text-sm'>
+      <section>
+        <h4 className='mb-1 font-medium text-gray-700'>Overview</h4>
+        <Row k='Keyword' v={a.keyword} />
+        <Row k='Status' v={a.status} />
+        <Row k='Created' v={new Date(a.created_at).toLocaleString()} />
+        <Row k='Published' v={a.published_at ? new Date(a.published_at).toLocaleString() : '—'} />
+        <Row k='Rating' v={a.human_rating == null ? '—' : a.human_rating ? '👍' : '👎'} />
+      </section>
+      <section>
+        <h4 className='mb-1 font-medium text-gray-700'>Metrics</h4>
+        <Row k='AI score' v={a.ai_score == null ? undefined : a.ai_score.toFixed(2)} />
+        <Row k='Reward' v={a.reward == null ? undefined : a.reward.toFixed(2)} />
+        <Row k='Quality floor' v={a.quality_ok == null ? '—' : a.quality_ok ? 'pass' : 'fail'} />
+        <Row k='Humanize cycles' v={a.humanize_cycles} />
+        <Row k='Tokens' v={a.tokens} />
+        <Row k='Images' v={`${a.images_resolved ?? 0}/${a.images_requested ?? 0} (skipped ${a.images_skipped ?? 0})`} />
+      </section>
+      <section>
+        <h4 className='mb-1 font-medium text-gray-700'>Settings</h4>
+        <Row k='Provider' v={rp.provider} />
+        <Row k='Model' v={rp.model} />
+        <Row k='Words' v={rp.min_words && rp.max_words ? `${rp.min_words}–${rp.max_words}` : null} />
+        <Row k='Max tokens' v={rp.max_tokens} />
+        <Row k='Cycles' v={rp.max_cycles} />
+        <Row k='AI threshold' v={rp.ai_threshold} />
+        <Row k='Language' v={rp.language} />
+        <Row k='Auto-publish' v={rp.auto_publish == null ? null : rp.auto_publish ? 'yes' : 'no'} />
+      </section>
+      {flagged.length > 0 && (
+        <section>
+          <h4 className='mb-1 font-medium text-gray-700'>Flagged sentences</h4>
+          <ul className='list-disc space-y-1 pl-5 text-gray-600'>
+            {flagged.map((s, i) => (
+              <li key={i}>{s}</li>
+            ))}
+          </ul>
+        </section>
+      )}
     </div>
   )
 }

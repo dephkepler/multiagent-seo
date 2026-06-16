@@ -21,6 +21,10 @@ type SERPProvider interface {
 
 type TopicSource interface {
 	Lookup(ctx context.Context, topic string) (Cluster, error)
+	Topics(ctx context.Context) ([]string, error)
+	// Clusters returns every topic's cluster in a single fetch, keyed by
+	// normalized topic, so batch generation avoids one Lookup per topic.
+	Clusters(ctx context.Context) (map[string]Cluster, error)
 }
 
 type ContentChecker interface {

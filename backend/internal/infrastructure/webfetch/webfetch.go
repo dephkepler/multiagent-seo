@@ -5,98 +5,47 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"net"
 	"net/http"
-	"net/netip"
 	"net/url"
 	"strings"
-	"syscall"
 	"time"
 	"unicode/utf8"
 
 	"golang.org/x/net/html"
 
 	"multiagent-seo/internal/domain/linkbuilding"
+	"multiagent-seo/pkg/httpx"
 )
 
 const maxBody = 2 << 20
 
 const maxTextSample = 2000
 
-const userAgent = "Mozilla/5.0 (compatible; multiagent-seo-bot/1.0)"
-
 const maxRedirects = 5
 
 type Fetcher struct {
-	http          *http.Client
-	log           *slog.Logger
-	allowLoopback bool
+	http *http.Client
+	log  *slog.Logger
 }
 
 func New(log *slog.Logger) *Fetcher {
+	return newFetcher(log, false)
+}
+
+func newFetcher(log *slog.Logger, allowLoopback bool) *Fetcher {
 	if log == nil {
 		log = slog.Default()
 	}
-	f := &Fetcher{log: log}
-	f.http = &http.Client{
-		Timeout:       15 * time.Second,
-		Transport:     f.transport(),
-		CheckRedirect: checkRedirect,
+	opts := []httpx.Option{
+		httpx.WithTimeout(15 * time.Second),
+		httpx.WithMaxRedirects(maxRedirects),
+		httpx.BlockPrivateIPs(),
 	}
-	return f
+	if allowLoopback {
+		opts = append(opts, httpx.AllowLoopback())
+	}
+	return &Fetcher{log: log, http: httpx.New(opts...)}
 }
-
-func (f *Fetcher) transport() *http.Transport {
-	dialer := &net.Dialer{
-		Timeout: 10 * time.Second,
-		Control: func(network, address string, _ syscall.RawConn) error {
-			host, _, err := net.SplitHostPort(address)
-			if err != nil {
-				return fmt.Errorf("webfetch dial guard: %w", err)
-			}
-			ip, err := netip.ParseAddr(host)
-			if err != nil {
-				return fmt.Errorf("webfetch dial guard parse %q: %w", host, err)
-			}
-			if f.allowLoopback && ip.IsLoopback() {
-				return nil
-			}
-			if disallowedIP(ip) {
-				return fmt.Errorf("webfetch dial guard: blocked address %s", ip)
-			}
-			return nil
-		},
-	}
-	t := &http.Transport{DialContext: dialer.DialContext}
-	return t
-}
-
-func checkRedirect(_ *http.Request, via []*http.Request) error {
-	if len(via) >= maxRedirects {
-		return fmt.Errorf("webfetch: stopped after %d redirects", maxRedirects)
-	}
-	return nil
-}
-
-func disallowedIP(ip netip.Addr) bool {
-	ip = ip.Unmap()
-	switch {
-	case ip.IsLoopback(),
-		ip.IsPrivate(),
-		ip.IsLinkLocalUnicast(),
-		ip.IsLinkLocalMulticast(),
-		ip.IsMulticast(),
-		ip.IsUnspecified(),
-		ip.IsInterfaceLocalMulticast():
-		return true
-	}
-	if ip.Is4() && cgnat.Contains(ip) {
-		return true
-	}
-	return false
-}
-
-var cgnat = netip.MustParsePrefix("100.64.0.0/10")
 
 func (f *Fetcher) Fetch(ctx context.Context, rawURL string) (linkbuilding.Page, error) {
 	u, err := url.Parse(rawURL)
@@ -111,7 +60,6 @@ func (f *Fetcher) Fetch(ctx context.Context, rawURL string) (linkbuilding.Page, 
 	if err != nil {
 		return linkbuilding.Page{}, fmt.Errorf("webfetch new request: %w", err)
 	}
-	req.Header.Set("User-Agent", userAgent)
 
 	resp, err := f.http.Do(req)
 	if err != nil {

@@ -4,12 +4,9 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"os"
 	"strings"
 	"time"
 
-	"golang.org/x/oauth2/google"
-	"google.golang.org/api/option"
 	"google.golang.org/api/sheets/v4"
 
 	"multiagent-seo/internal/domain/linkbuilding"
@@ -46,28 +43,13 @@ func NewPlacementSink(ctx context.Context, credentialsFile, spreadsheetID string
 }
 
 func newSource(ctx context.Context, credentialsFile, spreadsheetID string, log *slog.Logger) (*websiteSource, error) {
-	if credentialsFile == "" || spreadsheetID == "" {
-		return nil, fmt.Errorf("sheets: credentialsFile and spreadsheetId are required")
-	}
 	if log == nil {
 		log = slog.Default()
 	}
-
-	credsJSON, err := os.ReadFile(credentialsFile)
+	svc, err := newSheetsService(ctx, credentialsFile, spreadsheetID)
 	if err != nil {
-		return nil, fmt.Errorf("read credentials: %w", err)
+		return nil, err
 	}
-
-	creds, err := google.CredentialsFromJSON(ctx, credsJSON, sheets.SpreadsheetsScope)
-	if err != nil {
-		return nil, fmt.Errorf("parse credentials: %w", err)
-	}
-
-	svc, err := sheets.NewService(ctx, option.WithTokenSource(creds.TokenSource))
-	if err != nil {
-		return nil, fmt.Errorf("create sheets service: %w", err)
-	}
-
 	return &websiteSource{
 		svc:           svc,
 		spreadsheetID: spreadsheetID,

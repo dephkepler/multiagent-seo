@@ -17,13 +17,18 @@ type AsyncRunner struct {
 	timeout time.Duration
 	log     *slog.Logger
 	wg      sync.WaitGroup
+	sem     chan struct{}
 }
 
-func NewAsyncRunner(timeout time.Duration, log *slog.Logger) *AsyncRunner {
+func NewAsyncRunner(timeout time.Duration, maxConcurrent int, log *slog.Logger) *AsyncRunner {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &AsyncRunner{timeout: timeout, log: log}
+	var sem chan struct{}
+	if maxConcurrent > 0 {
+		sem = make(chan struct{}, maxConcurrent)
+	}
+	return &AsyncRunner{timeout: timeout, log: log, sem: sem}
 }
 
 func (r *AsyncRunner) Go(parent context.Context, fn func(context.Context)) {
@@ -31,6 +36,10 @@ func (r *AsyncRunner) Go(parent context.Context, fn func(context.Context)) {
 	r.wg.Add(1)
 	go func() {
 		defer r.wg.Done()
+		if r.sem != nil {
+			r.sem <- struct{}{}
+			defer func() { <-r.sem }()
+		}
 		ctx := base
 		var cancel context.CancelFunc
 		if r.timeout > 0 {

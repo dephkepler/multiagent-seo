@@ -21,6 +21,7 @@ import (
 
 type generateService interface {
 	Generate(ctx context.Context, req apparticles.GenerateRequest) (apparticles.GenerateResult, error)
+	GenerateBatch(ctx context.Context, count int, shared apparticles.GenerateRequest) ([]int64, error)
 	Publish(ctx context.Context, id int64) (articles.Article, error)
 	List(ctx context.Context, limit, offset int) ([]articles.Article, int, error)
 	Get(ctx context.Context, id int64) (articles.Article, error)
@@ -87,6 +88,53 @@ func (h *ArticlesHandler) GenerateArticle(w http.ResponseWriter, r *http.Request
 		accepted.SiteId = &site
 	}
 	response.WriteJSON(r.Context(), w, http.StatusAccepted, accepted)
+}
+
+func (h *ArticlesHandler) GenerateBatch(w http.ResponseWriter, r *http.Request) {
+	if h.unavailable(w) {
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
+	var body oapigen.GenerateBatchRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		problem.Write(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if err := validate.Validate(body); err != nil {
+		problem.Write(w, http.StatusBadRequest, strings.Join(validate.MissingFields(err), ", "))
+		return
+	}
+	if body.SiteId == uuid.Nil {
+		problem.Write(w, http.StatusBadRequest, "site_id")
+		return
+	}
+
+	shared := apparticles.GenerateRequest{
+		SiteID:                  body.SiteId,
+		AutoPublish:             deref(body.AutoPublish),
+		IncludeImages:           body.IncludeImages,
+		IncludeImageAttribution: ptr(false),
+		MinWords:                deref(body.MinWords),
+		MaxWords:                deref(body.MaxWords),
+		MaxTokens:               deref(body.MaxTokens),
+		MaxCycles:               deref(body.MaxCycles),
+		Language:                deref(body.Language),
+		Provider:                deref(body.Provider),
+		Model:                   deref(body.Model),
+	}
+	if body.AiThreshold != nil {
+		shared.AIThreshold = float64(*body.AiThreshold)
+	}
+
+	ids, err := h.svc.GenerateBatch(r.Context(), body.Count, shared)
+	if err != nil {
+		h.writeError(r.Context(), w, "generate_batch", err)
+		return
+	}
+	response.WriteJSON(r.Context(), w, http.StatusAccepted, oapigen.GenerateBatchAccepted{
+		Count:      len(ids),
+		ArticleIds: ids,
+	})
 }
 
 func (h *ArticlesHandler) ListArticles(w http.ResponseWriter, r *http.Request, params oapigen.ListArticlesParams) {
@@ -246,6 +294,22 @@ func toArticle(a articles.Article) oapigen.Article {
 		cr := a.CheckResult
 		out.CheckResult = &cr
 	}
+	if len(a.RequestParams) > 0 {
+		rp := a.RequestParams
+		out.RequestParams = &rp
+	}
+	out.PublishedAt = a.PublishedAt
+	if a.AIScore != nil {
+		v := float32(*a.AIScore)
+		out.AiScore = &v
+	}
+	if a.Reward != nil {
+		v := float32(*a.Reward)
+		out.Reward = &v
+	}
+	out.QualityOk = a.QualityOK
+	out.HumanizeCycles = a.HumanizeCycles
+	out.Tokens = a.Tokens
 	return out
 }
 

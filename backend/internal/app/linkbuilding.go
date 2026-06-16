@@ -49,7 +49,7 @@ func buildLinkbuilding(
 		log.Warn("link-building disabled: website source unavailable", "err", err)
 		return nil, nil, nil, nil
 	}
-	runner := jobrunner.NewAsyncRunner(cfg.Server.BackgroundJobTimeout, log)
+	runner := jobrunner.NewAsyncRunner(cfg.Server.BackgroundJobTimeout, cfg.Server.BackgroundJobConcurrency, log)
 	factory := infrallm.NewFactory(cfg.LLM, log)
 
 	classifierBuilder := func(provider, model string) (domainlinkbuilding.TopicClassifier, error) {
