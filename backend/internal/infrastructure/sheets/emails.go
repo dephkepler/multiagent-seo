@@ -29,8 +29,9 @@ func NewEmailSource(ctx context.Context, credentialsFile, spreadsheetID string, 
 	return &emailSource{svc: svc, spreadsheetID: spreadsheetID, log: log}, nil
 }
 
-// List reads column A (URL) and C (status). Rows whose C is already filled are
-// skipped so a re-run resumes where it left off.
+// List reads column A (URL) and C (status). Rows whose latest status is a
+// success ("found …") are skipped; "no emails"/"error" rows are retried so a
+// re-run re-attempts sites that didn't yield an address.
 func (s *emailSource) List(ctx context.Context, sheet string) ([]emailscrape.Site, error) {
 	rangeStr := fmt.Sprintf("%s!A:C", sheet)
 	resp, err := s.svc.Spreadsheets.Values.Get(s.spreadsheetID, rangeStr).Context(ctx).Do()
@@ -48,7 +49,11 @@ func (s *emailSource) List(ctx context.Context, sheet string) ([]emailscrape.Sit
 		if !strings.HasPrefix(strings.ToLower(url), "http") {
 			continue
 		}
-		if len(row) >= 3 && strings.TrimSpace(fmt.Sprint(row[2])) != "" {
+		status := ""
+		if len(row) >= 3 {
+			status = fmt.Sprint(row[2])
+		}
+		if isFoundStatus(status) {
 			skipped++
 			continue
 		}
@@ -59,9 +64,19 @@ func (s *emailSource) List(ctx context.Context, sheet string) ([]emailscrape.Sit
 		"sheet", sheet,
 		"rows_scanned", len(resp.Values),
 		"pending", len(out),
-		"skipped_done", skipped,
+		"skipped_found", skipped,
 	)
 	return out, nil
+}
+
+// isFoundStatus reports whether the latest status line (column C is append-only,
+// newest first) marks a successful scrape, which we don't re-run.
+func isFoundStatus(cell string) bool {
+	firstLine := cell
+	if i := strings.IndexByte(cell, '\n'); i >= 0 {
+		firstLine = cell[:i]
+	}
+	return strings.Contains(strings.ToLower(firstLine), "found")
 }
 
 // WriteResults overwrites column B with the found emails and prepends a
