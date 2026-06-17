@@ -1,0 +1,9 @@
+# Prod-only delta, layered on top of compose.yaml. Pins the database to the
+# pre-existing external volume that holds the real data; without it compose
+# falls back to a fresh per-project volume and the DB looks wiped.
+# Always deploy with BOTH files (or just `make deploy`):
+#   docker compose -f devops/compose.yaml -f devops/compose.prod.yaml ...
+volumes:
+  postgres_data:
+    external: true
+    name: contentflow_postgres_data
