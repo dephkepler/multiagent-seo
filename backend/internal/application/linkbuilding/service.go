@@ -11,6 +11,7 @@ import (
 
 	domain "multiagent-seo/internal/domain/linkbuilding"
 	"multiagent-seo/pkg/jobrunner"
+	"multiagent-seo/pkg/workpool"
 )
 
 const (
@@ -126,67 +127,24 @@ func pickStr(a, b string) string {
 }
 
 func (s *Service) qualifyAll(ctx context.Context, log *slog.Logger, sheet string, sites []domain.Website, candidates, accepted []string, classifier domain.TopicClassifier) {
-	resultsCh := make(chan domain.Result)
-	sem := make(chan struct{}, maxConcurrentSites)
-	var wg sync.WaitGroup
+	processed, err := workpool.Run(ctx, sites,
+		func(ctx context.Context, w domain.Website) (domain.Result, bool) {
+			return s.qualifyOne(ctx, log, w, candidates, accepted, classifier)
+		},
+		func(ctx context.Context, batch []domain.Result) error {
+			return s.sites.WriteResults(ctx, sheet, batch)
+		},
+		workpool.Options{Concurrency: maxConcurrentSites, FlushEvery: resultFlushBatch, FlushTimeout: resultWriteTimeout},
+	)
 
-	go func() {
-		for _, w := range sites {
-			select {
-			case <-ctx.Done():
-				wg.Wait()
-				close(resultsCh)
-				return
-			case sem <- struct{}{}:
-			}
-			wg.Add(1)
-			go func(w domain.Website) {
-				defer wg.Done()
-				defer func() { <-sem }()
-				if res, ok := s.qualifyOne(ctx, log, w, candidates, accepted, classifier); ok {
-					resultsCh <- res
-				}
-			}(w)
-		}
-		wg.Wait()
-		close(resultsCh)
-	}()
-
-	batch := make([]domain.Result, 0, resultFlushBatch)
-	flush := func() error {
-		if len(batch) == 0 {
-			return nil
-		}
-		writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), resultWriteTimeout)
-		defer cancel()
-		if err := s.sites.WriteResults(writeCtx, sheet, batch); err != nil {
-			return fmt.Errorf("write results (batch %d): %w", len(batch), err)
-		}
-		batch = batch[:0]
-		return nil
+	switch {
+	case err != nil && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)):
+		log.WarnContext(ctx, "website qualification aborted", "processed", processed, "total", len(sites), "err", err)
+	case err != nil:
+		log.ErrorContext(ctx, "website qualification stopped on write failure", "processed", processed, "total", len(sites), "err", err)
+	default:
+		log.InfoContext(ctx, "website qualification done", "processed", processed)
 	}
-
-	processed := 0
-	for res := range resultsCh {
-		batch = append(batch, res)
-		processed++
-		if len(batch) >= resultFlushBatch {
-			if err := flush(); err != nil {
-				log.ErrorContext(ctx, "website qualification stopped on write failure", "processed", processed, "total", len(sites), "err", err)
-				return
-			}
-		}
-	}
-	if err := flush(); err != nil {
-		log.ErrorContext(ctx, "website qualification final write failed", "processed", processed, "total", len(sites), "err", err)
-		return
-	}
-
-	if ctx.Err() != nil {
-		log.WarnContext(ctx, "website qualification aborted", "processed", processed, "total", len(sites), "err", ctx.Err())
-		return
-	}
-	log.InfoContext(ctx, "website qualification done", "processed", processed)
 }
 
 func (s *Service) qualifyOne(ctx context.Context, log *slog.Logger, w domain.Website, candidates, accepted []string, classifier domain.TopicClassifier) (domain.Result, bool) {

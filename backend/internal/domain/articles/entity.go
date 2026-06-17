@@ -44,6 +44,13 @@ type Article struct {
 	PublishedAt *time.Time
 
 	HumanRating *bool // copywriter 👍/👎; nil = not rated
+
+	// Writer-stage outcome metrics, populated only by Get (detail view).
+	AIScore        *float64
+	Reward         *float64
+	QualityOK      *bool
+	HumanizeCycles *int
+	Tokens         *int
 }
 
 type RevisionSource string

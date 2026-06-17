@@ -14,14 +14,15 @@ import (
 const envPrefix = "CF_"
 
 type ServerConfig struct {
-	Port                 string        `env:"APP_PORT" envDefault:"8080" validate:"required"`
-	Host                 string        `env:"APP_HOST" envDefault:"localhost" validate:"required"`
-	BasePath             string        `env:"APP_BASE_PATH" envDefault:"/"`
-	CORSAllowedOrigins   []string      `env:"APP_CORS_ALLOWED_ORIGINS" envDefault:"http://localhost:3000" envSeparator:","`
-	ReadTimeout          time.Duration `env:"APP_READ_TIMEOUT" envDefault:"10s"`
-	WriteTimeout         time.Duration `env:"APP_WRITE_TIMEOUT" envDefault:"5m"`
-	ShutdownWaitTimeout  time.Duration `env:"APP_SHUTDOWN_WAIT_TIMEOUT" envDefault:"30s"`
-	BackgroundJobTimeout time.Duration `env:"APP_BACKGROUND_JOB_TIMEOUT" envDefault:"15m"`
+	Port                     string        `env:"APP_PORT" envDefault:"8080" validate:"required"`
+	Host                     string        `env:"APP_HOST" envDefault:"localhost" validate:"required"`
+	BasePath                 string        `env:"APP_BASE_PATH" envDefault:"/"`
+	CORSAllowedOrigins       []string      `env:"APP_CORS_ALLOWED_ORIGINS" envDefault:"http://localhost:3000" envSeparator:","`
+	ReadTimeout              time.Duration `env:"APP_READ_TIMEOUT" envDefault:"10s"`
+	WriteTimeout             time.Duration `env:"APP_WRITE_TIMEOUT" envDefault:"5m"`
+	ShutdownWaitTimeout      time.Duration `env:"APP_SHUTDOWN_WAIT_TIMEOUT" envDefault:"30s"`
+	BackgroundJobTimeout     time.Duration `env:"APP_BACKGROUND_JOB_TIMEOUT" envDefault:"15m"`
+	BackgroundJobConcurrency int           `env:"APP_BACKGROUND_JOB_CONCURRENCY" envDefault:"3"`
 }
 
 type LoggerConfig struct {

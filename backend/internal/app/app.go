@@ -72,7 +72,7 @@ func Run(ctx context.Context, cfg config.Config) error {
 		authSvc = appauth.NewService(postgres.NewUserRepository(pool), jwtSvc)
 		apiTokenSvc = appapitoken.NewService(postgres.NewApiTokenRepository(pool))
 
-		runner = jobrunner.NewAsyncRunner(cfg.Server.BackgroundJobTimeout, slogLog)
+		runner = jobrunner.NewAsyncRunner(cfg.Server.BackgroundJobTimeout, cfg.Server.BackgroundJobConcurrency, slogLog)
 		articleRepo := postgres.NewArticleRepository(pool)
 		promptRepo := postgres.NewPromptRepository(pool)
 		articlesSvc = apparticles.NewService(
@@ -99,6 +99,7 @@ func Run(ctx context.Context, cfg config.Config) error {
 	}
 
 	linkbuildingSvc, linkbuildingLoginSvc, linkbuildingBacklinkSvc, lbRunner := buildLinkbuilding(ctx, cfg, slogLog, pool, wordpressRepo)
+	emailScrapeSvc, emailRunner := buildEmailScrape(ctx, cfg, slogLog, pool)
 
 	healthSvc := apphealth.NewService(domainhealth.NewService(healthRepo))
 	server := handlers.NewServer(
@@ -108,6 +109,7 @@ func Run(ctx context.Context, cfg config.Config) error {
 		nilableArticlesHandler(articlesSvc),
 		nilableLinkbuildingHandler(linkbuildingSvc, linkbuildingLoginSvc, linkbuildingBacklinkSvc),
 		nilableApiTokensHandler(apiTokenSvc),
+		nilableEmailScrapeHandler(emailScrapeSvc),
 	)
 
 	if articlesSvc != nil {
@@ -150,7 +152,7 @@ func Run(ctx context.Context, cfg config.Config) error {
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Error().Err(err).Msg("graceful shutdown failed")
 	}
-	for name, rn := range map[string]*jobrunner.AsyncRunner{"articles": runner, "linkbuilding": lbRunner} {
+	for name, rn := range map[string]*jobrunner.AsyncRunner{"articles": runner, "linkbuilding": lbRunner, "emailscrape": emailRunner} {
 		if rn == nil {
 			continue
 		}

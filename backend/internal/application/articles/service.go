@@ -57,6 +57,10 @@ type GenerateRequest struct {
 	AIThreshold             float64
 	IncludeImages           *bool
 	IncludeImageAttribution *bool
+
+	// cluster, when set, skips the per-keyword sheet Lookup in resolve. Set
+	// only inside this package (batch generation) — never from HTTP input.
+	cluster *articles.Cluster
 }
 
 type Service struct {
@@ -239,9 +243,15 @@ func (s *Service) resolve(ctx context.Context, req GenerateRequest) (genSettings
 		autoPublish:      req.AutoPublish,
 	}
 
-	cluster, err := s.topics.Lookup(ctx, req.Keyword)
-	if err != nil {
-		return genSettings{}, fmt.Errorf("cluster lookup: %w", err)
+	cluster := articles.Cluster{}
+	if req.cluster != nil {
+		cluster = *req.cluster
+	} else {
+		c, err := s.topics.Lookup(ctx, req.Keyword)
+		if err != nil {
+			return genSettings{}, fmt.Errorf("cluster lookup: %w", err)
+		}
+		cluster = c
 	}
 	if len(cluster.Keywords) == 0 {
 		return genSettings{}, ErrNoCluster
@@ -454,6 +464,61 @@ func (s *Service) GenerateCandidate(ctx context.Context) {
 		return
 	}
 	s.log.InfoContext(ctx, "evolve: generated new candidate", "id", id, "parent", champion.ID, "failures", len(failures))
+}
+
+const maxBatchCount = 100
+
+func (s *Service) GenerateBatch(ctx context.Context, count int, shared GenerateRequest) ([]int64, error) {
+	if count <= 0 {
+		return nil, nil
+	}
+	if count > maxBatchCount {
+		count = maxBatchCount
+	}
+
+	topics, err := s.topics.Topics(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list topics: %w", err)
+	}
+	clusters, err := s.topics.Clusters(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list clusters: %w", err)
+	}
+	done, err := s.repo.GeneratedKeywords(ctx, shared.SiteID)
+	if err != nil {
+		return nil, fmt.Errorf("existing keywords: %w", err)
+	}
+	doneSet := make(map[string]bool, len(done))
+	for _, k := range done {
+		doneSet[strings.ToLower(strings.TrimSpace(k))] = true
+	}
+
+	ids := make([]int64, 0, count)
+	for _, t := range topics {
+		if len(ids) >= count {
+			break
+		}
+		key := strings.ToLower(strings.TrimSpace(t))
+		if doneSet[key] {
+			continue
+		}
+		req := shared
+		req.Keyword = t
+		if c, ok := clusters[key]; ok {
+			req.cluster = &c
+		}
+		res, err := s.Generate(ctx, req)
+		if err != nil {
+			s.log.WarnContext(ctx, "batch: skip topic", "topic", t, "err", err)
+			continue
+		}
+		ids = append(ids, res.Article.ID)
+	}
+	if len(ids) < count {
+		s.log.InfoContext(ctx, "batch: fewer articles queued than requested",
+			"requested", count, "queued", len(ids), "topics_available", len(topics))
+	}
+	return ids, nil
 }
 
 func (s *Service) RateArticle(ctx context.Context, articleID int64, rating *bool) error {

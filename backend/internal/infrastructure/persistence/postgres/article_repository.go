@@ -57,14 +57,17 @@ func (r *ArticleRepository) Create(ctx context.Context, in articles.CreateArticl
 
 func (r *ArticleRepository) Get(ctx context.Context, id int64) (*articles.Article, error) {
 	const q = `
-		SELECT id, keyword, site_id, site, status,
-		       COALESCE(wp_post_id, 0),
-		       COALESCE(wp_edit_url, ''),
-		       COALESCE(wp_post_url, ''),
-		       images_requested, images_resolved, images_skipped,
-		       competitor_data, check_result, request_params,
-		       created_at, updated_at, published_at, human_rating
-		FROM articles WHERE id = @id`
+		SELECT a.id, a.keyword, a.site_id, a.site, a.status,
+		       COALESCE(a.wp_post_id, 0),
+		       COALESCE(a.wp_edit_url, ''),
+		       COALESCE(a.wp_post_url, ''),
+		       a.images_requested, a.images_resolved, a.images_skipped,
+		       a.competitor_data, a.check_result, a.request_params,
+		       a.created_at, a.updated_at, a.published_at, a.human_rating,
+		       o.ai_score, o.reward, o.quality_ok, o.humanize_cycles, o.tokens
+		FROM articles a
+		LEFT JOIN prompt_outcomes o ON o.article_id = a.id AND o.stage = 'writer'
+		WHERE a.id = @id`
 
 	row := r.db.QueryRow(ctx, q, pgx.NamedArgs{"id": id})
 	a, err := scanArticleFull(row)
@@ -164,6 +167,25 @@ func (r *ArticleRepository) MarkPublished(ctx context.Context, id int64, postURL
 		"wp_post_url": postURL,
 		"id":          id,
 	})
+}
+
+func (r *ArticleRepository) GeneratedKeywords(ctx context.Context, siteID uuid.UUID) ([]string, error) {
+	const q = `SELECT DISTINCT keyword FROM articles WHERE status <> @failed AND site_id = @site_id`
+	rows, err := r.db.Query(ctx, q, pgx.NamedArgs{"failed": articles.StatusFailed, "site_id": siteID})
+	if err != nil {
+		return nil, fmt.Errorf("generated keywords: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]string, 0)
+	for rows.Next() {
+		var kw string
+		if err := rows.Scan(&kw); err != nil {
+			return nil, fmt.Errorf("scan keyword: %w", err)
+		}
+		out = append(out, kw)
+	}
+	return out, rows.Err()
 }
 
 func (r *ArticleRepository) SetHumanRating(ctx context.Context, id int64, rating *bool) error {
@@ -311,6 +333,11 @@ func scanArticleFull(row pgx.Row) (articles.Article, error) {
 		&a.UpdatedAt,
 		&a.PublishedAt,
 		&a.HumanRating,
+		&a.AIScore,
+		&a.Reward,
+		&a.QualityOK,
+		&a.HumanizeCycles,
+		&a.Tokens,
 	)
 	a.SiteID = siteID.UUID
 	if err != nil {

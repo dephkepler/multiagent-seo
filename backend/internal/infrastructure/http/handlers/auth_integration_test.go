@@ -55,7 +55,7 @@ func itAuthServer(t *testing.T, pool *pgxpool.Pool) *httptest.Server {
 		handlers.NewLoginHandler(authSvc),
 		handlers.NewArticlesHandler(nil),
 		handlers.NewLinkbuildingHandler(nil, nil, nil),
-		handlers.NewApiTokensHandler(nil),
+		handlers.NewApiTokensHandler(nil), handlers.NewEmailScrapeHandler(nil),
 	)
 	router := apihttp.NewRouter(config.ServerConfig{
 		BasePath:           "/",
