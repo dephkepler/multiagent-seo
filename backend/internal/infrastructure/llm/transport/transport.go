@@ -6,11 +6,10 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"strconv"
 	"time"
 
-	"multiagent-seo/internal/infrastructure/llm/retry"
 	"multiagent-seo/internal/infrastructure/llm/usage"
+	"multiagent-seo/pkg/retry"
 )
 
 const maxResponseBytes = 1 << 20
@@ -69,17 +68,6 @@ func (e *httpError) HTTPStatus() int { return e.status }
 
 func (e *httpError) RetryAfter() (time.Duration, bool) { return e.retryAfter, e.retryAfter > 0 }
 
-func parseRetryAfter(h http.Header) time.Duration {
-	v := h.Get("Retry-After")
-	if v == "" {
-		return 0
-	}
-	if secs, err := strconv.ParseFloat(v, 64); err == nil && secs > 0 {
-		return time.Duration(secs * float64(time.Second))
-	}
-	return 0
-}
-
 func truncateBody(body []byte) string {
 	if len(body) <= maxErrorBodyBytes {
 		return string(body)
@@ -127,7 +115,7 @@ func (c *Client) Complete(ctx context.Context, prompt string, maxTokens int) (st
 		}
 
 		if resp.StatusCode != http.StatusOK {
-			return &httpError{provider: provider, status: resp.StatusCode, body: truncateBody(body), retryAfter: parseRetryAfter(resp.Header)}
+			return &httpError{provider: provider, status: resp.StatusCode, body: truncateBody(body), retryAfter: retry.ParseRetryAfter(resp.Header)}
 		}
 
 		parsedContent, parsedUsage, parseErr := c.codec.ParseResponse(body)

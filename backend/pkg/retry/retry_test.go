@@ -2,6 +2,7 @@ package retry
 
 import (
 	"context"
+	"net/http"
 	"testing"
 	"time"
 )
@@ -63,5 +64,29 @@ func TestDo_HonorsRetryAfterOverBackoff(t *testing.T) {
 	})
 	if elapsed := time.Since(start); elapsed < 25*time.Millisecond {
 		t.Errorf("waited %v, expected ~Retry-After (30ms)", elapsed)
+	}
+}
+
+func TestDo_CapsRetryAfter(t *testing.T) {
+	cfg := Config{MaxAttempts: 2, Backoffs: []time.Duration{time.Microsecond}, MaxRetryAfter: 10 * time.Millisecond}
+	start := time.Now()
+	_ = Do(context.Background(), cfg, nil, "test", func() error {
+		return fakeErr{status: 429, after: time.Hour}
+	})
+	if elapsed := time.Since(start); elapsed > 200*time.Millisecond {
+		t.Errorf("waited %v, expected the cap (10ms) to apply, not the hour Retry-After", elapsed)
+	}
+}
+
+func TestParseRetryAfter(t *testing.T) {
+	if d := ParseRetryAfter(http.Header{"Retry-After": {"2"}}); d != 2*time.Second {
+		t.Errorf("seconds form = %v, want 2s", d)
+	}
+	if d := ParseRetryAfter(http.Header{}); d != 0 {
+		t.Errorf("missing header = %v, want 0", d)
+	}
+	future := time.Now().Add(5 * time.Second).UTC().Format(http.TimeFormat)
+	if d := ParseRetryAfter(http.Header{"Retry-After": {future}}); d <= 0 || d > 6*time.Second {
+		t.Errorf("http-date form = %v, want ~5s", d)
 	}
 }

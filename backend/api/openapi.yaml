@@ -265,6 +265,29 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+  /generate/batch:
+    post:
+      operationId: generateBatch
+      security:
+        - bearerAuth: [ ]
+      tags: [ Articles ]
+      summary: Queue a batch from the next N unused sheet topics
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GenerateBatchRequest"
+      responses:
+        "202":
+          description: Batch queued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenerateBatchAccepted"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
   /articles:
     get:
       operationId: listArticles
@@ -436,6 +459,71 @@ paths:
         "400":
           $ref: "#/components/responses/BadRequest"
 
+  /emailscrape:
+    post:
+      operationId: scrapeEmails
+      security:
+        - bearerAuth: [ ]
+      tags: [ Email Scrape ]
+      summary: Crawl the sites listed in a sheet and scrape their email addresses
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ScrapeEmailsRequest"
+      responses:
+        "202":
+          description: Scrape accepted; found emails and per-site status are written back to the sheet
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScrapeEmailsAccepted"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /emailscrape/jobs/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      operationId: getScrapeJob
+      security:
+        - bearerAuth: [ ]
+      tags: [ Email Scrape ]
+      summary: Get the progress and state of a scrape job
+      responses:
+        "200":
+          description: Job status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScrapeJob"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /emailscrape/jobs/{id}/cancel:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      operationId: cancelScrapeJob
+      security:
+        - bearerAuth: [ ]
+      tags: [ Email Scrape ]
+      summary: Request cancellation of a running scrape job
+      responses:
+        "202":
+          description: Cancellation requested
+        "404":
+          $ref: "#/components/responses/NotFound"
+
 components:
   securitySchemes:
     bearerAuth:
@@ -470,6 +558,51 @@ components:
             $ref: "#/components/schemas/ErrorResponse"
 
   schemas:
+    GenerateBatchRequest:
+      type: object
+      required: [ count, site_id ]
+      properties:
+        count:
+          type: integer
+          x-oapi-codegen-extra-tags:
+            validate: "required,min=1,max=100"
+        site_id:
+          type: string
+          format: uuid
+          x-oapi-codegen-extra-tags:
+            validate: "required"
+        min_words:
+          type: integer
+        max_words:
+          type: integer
+        max_tokens:
+          type: integer
+        language:
+          type: string
+        provider:
+          type: string
+        model:
+          type: string
+        auto_publish:
+          type: boolean
+        max_cycles:
+          type: integer
+        ai_threshold:
+          type: number
+        include_images:
+          type: boolean
+          nullable: true
+    GenerateBatchAccepted:
+      type: object
+      required: [ count, article_ids ]
+      properties:
+        count:
+          type: integer
+        article_ids:
+          type: array
+          items:
+            type: integer
+            format: int64
     ArticleList:
       type: object
       required: [ items, total ]
@@ -524,6 +657,42 @@ components:
         sheet:
           type: string
         websites_queued:
+          type: integer
+
+    ScrapeEmailsRequest:
+      type: object
+      required: [ sheet ]
+      properties:
+        sheet:
+          type: string
+          example: DONORS
+          x-oapi-codegen-extra-tags:
+            validate: "required,min=1"
+
+    ScrapeEmailsAccepted:
+      type: object
+      required: [ sheet, sites_queued, job_id ]
+      properties:
+        sheet:
+          type: string
+        sites_queued:
+          type: integer
+        job_id:
+          type: string
+
+    ScrapeJob:
+      type: object
+      required: [ id, sheet, state, total, processed ]
+      properties:
+        id:
+          type: string
+        sheet:
+          type: string
+        state:
+          type: string
+        total:
+          type: integer
+        processed:
           type: integer
 
     SiteLoginRequest:
@@ -709,8 +878,31 @@ components:
         updated_at:
           type: string
           format: date-time
+        published_at:
+          type: string
+          format: date-time
+          nullable: true
+        request_params:
+          type: object
+          nullable: true
+          x-go-type: json.RawMessage
         human_rating:
           type: boolean
+          nullable: true
+        ai_score:
+          type: number
+          nullable: true
+        reward:
+          type: number
+          nullable: true
+        quality_ok:
+          type: boolean
+          nullable: true
+        humanize_cycles:
+          type: integer
+          nullable: true
+        tokens:
+          type: integer
           nullable: true
 
     LoginRequest:

@@ -21,6 +21,7 @@ type ArticleRepository interface {
 	Create(ctx context.Context, in CreateArticle) (int64, error)
 	Get(ctx context.Context, id int64) (*Article, error)
 	List(ctx context.Context, limit, offset int) ([]Article, int, error)
+	GeneratedKeywords(ctx context.Context, siteID uuid.UUID) ([]string, error)
 
 	UpdateDraft(ctx context.Context, id, wpPostID int64, editURL string) error
 	MarkFailed(ctx context.Context, id int64) error

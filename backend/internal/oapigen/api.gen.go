@@ -85,18 +85,25 @@ type ApiTokenCreated struct {
 
 // Article defines model for Article.
 type Article struct {
+	AiScore         *float32            `json:"ai_score,omitempty"`
 	CheckResult     *json.RawMessage    `json:"check_result,omitempty"`
 	CompetitorData  *json.RawMessage    `json:"competitor_data,omitempty"`
 	CreatedAt       time.Time           `json:"created_at"`
 	HumanRating     *bool               `json:"human_rating,omitempty"`
+	HumanizeCycles  *int                `json:"humanize_cycles,omitempty"`
 	Id              int64               `json:"id"`
 	ImagesRequested *int                `json:"images_requested,omitempty"`
 	ImagesResolved  *int                `json:"images_resolved,omitempty"`
 	ImagesSkipped   *int                `json:"images_skipped,omitempty"`
 	Keyword         string              `json:"keyword"`
+	PublishedAt     *time.Time          `json:"published_at,omitempty"`
+	QualityOk       *bool               `json:"quality_ok,omitempty"`
+	RequestParams   *json.RawMessage    `json:"request_params,omitempty"`
+	Reward          *float32            `json:"reward,omitempty"`
 	Site            *string             `json:"site,omitempty"`
 	SiteId          *openapi_types.UUID `json:"site_id,omitempty"`
 	Status          string              `json:"status"`
+	Tokens          *int                `json:"tokens,omitempty"`
 	UpdatedAt       time.Time           `json:"updated_at"`
 	WpEditUrl       *string             `json:"wp_edit_url,omitempty"`
 	WpPostId        *int64              `json:"wp_post_id,omitempty"`
@@ -144,6 +151,28 @@ type GenerateAccepted struct {
 	StatusUrl      *string             `json:"status_url,omitempty"`
 	SuggestedTitle *string             `json:"suggested_title,omitempty"`
 	TargetKeywords []string            `json:"target_keywords,omitempty"`
+}
+
+// GenerateBatchAccepted defines model for GenerateBatchAccepted.
+type GenerateBatchAccepted struct {
+	ArticleIds []int64 `json:"article_ids"`
+	Count      int     `json:"count"`
+}
+
+// GenerateBatchRequest defines model for GenerateBatchRequest.
+type GenerateBatchRequest struct {
+	AiThreshold   *float32           `json:"ai_threshold,omitempty"`
+	AutoPublish   *bool              `json:"auto_publish,omitempty"`
+	Count         int                `json:"count" validate:"required,min=1,max=100"`
+	IncludeImages *bool              `json:"include_images,omitempty"`
+	Language      *string            `json:"language,omitempty"`
+	MaxCycles     *int               `json:"max_cycles,omitempty"`
+	MaxTokens     *int               `json:"max_tokens,omitempty"`
+	MaxWords      *int               `json:"max_words,omitempty"`
+	MinWords      *int               `json:"min_words,omitempty"`
+	Model         *string            `json:"model,omitempty"`
+	Provider      *string            `json:"provider,omitempty"`
+	SiteId        openapi_types.UUID `json:"site_id" validate:"required"`
 }
 
 // GenerateRequest defines model for GenerateRequest.
@@ -235,6 +264,27 @@ type RateArticleRequest struct {
 // RateArticleRequestRating defines model for RateArticleRequest.Rating.
 type RateArticleRequestRating string
 
+// ScrapeEmailsAccepted defines model for ScrapeEmailsAccepted.
+type ScrapeEmailsAccepted struct {
+	JobId       string `json:"job_id"`
+	Sheet       string `json:"sheet"`
+	SitesQueued int    `json:"sites_queued"`
+}
+
+// ScrapeEmailsRequest defines model for ScrapeEmailsRequest.
+type ScrapeEmailsRequest struct {
+	Sheet string `json:"sheet" validate:"required,min=1"`
+}
+
+// ScrapeJob defines model for ScrapeJob.
+type ScrapeJob struct {
+	Id        string `json:"id"`
+	Processed int    `json:"processed"`
+	Sheet     string `json:"sheet"`
+	State     string `json:"state"`
+	Total     int    `json:"total"`
+}
+
 // SiteLoginAccepted defines model for SiteLoginAccepted.
 type SiteLoginAccepted struct {
 	Sheet       string `json:"sheet"`
@@ -306,8 +356,14 @@ type RateArticleJSONRequestBody = RateArticleRequest
 // LoginJSONRequestBody defines body for Login for application/json ContentType.
 type LoginJSONRequestBody = LoginRequest
 
+// ScrapeEmailsJSONRequestBody defines body for ScrapeEmails for application/json ContentType.
+type ScrapeEmailsJSONRequestBody = ScrapeEmailsRequest
+
 // GenerateArticleJSONRequestBody defines body for GenerateArticle for application/json ContentType.
 type GenerateArticleJSONRequestBody = GenerateRequest
+
+// GenerateBatchJSONRequestBody defines body for GenerateBatch for application/json ContentType.
+type GenerateBatchJSONRequestBody = GenerateBatchRequest
 
 // LoginToSitesJSONRequestBody defines body for LoginToSites for application/json ContentType.
 type LoginToSitesJSONRequestBody = SiteLoginRequest
@@ -350,9 +406,21 @@ type ServerInterface interface {
 	// Authenticate and receive a JWT
 	// (POST /auth/login)
 	Login(w http.ResponseWriter, r *http.Request)
+	// Crawl the sites listed in a sheet and scrape their email addresses
+	// (POST /emailscrape)
+	ScrapeEmails(w http.ResponseWriter, r *http.Request)
+	// Get the progress and state of a scrape job
+	// (GET /emailscrape/jobs/{id})
+	GetScrapeJob(w http.ResponseWriter, r *http.Request, id string)
+	// Request cancellation of a running scrape job
+	// (POST /emailscrape/jobs/{id}/cancel)
+	CancelScrapeJob(w http.ResponseWriter, r *http.Request, id string)
 	// Queue an article for generation
 	// (POST /generate)
 	GenerateArticle(w http.ResponseWriter, r *http.Request)
+	// Queue a batch from the next N unused sheet topics
+	// (POST /generate/batch)
+	GenerateBatch(w http.ResponseWriter, r *http.Request)
 	// Health check
 	// (GET /healthz)
 	GetHealthz(w http.ResponseWriter, r *http.Request)
@@ -437,9 +505,33 @@ func (_ Unimplemented) Login(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// Crawl the sites listed in a sheet and scrape their email addresses
+// (POST /emailscrape)
+func (_ Unimplemented) ScrapeEmails(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Get the progress and state of a scrape job
+// (GET /emailscrape/jobs/{id})
+func (_ Unimplemented) GetScrapeJob(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Request cancellation of a running scrape job
+// (POST /emailscrape/jobs/{id}/cancel)
+func (_ Unimplemented) CancelScrapeJob(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // Queue an article for generation
 // (POST /generate)
 func (_ Unimplemented) GenerateArticle(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Queue a batch from the next N unused sheet topics
+// (POST /generate/batch)
+func (_ Unimplemented) GenerateBatch(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -746,6 +838,90 @@ func (siw *ServerInterfaceWrapper) Login(w http.ResponseWriter, r *http.Request)
 	handler.ServeHTTP(w, r)
 }
 
+// ScrapeEmails operation middleware
+func (siw *ServerInterfaceWrapper) ScrapeEmails(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ScrapeEmails(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetScrapeJob operation middleware
+func (siw *ServerInterfaceWrapper) GetScrapeJob(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetScrapeJob(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CancelScrapeJob operation middleware
+func (siw *ServerInterfaceWrapper) CancelScrapeJob(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CancelScrapeJob(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GenerateArticle operation middleware
 func (siw *ServerInterfaceWrapper) GenerateArticle(w http.ResponseWriter, r *http.Request) {
 
@@ -757,6 +933,26 @@ func (siw *ServerInterfaceWrapper) GenerateArticle(w http.ResponseWriter, r *htt
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GenerateArticle(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GenerateBatch operation middleware
+func (siw *ServerInterfaceWrapper) GenerateBatch(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GenerateBatch(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1134,7 +1330,19 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Post(options.BaseURL+"/auth/login", wrapper.Login)
 	})
 	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/emailscrape", wrapper.ScrapeEmails)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/emailscrape/jobs/{id}", wrapper.GetScrapeJob)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/emailscrape/jobs/{id}/cancel", wrapper.CancelScrapeJob)
+	})
+	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/generate", wrapper.GenerateArticle)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/generate/batch", wrapper.GenerateBatch)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/healthz", wrapper.GetHealthz)
@@ -1470,6 +1678,114 @@ func (response Login401ApplicationProblemPlusJSONResponse) VisitLoginResponse(w 
 	return err
 }
 
+type ScrapeEmailsRequestObject struct {
+	Body *ScrapeEmailsJSONRequestBody
+}
+
+type ScrapeEmailsResponseObject interface {
+	VisitScrapeEmailsResponse(w http.ResponseWriter) error
+}
+
+type ScrapeEmails202JSONResponse ScrapeEmailsAccepted
+
+func (response ScrapeEmails202JSONResponse) VisitScrapeEmailsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(202)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScrapeEmails400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response ScrapeEmails400ApplicationProblemPlusJSONResponse) VisitScrapeEmailsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetScrapeJobRequestObject struct {
+	Id string `json:"id"`
+}
+
+type GetScrapeJobResponseObject interface {
+	VisitGetScrapeJobResponse(w http.ResponseWriter) error
+}
+
+type GetScrapeJob200JSONResponse ScrapeJob
+
+func (response GetScrapeJob200JSONResponse) VisitGetScrapeJobResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetScrapeJob404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response GetScrapeJob404ApplicationProblemPlusJSONResponse) VisitGetScrapeJobResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CancelScrapeJobRequestObject struct {
+	Id string `json:"id"`
+}
+
+type CancelScrapeJobResponseObject interface {
+	VisitCancelScrapeJobResponse(w http.ResponseWriter) error
+}
+
+type CancelScrapeJob202Response struct {
+}
+
+func (response CancelScrapeJob202Response) VisitCancelScrapeJobResponse(w http.ResponseWriter) error {
+	w.WriteHeader(202)
+	return nil
+}
+
+type CancelScrapeJob404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response CancelScrapeJob404ApplicationProblemPlusJSONResponse) VisitCancelScrapeJobResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type GenerateArticleRequestObject struct {
 	Body *GenerateArticleJSONRequestBody
 }
@@ -1520,6 +1836,44 @@ func (response GenerateArticle404ApplicationProblemPlusJSONResponse) VisitGenera
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GenerateBatchRequestObject struct {
+	Body *GenerateBatchJSONRequestBody
+}
+
+type GenerateBatchResponseObject interface {
+	VisitGenerateBatchResponse(w http.ResponseWriter) error
+}
+
+type GenerateBatch202JSONResponse GenerateBatchAccepted
+
+func (response GenerateBatch202JSONResponse) VisitGenerateBatchResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(202)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GenerateBatch400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response GenerateBatch400ApplicationProblemPlusJSONResponse) VisitGenerateBatchResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -1920,9 +2274,21 @@ type StrictServerInterface interface {
 	// Authenticate and receive a JWT
 	// (POST /auth/login)
 	Login(ctx context.Context, request LoginRequestObject) (LoginResponseObject, error)
+	// Crawl the sites listed in a sheet and scrape their email addresses
+	// (POST /emailscrape)
+	ScrapeEmails(ctx context.Context, request ScrapeEmailsRequestObject) (ScrapeEmailsResponseObject, error)
+	// Get the progress and state of a scrape job
+	// (GET /emailscrape/jobs/{id})
+	GetScrapeJob(ctx context.Context, request GetScrapeJobRequestObject) (GetScrapeJobResponseObject, error)
+	// Request cancellation of a running scrape job
+	// (POST /emailscrape/jobs/{id}/cancel)
+	CancelScrapeJob(ctx context.Context, request CancelScrapeJobRequestObject) (CancelScrapeJobResponseObject, error)
 	// Queue an article for generation
 	// (POST /generate)
 	GenerateArticle(ctx context.Context, request GenerateArticleRequestObject) (GenerateArticleResponseObject, error)
+	// Queue a batch from the next N unused sheet topics
+	// (POST /generate/batch)
+	GenerateBatch(ctx context.Context, request GenerateBatchRequestObject) (GenerateBatchResponseObject, error)
 	// Health check
 	// (GET /healthz)
 	GetHealthz(ctx context.Context, request GetHealthzRequestObject) (GetHealthzResponseObject, error)
@@ -2207,6 +2573,89 @@ func (sh *strictHandler) Login(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// ScrapeEmails operation middleware
+func (sh *strictHandler) ScrapeEmails(w http.ResponseWriter, r *http.Request) {
+	var request ScrapeEmailsRequestObject
+
+	var body ScrapeEmailsJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ScrapeEmails(ctx, request.(ScrapeEmailsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ScrapeEmails")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ScrapeEmailsResponseObject); ok {
+		if err := validResponse.VisitScrapeEmailsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetScrapeJob operation middleware
+func (sh *strictHandler) GetScrapeJob(w http.ResponseWriter, r *http.Request, id string) {
+	var request GetScrapeJobRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetScrapeJob(ctx, request.(GetScrapeJobRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetScrapeJob")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetScrapeJobResponseObject); ok {
+		if err := validResponse.VisitGetScrapeJobResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CancelScrapeJob operation middleware
+func (sh *strictHandler) CancelScrapeJob(w http.ResponseWriter, r *http.Request, id string) {
+	var request CancelScrapeJobRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CancelScrapeJob(ctx, request.(CancelScrapeJobRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CancelScrapeJob")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CancelScrapeJobResponseObject); ok {
+		if err := validResponse.VisitCancelScrapeJobResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // GenerateArticle operation middleware
 func (sh *strictHandler) GenerateArticle(w http.ResponseWriter, r *http.Request) {
 	var request GenerateArticleRequestObject
@@ -2231,6 +2680,37 @@ func (sh *strictHandler) GenerateArticle(w http.ResponseWriter, r *http.Request)
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GenerateArticleResponseObject); ok {
 		if err := validResponse.VisitGenerateArticleResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GenerateBatch operation middleware
+func (sh *strictHandler) GenerateBatch(w http.ResponseWriter, r *http.Request) {
+	var request GenerateBatchRequestObject
+
+	var body GenerateBatchJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GenerateBatch(ctx, request.(GenerateBatchRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GenerateBatch")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GenerateBatchResponseObject); ok {
+		if err := validResponse.VisitGenerateBatchResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -2524,59 +3004,67 @@ func (sh *strictHandler) UpdateWordpressSite(w http.ResponseWriter, r *http.Requ
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"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",
+	"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",
+	"YAtuOgg0TWZTmJe2VWoxW1wt/hkAAP//",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

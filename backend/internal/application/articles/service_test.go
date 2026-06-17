@@ -45,6 +45,15 @@ func (r *fakeRepo) MarkPublished(_ context.Context, id int64, postURL string) er
 	r.arts[id].Status, r.arts[id].WPPostURL = articles.StatusPublished, postURL
 	return nil
 }
+func (r *fakeRepo) GeneratedKeywords(_ context.Context, siteID uuid.UUID) ([]string, error) {
+	var out []string
+	for _, a := range r.arts {
+		if a.Status != articles.StatusFailed && a.SiteID == siteID {
+			out = append(out, a.Keyword)
+		}
+	}
+	return out, nil
+}
 func (r *fakeRepo) SetHumanRating(_ context.Context, id int64, rating *bool) error {
 	if a := r.arts[id]; a != nil {
 		a.HumanRating = rating
@@ -77,6 +86,15 @@ type fakeTopics struct{}
 
 func (fakeTopics) Lookup(_ context.Context, topic string) (articles.Cluster, error) {
 	return articles.Cluster{Keywords: []string{topic, "secondary"}, Title: "Title"}, nil
+}
+func (fakeTopics) Topics(context.Context) ([]string, error) {
+	return []string{"topic-a", "topic-b"}, nil
+}
+func (fakeTopics) Clusters(context.Context) (map[string]articles.Cluster, error) {
+	return map[string]articles.Cluster{
+		"topic-a": {Keywords: []string{"topic-a", "secondary"}, Title: "Title"},
+		"topic-b": {Keywords: []string{"topic-b", "secondary"}, Title: "Title"},
+	}, nil
 }
 
 type fakeChecker struct{}
@@ -146,4 +164,8 @@ type emptyTopics struct{}
 
 func (emptyTopics) Lookup(context.Context, string) (articles.Cluster, error) {
 	return articles.Cluster{}, nil
+}
+func (emptyTopics) Topics(context.Context) ([]string, error) { return nil, nil }
+func (emptyTopics) Clusters(context.Context) (map[string]articles.Cluster, error) {
+	return nil, nil
 }

@@ -8,20 +8,16 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"net"
 	"net/http"
-	"net/netip"
 	"net/url"
 	"sort"
 	"strings"
-	"syscall"
 	"time"
+
+	"multiagent-seo/pkg/httpx"
 )
 
-const (
-	userAgent = "Mozilla/5.0 (compatible; multiagent-seo-bot/1.0)"
-	maxBody   = 4 << 20
-)
+const maxBody = 4 << 20
 
 type Discoverer struct {
 	http *http.Client
@@ -32,29 +28,10 @@ func New(log *slog.Logger) *Discoverer {
 	if log == nil {
 		log = slog.Default()
 	}
-	d := &Discoverer{log: log}
-	dialer := &net.Dialer{
-		Timeout: 10 * time.Second,
-		Control: func(_ string, address string, _ syscall.RawConn) error {
-			host, _, err := net.SplitHostPort(address)
-			if err != nil {
-				return err
-			}
-			ip, err := netip.ParseAddr(host)
-			if err != nil {
-				return err
-			}
-			if disallowedIP(ip) {
-				return fmt.Errorf("blocked address %s", ip)
-			}
-			return nil
-		},
+	return &Discoverer{
+		log:  log,
+		http: httpx.New(httpx.WithTimeout(12*time.Second), httpx.BlockPrivateIPs()),
 	}
-	d.http = &http.Client{
-		Timeout:   12 * time.Second,
-		Transport: &http.Transport{DialContext: dialer.DialContext},
-	}
-	return d
 }
 
 func (d *Discoverer) Discover(ctx context.Context, siteURL string, limit int) ([]string, error) {
@@ -195,7 +172,6 @@ func (d *Discoverer) fetch(ctx context.Context, rawURL string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", userAgent)
 	resp, err := d.http.Do(req)
 	if err != nil {
 		return nil, err
@@ -266,17 +242,3 @@ func looksLikePost(loc string) bool {
 	}
 	return strings.Count(path, "/") >= 1
 }
-
-func disallowedIP(ip netip.Addr) bool {
-	ip = ip.Unmap()
-	if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() ||
-		ip.IsMulticast() || ip.IsUnspecified() || ip.IsInterfaceLocalMulticast() {
-		return true
-	}
-	if ip.Is4() && cgnat.Contains(ip) {
-		return true
-	}
-	return false
-}
-
-var cgnat = netip.MustParsePrefix("100.64.0.0/10")

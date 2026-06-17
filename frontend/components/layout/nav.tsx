@@ -12,6 +12,7 @@ const links = [
   { href: '/linkbuilding/qualify', label: 'Qualify donors' },
   { href: '/linkbuilding/login', label: 'Auto-login' },
   { href: '/linkbuilding/place-backlinks', label: 'Place backlinks' },
+  { href: '/emailscrape', label: 'Email scrape' },
 ]
 
 export function Nav() {

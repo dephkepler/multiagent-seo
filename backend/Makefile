@@ -1,4 +1,4 @@
-.PHONY: dev db run stop up down logs creds generate migrate-up migrate-down migrate-create
+.PHONY: dev db run stop up down logs creds generate migrate-up migrate-down migrate-create lint
 
 -include .env
 export
@@ -51,3 +51,9 @@ down:
 
 logs:
 	$(COMPOSE) logs -f app
+
+lint:
+	@test -z "$$(gofmt -s -l .)" || { gofmt -s -l .; echo "run: gofmt -s -w ."; exit 1; }
+	go vet ./...
+	go run github.com/gordonklaus/ineffassign@latest ./...
+	go run github.com/kisielk/errcheck@latest -ignore 'Close$$' ./...

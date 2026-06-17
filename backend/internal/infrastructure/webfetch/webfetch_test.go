@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"net/netip"
 	"slices"
 	"strings"
 	"testing"
@@ -100,36 +99,8 @@ func TestTruncateRunesBoundary(t *testing.T) {
 	}
 }
 
-func TestDisallowedIP(t *testing.T) {
-	cases := []struct {
-		ip   string
-		want bool
-	}{
-		{"127.0.0.1", true},
-		{"169.254.169.254", true},
-		{"10.0.0.1", true},
-		{"192.168.1.1", true},
-		{"172.16.0.1", true},
-		{"100.64.0.1", true},
-		{"::1", true},
-		{"fe80::1", true},
-		{"fc00::1", true},
-		{"8.8.8.8", false},
-		{"1.1.1.1", false},
-	}
-	for _, c := range cases {
-		got := disallowedIP(netip.MustParseAddr(c.ip))
-		if got != c.want {
-			t.Errorf("disallowedIP(%s) = %v, want %v", c.ip, got, c.want)
-		}
-	}
-}
-
 func testFetcher() *Fetcher {
-	f := New(nil)
-	f.allowLoopback = true
-	f.http.Transport = f.transport()
-	return f
+	return newFetcher(nil, true)
 }
 
 func TestFetchRedirectToBlockedTarget(t *testing.T) {
