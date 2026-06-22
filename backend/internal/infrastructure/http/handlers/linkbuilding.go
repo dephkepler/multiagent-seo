@@ -3,7 +3,6 @@ package handlers
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"reflect"
 	"strings"
@@ -24,10 +23,6 @@ func isNil(i any) bool {
 	return v.Kind() == reflect.Ptr && v.IsNil()
 }
 
-type linkbuildingService interface {
-	QualifyWebsites(ctx context.Context, req applb.QualifyRequest) (applb.QualifyResult, error)
-}
-
 type linkbuildingLoginService interface {
 	LoginToSites(ctx context.Context, req applb.LoginRequest) (applb.LoginQueued, error)
 }
@@ -37,57 +32,18 @@ type linkbuildingBacklinkService interface {
 }
 
 type LinkbuildingHandler struct {
-	svc         linkbuildingService
 	loginSvc    linkbuildingLoginService
 	backlinkSvc linkbuildingBacklinkService
 }
 
-func NewLinkbuildingHandler(svc linkbuildingService, loginSvc linkbuildingLoginService, backlinkSvc linkbuildingBacklinkService) *LinkbuildingHandler {
-	return &LinkbuildingHandler{svc: svc, loginSvc: loginSvc, backlinkSvc: backlinkSvc}
+func NewLinkbuildingHandler(loginSvc linkbuildingLoginService, backlinkSvc linkbuildingBacklinkService) *LinkbuildingHandler {
+	return &LinkbuildingHandler{loginSvc: loginSvc, backlinkSvc: backlinkSvc}
 }
 
-func (h *LinkbuildingHandler) QualifyWebsites(w http.ResponseWriter, r *http.Request) {
-	if isNil(h.svc) {
-		problem.Write(w, http.StatusServiceUnavailable, "link building unavailable")
-		return
-	}
-	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
-	var body oapigen.QualifyRequest
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		log := logger.New(r.Context(), "handlers.linkbuilding")
-		log.Debug().Err(err).Msg("decode qualify body")
-		problem.Write(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
-	if err := validate.Validate(body); err != nil {
-		problem.Write(w, http.StatusBadRequest, strings.Join(validate.MissingFields(err), ", "))
-		return
-	}
-
-	res, err := h.svc.QualifyWebsites(r.Context(), applb.QualifyRequest{
-		Sheet:           body.Sheet,
-		AcceptedTopics:  body.AcceptedTopics,
-		CandidateTopics: body.CandidateTopics,
-		Provider:        derefStr(body.Provider),
-		Model:           derefStr(body.Model),
-	})
-	if err != nil {
-		switch {
-		case errors.Is(err, applb.ErrNoSheet), errors.Is(err, applb.ErrNoTopics):
-			problem.Write(w, http.StatusBadRequest, err.Error())
-		default:
-			log := logger.New(r.Context(), "handlers.linkbuilding")
-			log.Error().Err(err).Str("op", "qualify_websites").Msg("internal error")
-			problem.Write(w, http.StatusInternalServerError, "internal error")
-		}
-		return
-	}
-
-	response.WriteJSON(r.Context(), w, http.StatusAccepted, oapigen.QualifyAccepted{
-		Sheet:          res.Sheet,
-		WebsitesQueued: res.WebsitesQueued,
-	})
-}
+var linkbuildingErrMap = newErrMap("handlers.linkbuilding",
+	EMsg(applb.ErrNoSheet, http.StatusBadRequest),
+	EMsg(applb.ErrNoTargetSite, http.StatusBadRequest),
+)
 
 func (h *LinkbuildingHandler) LoginToSites(w http.ResponseWriter, r *http.Request) {
 	if isNil(h.loginSvc) {
@@ -107,16 +63,9 @@ func (h *LinkbuildingHandler) LoginToSites(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	res, err := h.loginSvc.LoginToSites(r.Context(), applb.LoginRequest{Sheet: body.Sheet, Topics: body.Topics})
+	res, err := h.loginSvc.LoginToSites(r.Context(), applb.LoginRequest{Sheet: body.Sheet})
 	if err != nil {
-		switch {
-		case errors.Is(err, applb.ErrNoSheet):
-			problem.Write(w, http.StatusBadRequest, err.Error())
-		default:
-			log := logger.New(r.Context(), "handlers.linkbuilding")
-			log.Error().Err(err).Str("op", "login_to_sites").Msg("internal error")
-			problem.Write(w, http.StatusInternalServerError, "internal error")
-		}
+		linkbuildingErrMap.Handle(r.Context(), w, "login_to_sites", err)
 		return
 	}
 
@@ -147,19 +96,12 @@ func (h *LinkbuildingHandler) PlaceBacklinks(w http.ResponseWriter, r *http.Requ
 	res, err := h.backlinkSvc.PlaceBacklinks(r.Context(), applb.PlaceBacklinksRequest{
 		Sheet:         body.Sheet,
 		TargetSiteURL: body.TargetSiteUrl,
-		Topics:        body.Topics,
+		Count:         deref(body.Count),
 		Provider:      derefStr(body.Provider),
 		Model:         derefStr(body.Model),
 	})
 	if err != nil {
-		switch {
-		case errors.Is(err, applb.ErrNoSheet), errors.Is(err, applb.ErrNoTargetSite):
-			problem.Write(w, http.StatusBadRequest, err.Error())
-		default:
-			log := logger.New(r.Context(), "handlers.linkbuilding")
-			log.Error().Err(err).Str("op", "place_backlinks").Msg("internal error")
-			problem.Write(w, http.StatusInternalServerError, "internal error")
-		}
+		linkbuildingErrMap.Handle(r.Context(), w, "place_backlinks", err)
 		return
 	}
 

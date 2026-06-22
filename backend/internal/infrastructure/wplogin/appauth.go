@@ -11,6 +11,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"multiagent-seo/pkg/httpx"
 )
 
 var nonceRe = regexp.MustCompile(`wpApiSettings\s*=\s*\{[^}]*"nonce":"([a-zA-Z0-9]+)"`)
@@ -64,7 +66,6 @@ func (a *Authenticator) IssueAppPassword(ctx context.Context, donorURL, login, p
 		return "", fmt.Errorf("login request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("User-Agent", userAgent)
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("login post: %w", err)
@@ -94,13 +95,12 @@ func fetchNonce(ctx context.Context, client *http.Client, profileURL string) (st
 	if err != nil {
 		return "", fmt.Errorf("fetch nonce request: %w", err)
 	}
-	req.Header.Set("User-Agent", userAgent)
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("fetch nonce: %w", err)
 	}
 	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, httpx.MaxPageBytes))
 	if err != nil {
 		return "", fmt.Errorf("read profile response: %w", err)
 	}
@@ -126,7 +126,6 @@ func createAppPassword(ctx context.Context, client *http.Client, origin, nonce, 
 		return "", fmt.Errorf("create app password request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", userAgent)
 	req.Header.Set("X-WP-Nonce", nonce)
 
 	resp, err := client.Do(req)
@@ -134,7 +133,7 @@ func createAppPassword(ctx context.Context, client *http.Client, origin, nonce, 
 		return "", fmt.Errorf("create app password: %w", err)
 	}
 	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, httpx.MaxResponseBytes))
 	if err != nil {
 		return "", fmt.Errorf("read app password response: %w", err)
 	}

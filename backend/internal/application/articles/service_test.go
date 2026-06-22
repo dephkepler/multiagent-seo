@@ -16,10 +16,11 @@ type fakeRepo struct {
 	next int64
 }
 
-func (r *fakeRepo) Create(_ context.Context, in articles.CreateArticle) (int64, error) {
+func (r *fakeRepo) Create(_ context.Context, in articles.CreateArticle) (articles.Article, error) {
 	r.next++
-	r.arts[r.next] = &articles.Article{ID: r.next, Keyword: in.Keyword, SiteID: in.SiteID, Status: articles.StatusGenerating}
-	return r.next, nil
+	a := articles.Article{ID: r.next, Keyword: in.Keyword, SiteID: in.SiteID, Status: articles.StatusGenerating}
+	r.arts[r.next] = &a
+	return a, nil
 }
 func (r *fakeRepo) Get(_ context.Context, id int64) (*articles.Article, error) {
 	a, ok := r.arts[id]

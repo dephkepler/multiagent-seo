@@ -20,7 +20,7 @@ tags:
   - name: Articles
     description: SEO article generation and publishing
   - name: Link Building
-    description: Donor-website qualification
+    description: Donor-website login and backlink placement
   - name: API Tokens
     description: Long-lived per-user API keys
 
@@ -390,29 +390,6 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
-  /linkbuilding/qualify:
-    post:
-      operationId: qualifyWebsites
-      security:
-        - bearerAuth: [ ]
-      tags: [ Link Building ]
-      summary: Qualify donor websites listed in a sheet
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/QualifyRequest"
-      responses:
-        "202":
-          description: Qualification accepted; results are written back to the sheet
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/QualifyAccepted"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-
   /linkbuilding/login:
     post:
       operationId: loginToSites
@@ -621,44 +598,6 @@ components:
         rating:
           type: string
           enum: [ like, dislike, none ]
-    QualifyRequest:
-      type: object
-      required: [ sheet, accepted_topics ]
-      properties:
-        sheet:
-          type: string
-          example: WEBSITES
-          x-oapi-codegen-extra-tags:
-            validate: "required,min=1"
-        accepted_topics:
-          type: array
-          items:
-            type: string
-          example: [ "travel" ]
-          x-oapi-codegen-extra-tags:
-            validate: "required,min=1"
-        candidate_topics:
-          type: array
-          items:
-            type: string
-          example: [ "travel", "tech", "ecommerce", "education", "casino", "news", "health", "food", "fashion", "fintech" ]
-        provider:
-          type: string
-          example: claude
-          description: Override the default LLM provider for this run only. Falls back to LLM_QUALIFY_PROVIDER (or LLM_PROVIDER) when empty.
-        model:
-          type: string
-          description: Override the default LLM model for this run only. Falls back to LLM_QUALIFY_MODEL (or LLM_MODEL) when empty.
-
-    QualifyAccepted:
-      type: object
-      required: [ sheet, websites_queued ]
-      properties:
-        sheet:
-          type: string
-        websites_queued:
-          type: integer
-
     ScrapeEmailsRequest:
       type: object
       required: [ sheet ]
@@ -704,12 +643,6 @@ components:
           example: WEBSITES
           x-oapi-codegen-extra-tags:
             validate: "required,min=1"
-        topics:
-          type: array
-          items:
-            type: string
-          example: [ "travel" ]
-          description: Optional Flow 1 topic allow-list. When set, only donors whose column B matches one of these (case-insensitive) are tried.
 
     SiteLoginAccepted:
       type: object
@@ -736,12 +669,10 @@ components:
           description: Public URL of one of the user's wordpress_sites; the backend rejects URLs not present in that table.
           x-oapi-codegen-extra-tags:
             validate: "required,url"
-        topics:
-          type: array
-          items:
-            type: string
-          example: [ "travel" ]
-          description: Optional Flow 1 topic allow-list. When set, only donors whose column B matches one of these (case-insensitive) are tried.
+        count:
+          type: integer
+          example: 3
+          description: Stop after this many SUCCESSFUL placements (failures don't count). Defaults to 3 when omitted.
         provider:
           type: string
           example: claude

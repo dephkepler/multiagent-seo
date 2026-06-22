@@ -27,9 +27,6 @@ var junkDomains = []string{
 	"schema.org", "w3.org", "sentry-next.wixpress.com",
 }
 
-// ExtractEmails pulls unique, normalized, real-looking addresses out of a page's
-// raw HTML: plain text, mailto: links, [at]/[dot] obfuscation, and Cloudflare's
-// data-cfemail protection. Junk and duplicates are dropped.
 func ExtractEmails(html string) []string {
 	seen := make(map[string]struct{})
 	add := func(raw string) {

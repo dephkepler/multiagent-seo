@@ -1,25 +1,57 @@
-package app
+package root
 
 import (
 	"context"
 	"log/slog"
 
-	"github.com/rs/zerolog/log"
+	"github.com/jackc/pgx/v5/pgxpool"
 
-	appapitoken "multiagent-seo/internal/application/apitoken"
 	apparticles "multiagent-seo/internal/application/articles"
-	appauth "multiagent-seo/internal/application/auth"
-	appwordpress "multiagent-seo/internal/application/wordpress"
+	"multiagent-seo/internal/application/promptevolution"
 	domainarticles "multiagent-seo/internal/domain/articles"
 	"multiagent-seo/internal/domain/articles/prompt"
-	domainauth "multiagent-seo/internal/domain/auth"
 	"multiagent-seo/internal/infrastructure/checker"
 	"multiagent-seo/internal/infrastructure/dataforseo"
-	"multiagent-seo/internal/infrastructure/http/handlers"
+	infrallm "multiagent-seo/internal/infrastructure/llm"
 	"multiagent-seo/internal/infrastructure/persistence/postgres"
+	"multiagent-seo/internal/infrastructure/pexels"
 	"multiagent-seo/internal/infrastructure/sheets"
+	infrawp "multiagent-seo/internal/infrastructure/wordpress"
 	"multiagent-seo/pkg/config"
+	"multiagent-seo/pkg/jobrunner"
 )
+
+func buildArticles(ctx context.Context, cfg config.Config, log *slog.Logger, pool *pgxpool.Pool, wordpressRepo *postgres.WordpressSiteRepository) (*apparticles.Service, *promptevolution.Service, *jobrunner.AsyncRunner) {
+	runner := jobrunner.NewAsyncRunner(cfg.Server.BackgroundJobTimeout, cfg.Server.BackgroundJobConcurrency, log)
+	articleRepo := postgres.NewArticleRepository(pool)
+	promptRepo := postgres.NewPromptRepository(pool)
+	llmFactory := infrallm.NewFactory(cfg.LLM, log)
+
+	svc := apparticles.NewService(
+		articleRepo,
+		llmFactory,
+		newSERP(cfg, log),
+		newTopics(ctx, cfg, log),
+		newChecker(cfg, log),
+		pexels.New(cfg.Pexels.APIKey, log),
+		infrawp.NewProvider(wordpressRepo, log, cfg.WordPress.HTTPTimeout),
+		promptRepo,
+		runner,
+		articleDefaults(cfg),
+		log,
+	)
+
+	// Articles left "generating" by a previous crash are reconciled to failed on boot.
+	if n, err := articleRepo.FailOrphanedGenerating(ctx); err != nil {
+		log.Warn("reconcile orphaned generating articles", "err", err)
+	} else if n > 0 {
+		log.Info("reconciled orphaned generating articles to failed", "count", n)
+	}
+
+	seedWriterChampion(ctx, promptRepo, log)
+	evolveSvc := promptevolution.NewService(promptRepo, llmFactory, log)
+	return svc, evolveSvc, runner
+}
 
 func articleDefaults(cfg config.Config) apparticles.Defaults {
 	return apparticles.Defaults{
@@ -79,10 +111,10 @@ func newChecker(cfg config.Config, log *slog.Logger) domainarticles.ContentCheck
 	return c
 }
 
-func seedWriterChampion(ctx context.Context, store *postgres.PromptRepository) {
+func seedWriterChampion(ctx context.Context, store *postgres.PromptRepository, log *slog.Logger) {
 	vars, err := store.ActiveVariants(ctx, domainarticles.PromptStageWriter)
 	if err != nil {
-		log.Warn().Err(err).Msg("check writer prompt champion")
+		log.Warn("check writer prompt champion", "err", err)
 		return
 	}
 	for _, v := range vars {
@@ -96,52 +128,8 @@ func seedWriterChampion(ctx context.Context, store *postgres.PromptRepository) {
 		Status: domainarticles.VariantChampion,
 		Origin: domainarticles.OriginSeed,
 	}); err != nil {
-		log.Warn().Err(err).Msg("seed writer prompt champion")
+		log.Warn("seed writer prompt champion", "err", err)
 		return
 	}
-	log.Info().Msg("seeded writer prompt champion from built-in template")
-}
-
-func nilableWordpressService(svc *appwordpress.Service) handlers.WordpressService {
-	if svc == nil {
-		return nil
-	}
-	return svc
-}
-
-func nilableAuthService(svc *appauth.Service) handlers.AuthService {
-	if svc == nil {
-		return nil
-	}
-	return svc
-}
-
-func nilableArticlesHandler(svc *apparticles.Service) *handlers.ArticlesHandler {
-	if svc == nil {
-		return handlers.NewArticlesHandler(nil)
-	}
-	return handlers.NewArticlesHandler(svc)
-}
-
-func nilableApiTokensHandler(svc *appapitoken.Service) *handlers.ApiTokensHandler {
-	if svc == nil {
-		return handlers.NewApiTokensHandler(nil)
-	}
-	return handlers.NewApiTokensHandler(svc)
-}
-
-type compositeVerifier struct {
-	jwt  domainauth.TokenVerifier
-	keys *appapitoken.Service
-}
-
-func (c compositeVerifier) Verify(ctx context.Context, token string) (string, error) {
-	if appapitoken.HasKeyPrefix(token) {
-		uid, err := c.keys.Authenticate(ctx, token)
-		if err != nil {
-			return "", err
-		}
-		return uid.String(), nil
-	}
-	return c.jwt.Verify(ctx, token)
+	log.Info("seeded writer prompt champion from built-in template")
 }

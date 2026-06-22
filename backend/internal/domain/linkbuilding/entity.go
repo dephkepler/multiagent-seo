@@ -1,33 +1,10 @@
 package linkbuilding
 
-type Website struct {
-	Row int
-	URL string
-}
-
-type Page struct {
-	Title           string
-	MetaDescription string
-	Headings        []string
-	TextSample      string
-	Links           []string
-}
-
-type Result struct {
-	Row             int
-	URL             string
-	Topic           string
-	OutboundDomains int
-	PostsSampled    int
-	Suitable        bool
-}
-
 type SiteCredential struct {
 	Row             int
 	BaseURL         string
 	Login           string
 	Password        string
-	Topic           string
 	LoginStatus     string
 	PlacementStatus string
 }

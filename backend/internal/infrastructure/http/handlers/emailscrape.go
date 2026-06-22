@@ -3,7 +3,6 @@ package handlers
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"strings"
 
@@ -30,6 +29,11 @@ func NewEmailScrapeHandler(svc emailScrapeService) *EmailScrapeHandler {
 	return &EmailScrapeHandler{svc: svc}
 }
 
+var emailScrapeErrMap = newErrMap("handlers.emailscrape",
+	EMsg(appemail.ErrNoSheet, http.StatusBadRequest),
+	E(domainemail.ErrJobNotFound, http.StatusNotFound, "scrape job not found"),
+)
+
 func (h *EmailScrapeHandler) ScrapeEmails(w http.ResponseWriter, r *http.Request) {
 	if isNil(h.svc) {
 		problem.Write(w, http.StatusServiceUnavailable, "email scraping unavailable")
@@ -50,14 +54,7 @@ func (h *EmailScrapeHandler) ScrapeEmails(w http.ResponseWriter, r *http.Request
 
 	res, err := h.svc.ScrapeEmails(r.Context(), appemail.ScrapeRequest{Sheet: body.Sheet})
 	if err != nil {
-		switch {
-		case errors.Is(err, appemail.ErrNoSheet):
-			problem.Write(w, http.StatusBadRequest, err.Error())
-		default:
-			log := logger.New(r.Context(), "handlers.emailscrape")
-			log.Error().Err(err).Str("op", "scrape_emails").Msg("internal error")
-			problem.Write(w, http.StatusInternalServerError, "internal error")
-		}
+		emailScrapeErrMap.Handle(r.Context(), w, "scrape_emails", err)
 		return
 	}
 
@@ -75,13 +72,7 @@ func (h *EmailScrapeHandler) GetScrapeJob(w http.ResponseWriter, r *http.Request
 	}
 	job, err := h.svc.JobStatus(r.Context(), id)
 	if err != nil {
-		if errors.Is(err, domainemail.ErrJobNotFound) {
-			problem.Write(w, http.StatusNotFound, "scrape job not found")
-			return
-		}
-		log := logger.New(r.Context(), "handlers.emailscrape")
-		log.Error().Err(err).Str("op", "get_scrape_job").Msg("internal error")
-		problem.Write(w, http.StatusInternalServerError, "internal error")
+		emailScrapeErrMap.Handle(r.Context(), w, "get_scrape_job", err)
 		return
 	}
 
@@ -100,13 +91,7 @@ func (h *EmailScrapeHandler) CancelScrapeJob(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	if err := h.svc.Cancel(r.Context(), id); err != nil {
-		if errors.Is(err, domainemail.ErrJobNotFound) {
-			problem.Write(w, http.StatusNotFound, "scrape job not found")
-			return
-		}
-		log := logger.New(r.Context(), "handlers.emailscrape")
-		log.Error().Err(err).Str("op", "cancel_scrape_job").Msg("internal error")
-		problem.Write(w, http.StatusInternalServerError, "internal error")
+		emailScrapeErrMap.Handle(r.Context(), w, "cancel_scrape_job", err)
 		return
 	}
 	w.WriteHeader(http.StatusAccepted)

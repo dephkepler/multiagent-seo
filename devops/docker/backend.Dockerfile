@@ -1,6 +1,7 @@
 # syntax=docker/dockerfile:1
 
-FROM golang:1.25-alpine AS build
+ARG GO_VERSION=1.25
+FROM golang:${GO_VERSION}-alpine AS builder
 WORKDIR /src
 
 COPY go.mod go.sum ./
@@ -14,8 +15,9 @@ FROM alpine:3.20
 WORKDIR /app
 RUN apk add --no-cache ca-certificates
 
-COPY --from=build /out/server /app/server
-COPY --from=build /out/createuser /app/createuser
+COPY --from=builder /out/server /app/server
+COPY --from=builder /out/createuser /app/createuser
+COPY --from=builder /src/migrations /app/migrations
 
 EXPOSE 8080
-CMD ["/app/server"]
+ENTRYPOINT ["/app/server"]

@@ -44,9 +44,6 @@ func New(apiKey, model string, aiThreshold float64, log *slog.Logger) *Client {
 	if model == "" {
 		model = defaultModel
 	}
-	if aiThreshold == 0 {
-		aiThreshold = 0.8
-	}
 	if log == nil {
 		log = slog.Default()
 	}

@@ -12,7 +12,6 @@ import (
 type fakeCredSource struct {
 	creds   []domain.SiteCredential
 	written []domain.LoginResult
-	cleared int
 }
 
 func (f *fakeCredSource) ListCredentials(context.Context, string) ([]domain.SiteCredential, error) {
@@ -21,11 +20,6 @@ func (f *fakeCredSource) ListCredentials(context.Context, string) ([]domain.Site
 
 func (f *fakeCredSource) WriteLoginStatus(_ context.Context, _ string, r []domain.LoginResult) error {
 	f.written = append(f.written, r...)
-	return nil
-}
-
-func (f *fakeCredSource) ClearStaleStatuses(context.Context, string) error {
-	f.cleared++
 	return nil
 }
 
@@ -134,9 +128,6 @@ func TestLoginToSites_EmptyInventory(t *testing.T) {
 	}
 	if res.SitesQueued != 0 || len(creds.written) != 0 {
 		t.Errorf("empty inventory: queued=%d written=%d, want 0/0", res.SitesQueued, len(creds.written))
-	}
-	if creds.cleared != 1 {
-		t.Errorf("ClearStaleStatuses called %d times, want 1", creds.cleared)
 	}
 }
 

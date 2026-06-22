@@ -24,7 +24,7 @@ interface WordpressSite {
 export default function PlaceBacklinksPage() {
   const [sheet, setSheet] = useState('WEBSITES')
   const [targetSiteUrl, setTargetSiteUrl] = useState('')
-  const [topics, setTopics] = useState('')
+  const [count, setCount] = useState(3)
   const [provider, setProvider] = useState('')
 
   const sites = useQuery({
@@ -41,16 +41,12 @@ export default function PlaceBacklinksPage() {
 
   const run = useMutation({
     mutationFn: () => {
-      const topicList = topics
-        .split(',')
-        .map((t) => t.trim())
-        .filter(Boolean)
       return api<PlaceBacklinksAccepted>('/linkbuilding/place-backlinks', {
         method: 'POST',
         body: JSON.stringify({
           sheet,
           target_site_url: targetSiteUrl,
-          ...(topicList.length ? { topics: topicList } : {}),
+          count,
           ...(provider ? { provider } : {}),
         }),
       })
@@ -64,8 +60,9 @@ export default function PlaceBacklinksPage() {
       <Card>
         <h1 className='mb-1 text-lg font-semibold'>Place backlinks on donor sites</h1>
         <p className='mb-6 text-sm text-gray-500'>
-          Reads donors where column D=<code className='rounded bg-gray-100 px-1'>yes</code> and H is empty or <code className='rounded bg-gray-100 px-1'>login ok</code>, picks each donor&apos;s latest post via WP REST,
-          asks the LLM to weave in a contextual <code className='rounded bg-gray-100 px-1'>{'<a>'}</code> linking to your site, and writes the result into column I.
+          For each donor (url + login + password in columns E–G) it logs into WordPress, picks the latest post via WP REST, asks the LLM to weave in a contextual{' '}
+          <code className='rounded bg-gray-100 px-1'>{'<a>'}</code> linking to your site, updates the post, and records the result in column I. Already-placed donors are skipped;
+          it stops once it reaches the requested number of successful placements.
         </p>
         <form
           onSubmit={(e) => {
@@ -90,8 +87,8 @@ export default function PlaceBacklinksPage() {
             </Select>
           </div>
           <div>
-            <Label>Topics filter (optional, comma-separated)</Label>
-            <Input value={topics} onChange={(e) => setTopics(e.target.value)} placeholder='education, tech' />
+            <Label>How many to place today (stops after this many successful)</Label>
+            <Input type='number' min={1} value={count} onChange={(e) => setCount(Math.max(1, Math.floor(+e.target.value) || 1))} required />
           </div>
           <div>
             <Label>Provider (optional)</Label>

@@ -18,7 +18,7 @@ func NewFactory(cfg config.LLMConfig, log *slog.Logger) *Factory {
 
 func (f *Factory) ForModel(provider, model string) (articles.LLMClient, error) {
 	if model == "" {
-		model = f.cfg.ModelFor(provider)
+		model = ModelFor(f.cfg, provider)
 	}
-	return New(provider, f.cfg.KeyFor(provider), model, f.log)
+	return New(provider, KeyFor(f.cfg, provider), model, f.log)
 }

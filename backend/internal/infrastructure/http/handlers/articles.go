@@ -3,7 +3,6 @@ package handlers
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -37,9 +36,6 @@ func NewArticlesHandler(svc generateService) *ArticlesHandler {
 }
 
 func (h *ArticlesHandler) GenerateArticle(w http.ResponseWriter, r *http.Request) {
-	if h.unavailable(w) {
-		return
-	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 	var body oapigen.GenerateRequest
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -91,9 +87,6 @@ func (h *ArticlesHandler) GenerateArticle(w http.ResponseWriter, r *http.Request
 }
 
 func (h *ArticlesHandler) GenerateBatch(w http.ResponseWriter, r *http.Request) {
-	if h.unavailable(w) {
-		return
-	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 	var body oapigen.GenerateBatchRequest
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -113,7 +106,7 @@ func (h *ArticlesHandler) GenerateBatch(w http.ResponseWriter, r *http.Request) 
 		SiteID:                  body.SiteId,
 		AutoPublish:             deref(body.AutoPublish),
 		IncludeImages:           body.IncludeImages,
-		IncludeImageAttribution: ptr(false),
+		IncludeImageAttribution: ptr(false), // Batch generation doesn't support image attribution currently.
 		MinWords:                deref(body.MinWords),
 		MaxWords:                deref(body.MaxWords),
 		MaxTokens:               deref(body.MaxTokens),
@@ -138,9 +131,6 @@ func (h *ArticlesHandler) GenerateBatch(w http.ResponseWriter, r *http.Request) 
 }
 
 func (h *ArticlesHandler) ListArticles(w http.ResponseWriter, r *http.Request, params oapigen.ListArticlesParams) {
-	if h.unavailable(w) {
-		return
-	}
 	limit, offset := 25, 0
 	if params.Limit != nil {
 		limit = *params.Limit
@@ -161,9 +151,6 @@ func (h *ArticlesHandler) ListArticles(w http.ResponseWriter, r *http.Request, p
 }
 
 func (h *ArticlesHandler) GetArticle(w http.ResponseWriter, r *http.Request, id int64) {
-	if h.unavailable(w) {
-		return
-	}
 	article, err := h.svc.Get(r.Context(), id)
 	if err != nil {
 		h.writeError(r.Context(), w, "get_article", err)
@@ -173,9 +160,6 @@ func (h *ArticlesHandler) GetArticle(w http.ResponseWriter, r *http.Request, id 
 }
 
 func (h *ArticlesHandler) PublishArticle(w http.ResponseWriter, r *http.Request, id int64) {
-	if h.unavailable(w) {
-		return
-	}
 	article, err := h.svc.Publish(r.Context(), id)
 	if err != nil {
 		h.writeError(r.Context(), w, "publish_article", err)
@@ -185,9 +169,6 @@ func (h *ArticlesHandler) PublishArticle(w http.ResponseWriter, r *http.Request,
 }
 
 func (h *ArticlesHandler) RateArticle(w http.ResponseWriter, r *http.Request, id int64) {
-	if h.unavailable(w) {
-		return
-	}
 	var body oapigen.RateArticleRequest
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		problem.Write(w, http.StatusBadRequest, "invalid request body")
@@ -209,29 +190,15 @@ func (h *ArticlesHandler) RateArticle(w http.ResponseWriter, r *http.Request, id
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (h *ArticlesHandler) unavailable(w http.ResponseWriter) bool {
-	if h.svc == nil {
-		problem.Write(w, http.StatusServiceUnavailable, "database unavailable")
-		return true
-	}
-	return false
-}
+var articlesErrMap = newErrMap("handlers.articles",
+	E(apparticles.ErrNoCluster, http.StatusNotFound, "no keyword cluster for topic"),
+	E(apparticles.ErrArticleNotFound, http.StatusNotFound, "article not found"),
+	E(apparticles.ErrAlreadyPublished, http.StatusConflict, "article already published"),
+	E(apparticles.ErrNoDraftToPublish, http.StatusConflict, "article has no draft to publish"),
+)
 
 func (h *ArticlesHandler) writeError(ctx context.Context, w http.ResponseWriter, op string, err error) {
-	switch {
-	case errors.Is(err, apparticles.ErrNoCluster):
-		problem.Write(w, http.StatusNotFound, "no keyword cluster for topic")
-	case errors.Is(err, apparticles.ErrArticleNotFound):
-		problem.Write(w, http.StatusNotFound, "article not found")
-	case errors.Is(err, apparticles.ErrAlreadyPublished):
-		problem.Write(w, http.StatusConflict, "article already published")
-	case errors.Is(err, apparticles.ErrNoDraftToPublish):
-		problem.Write(w, http.StatusConflict, "article has no draft to publish")
-	default:
-		log := logger.New(ctx, "handlers.articles")
-		log.Error().Err(err).Str("op", op).Msg("internal error")
-		problem.Write(w, http.StatusInternalServerError, "internal error")
-	}
+	articlesErrMap.Handle(ctx, w, op, err)
 }
 
 func toGenerateRequest(body oapigen.GenerateRequest) apparticles.GenerateRequest {
@@ -321,4 +288,6 @@ func deref[T any](p *T) T {
 	return *p
 }
 
-func ptr[T any](v T) *T { return &v }
+func ptr[T any](v T) *T { // Helper to get a pointer to a literal, e.g. ptr(false)
+	return &v
+}

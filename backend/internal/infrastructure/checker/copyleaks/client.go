@@ -45,9 +45,6 @@ type Client struct {
 }
 
 func New(email, key string, aiThreshold float64, sandbox bool, log *slog.Logger) *Client {
-	if aiThreshold == 0 {
-		aiThreshold = 0.8
-	}
 	if log == nil {
 		log = slog.Default()
 	}

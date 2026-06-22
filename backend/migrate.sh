@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Thin wrapper around the golang-migrate CLI. Reads CF_DB_* like the app config.
-# The CLI is a dev prerequisite (kept out of go.mod so it doesn't drag in every
-# database driver). Install once:
+# Manual golang-migrate CLI wrapper (ad-hoc up/down/create). Reads CF_DB_* like
+# the app config. The app runs migrations itself on startup; this is for manual
+# ops. Install the CLI once:
 #   go install -tags 'pgx5' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
 #
 #   ./migrate.sh up

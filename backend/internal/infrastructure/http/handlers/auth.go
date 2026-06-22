@@ -31,10 +31,6 @@ func NewLoginHandler(auth AuthService) *LoginHandler {
 }
 
 func (h *LoginHandler) Login(w http.ResponseWriter, r *http.Request) {
-	if h.auth == nil {
-		problem.Write(w, http.StatusServiceUnavailable, "database unavailable")
-		return
-	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 	var body oapigen.LoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -64,10 +60,6 @@ func (h *LoginHandler) Login(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *LoginHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
-	if h.auth == nil {
-		problem.Write(w, http.StatusServiceUnavailable, "database unavailable")
-		return
-	}
 	users, err := h.auth.ListUsers(r.Context())
 	if err != nil {
 		log := logger.New(r.Context(), "handlers.auth")
