@@ -70,12 +70,11 @@ func (a *Authenticator) IssueAppPassword(ctx context.Context, donorURL, login, p
 	if err != nil {
 		return "", fmt.Errorf("login post: %w", err)
 	}
-	if err := resp.Body.Close(); err != nil {
-		return "", fmt.Errorf("close login response: %w", err)
-	}
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, httpx.MaxResponseBytes))
+	_ = resp.Body.Close()
 
 	if !hasLoggedInCookie(jar, origin) {
-		return "", fmt.Errorf("login failed (no wordpress_logged_in cookie set)")
+		return "", fmt.Errorf("login failed (status %d): %s", resp.StatusCode, loginDiag(body))
 	}
 
 	nonce, err := fetchNonce(ctx, client, origin.String()+"/wp-admin/profile.php")
@@ -152,6 +151,28 @@ func createAppPassword(ctx context.Context, client *http.Client, origin, nonce, 
 		return "", fmt.Errorf("empty password in response: %s", snippet(body))
 	}
 	return out.Password, nil
+}
+
+func loginDiag(body []byte) string {
+	low := strings.ToLower(string(body))
+	switch {
+	case strings.Contains(low, "g-recaptcha") || strings.Contains(low, "recaptcha/api"):
+		return "page shows reCAPTCHA — needs a real browser"
+	case strings.Contains(low, "h-captcha") || strings.Contains(low, "hcaptcha"):
+		return "page shows hCaptcha — needs a real browser"
+	case strings.Contains(low, "cf-challenge") || strings.Contains(low, "challenge-platform") || strings.Contains(low, "checking your browser") || strings.Contains(low, "cloudflare"):
+		return "Cloudflare / JS challenge — needs a real browser"
+	case strings.Contains(low, "the password you entered") || strings.Contains(low, "incorrect") || strings.Contains(low, "is not registered") || strings.Contains(low, "invalid username"):
+		return "WordPress rejected the credentials"
+	case strings.Contains(low, "too many") || strings.Contains(low, "locked") || strings.Contains(low, "try again later") || strings.Contains(low, "limit"):
+		return "rate-limited / login lockout"
+	case strings.Contains(low, "two-factor") || strings.Contains(low, "2fa") || strings.Contains(low, "authentication code"):
+		return "two-factor auth required"
+	case len(body) == 0:
+		return "empty response"
+	default:
+		return fmt.Sprintf("no known marker (%d bytes): %s", len(body), snippet(body))
+	}
 }
 
 func snippet(b []byte) string {
