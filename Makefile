@@ -5,10 +5,15 @@
 COMPOSE := docker compose -f devops/compose.yaml -f devops/compose.prod.yaml --env-file backend/.env
 
 .DEFAULT_GOAL := help
-.PHONY: help deploy rebuild-backend rebuild-frontend ps logs logs-frontend restart down
+.PHONY: help dev deploy rebuild-backend rebuild-frontend ps logs logs-frontend restart down
 
 help: ## list these commands
 	@grep -E '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*## "}{printf "  make %-18s %s\n", $$1, $$2}'
+
+dev: ## local dev: backend (:8080) + frontend (:3000) together, Ctrl-C stops both
+	npx --yes concurrently --kill-others --names "back,front" --prefix-colors "cyan,magenta" \
+		"cd backend && make dev" \
+		"cd frontend && npm run dev"
 
 deploy: ## rebuild backend+frontend, restart, then follow backend logs
 	$(COMPOSE) up --build -d

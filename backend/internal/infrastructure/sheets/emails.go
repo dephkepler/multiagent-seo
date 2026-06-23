@@ -29,11 +29,8 @@ func NewEmailSource(ctx context.Context, credentialsFile, spreadsheetID string, 
 	return &emailSource{svc: svc, spreadsheetID: spreadsheetID, log: log}, nil
 }
 
-// List reads column A (URL) and C (status). Rows whose latest status is a
-// success ("found …") are skipped; "no emails"/"error" rows are retried so a
-// re-run re-attempts sites that didn't yield an address.
 func (s *emailSource) List(ctx context.Context, sheet string) ([]emailscrape.Site, error) {
-	rangeStr := fmt.Sprintf("%s!A:C", sheet)
+	rangeStr := colRange(sheet, colEmailURL, colEmailStatus)
 	resp, err := s.svc.Spreadsheets.Values.Get(s.spreadsheetID, rangeStr).Context(ctx).Do()
 	if err != nil {
 		return nil, fmt.Errorf("fetch range %s: %w", rangeStr, err)
@@ -69,8 +66,6 @@ func (s *emailSource) List(ctx context.Context, sheet string) ([]emailscrape.Sit
 	return out, nil
 }
 
-// isFoundStatus reports whether the latest status line (column C is append-only,
-// newest first) marks a successful scrape, which we don't re-run.
 func isFoundStatus(cell string) bool {
 	firstLine := cell
 	if i := strings.IndexByte(cell, '\n'); i >= 0 {
@@ -79,8 +74,6 @@ func isFoundStatus(cell string) bool {
 	return strings.Contains(strings.ToLower(firstLine), "found")
 }
 
-// WriteResults overwrites column B with the found emails and prepends a
-// timestamped line to the append-only status column C.
 func (s *emailSource) WriteResults(ctx context.Context, sheet string, results []emailscrape.Result) error {
 	if len(results) == 0 {
 		return nil
@@ -88,7 +81,7 @@ func (s *emailSource) WriteResults(ctx context.Context, sheet string, results []
 
 	statusRanges := make([]string, 0, len(results))
 	for _, r := range results {
-		statusRanges = append(statusRanges, fmt.Sprintf("%s!C%d", sheet, r.Row))
+		statusRanges = append(statusRanges, colCell(sheet, colEmailStatus, r.Row))
 	}
 	existing, err := s.svc.Spreadsheets.Values.BatchGet(s.spreadsheetID).Ranges(statusRanges...).Context(ctx).Do()
 	if err != nil {
@@ -113,11 +106,11 @@ func (s *emailSource) WriteResults(ctx context.Context, sheet string, results []
 		}
 		valueRanges = append(valueRanges,
 			&sheets.ValueRange{
-				Range:  fmt.Sprintf("%s!B%d", sheet, r.Row),
+				Range:  colCell(sheet, colEmailList, r.Row),
 				Values: [][]any{{strings.Join(r.Emails, ", ")}},
 			},
 			&sheets.ValueRange{
-				Range:  fmt.Sprintf("%s!C%d", sheet, r.Row),
+				Range:  colCell(sheet, colEmailStatus, r.Row),
 				Values: [][]any{{entry}},
 			},
 		)

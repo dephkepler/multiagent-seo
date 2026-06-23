@@ -17,72 +17,29 @@ services:
       timeout: 3s
       retries: 20
 
-  migrate:
-    image: migrate/migrate
-    volumes:
-      - ../backend/migrations:/migrations
-    command:
-      - -path=/migrations
-      - -database=postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
-      - up
-    depends_on:
-      postgres:
-        condition: service_healthy
-    restart: "no"
-
   app:
     build:
       context: ../backend
       dockerfile: ../devops/docker/backend.Dockerfile
     ports:
       - "${APP_HOST_PORT}:8080"
+    env_file:
+      - ../backend/.env
     environment:
-      # 0.0.0.0 so the server is reachable from the host through the port map;
-      # the localhost default would only bind inside the container.
+      # Container overrides — the host values in .env don't apply inside the compose network.
       CF_APP_HOST: "0.0.0.0"
-      CF_APP_CORS_ALLOWED_ORIGINS: ${CF_APP_CORS_ALLOWED_ORIGINS:-http://localhost:3000}
-      # debug surfaces every per-row sheet decision and the donor stage warnings;
-      # info is the production default.
-      CF_LOG_LEVEL: ${CF_LOG_LEVEL:-info}
       CF_DB_HOST: postgres
       CF_DB_PORT: "5432"
       CF_DB_USER: ${POSTGRES_USER}
       CF_DB_PASSWORD: ${POSTGRES_PASSWORD}
       CF_DB_NAME: ${POSTGRES_DB}
-      # Generation secrets — sourced from devops/.env (gitignored). Unset vars
-      # fall back to the app's config defaults / mock adapters.
-      CF_LLM_PROVIDER: ${CF_LLM_PROVIDER:-groq}
-      CF_LLM_MODEL: ${CF_LLM_MODEL:-llama-3.3-70b-versatile}
-      CF_LLM_API_KEY: ${CF_LLM_API_KEY:-}
-      CF_LLM_GROQ_API_KEY: ${CF_LLM_GROQ_API_KEY:-}
-      CF_LLM_CLAUDE_API_KEY: ${CF_LLM_CLAUDE_API_KEY:-}
-      CF_DATAFORSEO_LOGIN: ${CF_DATAFORSEO_LOGIN:-}
-      CF_DATAFORSEO_PASSWORD: ${CF_DATAFORSEO_PASSWORD:-}
-      CF_SHEETS_SPREADSHEET_ID: ${CF_SHEETS_SPREADSHEET_ID:-}
       CF_SHEETS_CREDENTIALS_FILE: /app/credentials.json
-      # Keyword-cluster tab layout — defaults match the prod sheet ("casino2"
-      # tab, topic in A, keywords in B, title in C, with a header row).
-      CF_SHEETS_SHEET: ${CF_SHEETS_SHEET:-casino2}
-      CF_SHEETS_TOPIC_COLUMN: ${CF_SHEETS_TOPIC_COLUMN:-A}
-      CF_SHEETS_KEYWORD_COLUMN: ${CF_SHEETS_KEYWORD_COLUMN:-B}
-      CF_SHEETS_TITLE_COLUMN: ${CF_SHEETS_TITLE_COLUMN:-C}
-      CF_SHEETS_HEADER_ROW: ${CF_SHEETS_HEADER_ROW:-true}
-      CF_CHECKER_PROVIDER: ${CF_CHECKER_PROVIDER:-mock}
-      CF_CHECKER_API_KEY: ${CF_CHECKER_API_KEY:-}
-      CF_CHECKER_MODEL: ${CF_CHECKER_MODEL:-}
-      # Self-evolving prompts: off by default in prod; enable only with a real AI checker.
-      CF_PROMPT_EVOLVE_ENABLED: ${CF_PROMPT_EVOLVE_ENABLED:-false}
-      CF_PROMPT_HUMAN_WEIGHT: ${CF_PROMPT_HUMAN_WEIGHT:-0.65}
-      CF_PEXELS_API_KEY: ${CF_PEXELS_API_KEY:-}
-      CF_JWT_TTL: ${CF_JWT_TTL:-24h}
     volumes:
       # Google service-account creds for the Sheets adapters (read-only mount).
       - ../backend/credentials.json:/app/credentials.json:ro
     depends_on:
       postgres:
         condition: service_healthy
-      migrate:
-        condition: service_completed_successfully
 
   frontend:
     build:
@@ -97,3 +54,4 @@ services:
 
 volumes:
   postgres_data:
+    name: contentflow_postgres_data

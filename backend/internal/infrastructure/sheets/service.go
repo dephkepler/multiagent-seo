@@ -10,9 +10,6 @@ import (
 	"google.golang.org/api/sheets/v4"
 )
 
-// newSheetsService builds an authenticated read-write Sheets client. Shared by
-// every sheet adapter so the credentials-file → token-source → service steps
-// live in one place.
 func newSheetsService(ctx context.Context, credentialsFile, spreadsheetID string) (*sheets.Service, error) {
 	if credentialsFile == "" || spreadsheetID == "" {
 		return nil, fmt.Errorf("sheets: credentialsFile and spreadsheetId are required")

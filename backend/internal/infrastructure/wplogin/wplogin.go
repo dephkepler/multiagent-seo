@@ -3,7 +3,6 @@ package wplogin
 import (
 	"bytes"
 	"context"
-	"crypto/tls"
 	"fmt"
 	"io"
 	"log/slog"
@@ -15,26 +14,26 @@ import (
 	"time"
 
 	"multiagent-seo/internal/domain/linkbuilding"
+	"multiagent-seo/pkg/httpx"
 )
-
-const userAgent = "Mozilla/5.0 (compatible; multiagent-seo-bot/1.0)"
 
 type Authenticator struct {
 	timeout   time.Duration
 	log       *slog.Logger
-	transport *http.Transport
+	transport http.RoundTripper
 }
 
-func New(log *slog.Logger) *Authenticator {
+func New(log *slog.Logger, timeout time.Duration) *Authenticator {
 	if log == nil {
 		log = slog.Default()
 	}
 	return &Authenticator{
-		timeout: 20 * time.Second,
+		timeout: timeout,
 		log:     log,
-		transport: &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // G402: own-network login tool
-		},
+		transport: httpx.NewTransport(
+			httpx.BlockPrivateIPs(),
+			httpx.InsecureTLS(),
+		),
 	}
 }
 
@@ -111,7 +110,6 @@ func (a *Authenticator) Login(ctx context.Context, cred linkbuilding.SiteCredent
 		return res, nil
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("User-Agent", userAgent)
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -123,7 +121,7 @@ func (a *Authenticator) Login(ctx context.Context, cred linkbuilding.SiteCredent
 		return res, nil
 	}
 	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, httpx.MaxResponseBytes))
 	if err != nil {
 		if ctx.Err() != nil {
 			return res, ctx.Err()
@@ -167,7 +165,6 @@ func (a *Authenticator) fetchLoginForm(ctx context.Context, client *http.Client,
 	if err != nil {
 		return loginForm{}, 0, err
 	}
-	req.Header.Set("User-Agent", userAgent)
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -175,7 +172,7 @@ func (a *Authenticator) fetchLoginForm(ctx context.Context, client *http.Client,
 	}
 	defer resp.Body.Close()
 
-	form, perr := parseLoginForm(io.LimitReader(resp.Body, 1<<20))
+	form, perr := parseLoginForm(io.LimitReader(resp.Body, httpx.MaxResponseBytes))
 	return form, resp.StatusCode, perr
 }
 

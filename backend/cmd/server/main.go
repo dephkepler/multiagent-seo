@@ -7,7 +7,7 @@ import (
 
 	"github.com/rs/zerolog/log"
 
-	"multiagent-seo/internal/app"
+	"multiagent-seo/internal/root"
 	"multiagent-seo/pkg/config"
 	"multiagent-seo/pkg/logger"
 )
@@ -25,7 +25,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	if err := app.Run(ctx, cfg); err != nil {
+	if err := root.Run(ctx, cfg); err != nil {
 		log.Fatal().Err(err).Msg("app run")
 	}
 }

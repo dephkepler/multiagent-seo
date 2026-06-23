@@ -18,7 +18,7 @@ type CreateArticle struct {
 }
 
 type ArticleRepository interface {
-	Create(ctx context.Context, in CreateArticle) (int64, error)
+	Create(ctx context.Context, in CreateArticle) (Article, error)
 	Get(ctx context.Context, id int64) (*Article, error)
 	List(ctx context.Context, limit, offset int) ([]Article, int, error)
 	GeneratedKeywords(ctx context.Context, siteID uuid.UUID) ([]string, error)

@@ -2,27 +2,9 @@ package linkbuilding
 
 import "context"
 
-type WebsiteSource interface {
-	List(ctx context.Context, sheet string) ([]Website, error)
-	WriteResults(ctx context.Context, sheet string, results []Result) error
-}
-
-type PageFetcher interface {
-	Fetch(ctx context.Context, url string) (Page, error)
-}
-
-type PostsDiscover interface {
-	Discover(ctx context.Context, siteURL string, limit int) ([]string, error)
-}
-
-type TopicClassifier interface {
-	Classify(ctx context.Context, page Page, candidates []string) (string, error)
-}
-
 type CredentialSource interface {
 	ListCredentials(ctx context.Context, sheet string) ([]SiteCredential, error)
 	WriteLoginStatus(ctx context.Context, sheet string, results []LoginResult) error
-	ClearStaleStatuses(ctx context.Context, sheet string) error
 }
 
 type SiteAuthenticator interface {
@@ -31,6 +13,11 @@ type SiteAuthenticator interface {
 
 type PlacementSink interface {
 	WritePlacementStatus(ctx context.Context, sheet string, results []PlacementResult) error
+}
+
+type PlacementStore interface {
+	Save(ctx context.Context, p Placement) error
+	ListByRun(ctx context.Context, runID string) ([]Placement, error)
 }
 
 type DonorCredentialStore interface {

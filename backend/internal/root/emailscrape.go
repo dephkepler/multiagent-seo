@@ -1,4 +1,4 @@
-package app
+package root
 
 import (
 	"context"
@@ -7,7 +7,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	appemail "multiagent-seo/internal/application/emailscrape"
-	"multiagent-seo/internal/infrastructure/http/handlers"
 	"multiagent-seo/internal/infrastructure/pagefetch"
 	"multiagent-seo/internal/infrastructure/persistence/postgres"
 	"multiagent-seo/internal/infrastructure/sheets"
@@ -15,15 +14,7 @@ import (
 	"multiagent-seo/pkg/jobrunner"
 )
 
-func nilableEmailScrapeHandler(svc *appemail.Service) *handlers.EmailScrapeHandler {
-	return handlers.NewEmailScrapeHandler(svc)
-}
-
 func buildEmailScrape(ctx context.Context, cfg config.Config, log *slog.Logger, pool *pgxpool.Pool) (*appemail.Service, *jobrunner.AsyncRunner) {
-	if pool == nil {
-		log.Warn("email scrape disabled: database unavailable")
-		return nil, nil
-	}
 	src, err := sheets.NewEmailSource(ctx, cfg.Sheets.CredentialsFile, cfg.Sheets.SpreadsheetID, log)
 	if err != nil {
 		log.Warn("email scrape disabled: site source unavailable", "err", err)
@@ -37,6 +28,14 @@ func buildEmailScrape(ctx context.Context, cfg config.Config, log *slog.Logger, 
 		postgres.NewScrapeJobRepository(pool),
 		runner,
 		log,
+		appemail.Settings{
+			Concurrency:     cfg.EmailScrape.Concurrency,
+			FlushBatch:      cfg.EmailScrape.FlushBatch,
+			WriteTimeout:    cfg.EmailScrape.WriteTimeout,
+			MaxContactPages: cfg.EmailScrape.MaxContactPages,
+			PerHostRPS:      cfg.EmailScrape.PerHostRPS,
+			PerHostBurst:    cfg.EmailScrape.PerHostBurst,
+		},
 	)
 	return svc, runner
 }
