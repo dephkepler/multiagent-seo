@@ -1,33 +1,12 @@
 package linkbuilding
 
-type Website struct {
-	Row int
-	URL string
-}
-
-type Page struct {
-	Title           string
-	MetaDescription string
-	Headings        []string
-	TextSample      string
-	Links           []string
-}
-
-type Result struct {
-	Row             int
-	URL             string
-	Topic           string
-	OutboundDomains int
-	PostsSampled    int
-	Suitable        bool
-}
+import "time"
 
 type SiteCredential struct {
 	Row             int
 	BaseURL         string
 	Login           string
 	Password        string
-	Topic           string
 	LoginStatus     string
 	PlacementStatus string
 }
@@ -63,4 +42,21 @@ type PlacementResult struct {
 	DonorURL string
 	OK       bool
 	Status   string
+	PostURL  string
+	EditURL  string
+	Anchor   string
+}
+
+type Placement struct {
+	ID        int64
+	RunID     string
+	Sheet     string
+	DonorURL  string
+	TargetURL string
+	OK        bool
+	Status    string
+	PostURL   string
+	EditURL   string
+	Anchor    string
+	CreatedAt time.Time
 }

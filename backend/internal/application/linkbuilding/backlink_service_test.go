@@ -20,6 +20,24 @@ func (f *fakePlacements) WritePlacementStatus(_ context.Context, _ string, r []d
 	return nil
 }
 
+type fakePlacementStore struct {
+	saved []domain.Placement
+}
+
+func (f *fakePlacementStore) Save(_ context.Context, p domain.Placement) error {
+	f.saved = append(f.saved, p)
+	return nil
+}
+func (f *fakePlacementStore) ListByRun(_ context.Context, runID string) ([]domain.Placement, error) {
+	var out []domain.Placement
+	for _, p := range f.saved {
+		if p.RunID == runID {
+			out = append(out, p)
+		}
+	}
+	return out, nil
+}
+
 type fakeDonorStore struct {
 	saved   []domain.DonorCredential
 	preload map[string]domain.DonorCredential
@@ -84,7 +102,7 @@ func newBacklinkSvc(
 	tg fakeTargets,
 ) *applb.BacklinkService {
 	placerBuilder := func(string, string) (domain.BacklinkPlacer, error) { return pr, nil }
-	return applb.NewBacklinkService(creds, pl, ds, is, ed, placerBuilder, applb.LLMDefaults{}, tg, jobrunner.NewSyncRunner(), nil, applb.WithBacklinkDelay(0, 0))
+	return applb.NewBacklinkService(creds, pl, &fakePlacementStore{}, ds, is, ed, placerBuilder, applb.LLMDefaults{}, tg, jobrunner.NewSyncRunner(), nil, applb.WithBacklinkDelay(0, 0))
 }
 
 func TestPlaceBacklinks_HappyPathIssuesAndCachesCreds(t *testing.T) {

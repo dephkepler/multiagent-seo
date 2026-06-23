@@ -21,29 +21,24 @@ func (s Status) IsTerminal() bool {
 }
 
 type Article struct {
-	ID      int64
-	Keyword string
-	SiteID  uuid.UUID
-	Site    string
-	Status  Status
-
-	WPPostID  int64
-	WPEditURL string
-	WPPostURL string
-
+	ID              int64
+	Keyword         string
+	SiteID          uuid.UUID
+	Site            string
+	Status          Status
+	WPPostID        int64
+	WPEditURL       string
+	WPPostURL       string
 	ImagesRequested int
 	ImagesResolved  int
 	ImagesSkipped   int
-
-	CompetitorData json.RawMessage
-	CheckResult    json.RawMessage
-	RequestParams  json.RawMessage
-
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
-	PublishedAt *time.Time
-
-	HumanRating *bool // copywriter 👍/👎; nil = not rated
+	CompetitorData  json.RawMessage
+	CheckResult     json.RawMessage
+	RequestParams   json.RawMessage
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+	PublishedAt     *time.Time
+	HumanRating     *bool // copywriter 👍/👎; nil = not rated
 
 	// Writer-stage outcome metrics, populated only by Get (detail view).
 	AIScore        *float64

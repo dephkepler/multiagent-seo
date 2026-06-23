@@ -16,8 +16,6 @@ import (
 	"multiagent-seo/pkg/httpx"
 )
 
-const maxBody = 2 << 20
-
 type Fetcher struct {
 	http *http.Client
 	log  *slog.Logger
@@ -37,8 +35,6 @@ func New(log *slog.Logger) *Fetcher {
 	}
 }
 
-// Fetch returns a page's full HTML (capped) and its anchor hrefs. Unlike the
-// link-building fetcher it keeps the whole body, since emails can sit anywhere.
 func (f *Fetcher) Fetch(ctx context.Context, rawURL string) (emailscrape.Page, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil {
@@ -69,7 +65,7 @@ func (f *Fetcher) Fetch(ctx context.Context, rawURL string) (emailscrape.Page, e
 		}
 	}
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBody))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, httpx.MaxPageBytes))
 	if err != nil {
 		return emailscrape.Page{}, fmt.Errorf("pagefetch read %s: %w", rawURL, err)
 	}
@@ -87,7 +83,10 @@ func extractLinks(body string) []emailscrape.Link {
 	walk = func(n *html.Node) {
 		if n.Type == html.ElementNode && n.Data == "a" {
 			if href, ok := attr(n, "href"); ok && href != "" {
-				links = append(links, emailscrape.Link{Href: href, Text: nodeText(n)})
+				links = append(links, emailscrape.Link{
+					Href: href,
+					Text: nodeText(n),
+				})
 			}
 		}
 		for c := n.FirstChild; c != nil; c = c.NextSibling {

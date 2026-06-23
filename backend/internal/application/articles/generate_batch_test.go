@@ -106,9 +106,9 @@ type createErrRepo struct {
 	err    error
 }
 
-func (r *createErrRepo) Create(ctx context.Context, in articles.CreateArticle) (int64, error) {
+func (r *createErrRepo) Create(ctx context.Context, in articles.CreateArticle) (articles.Article, error) {
 	if in.Keyword == r.failOn {
-		return 0, r.err
+		return articles.Article{}, r.err
 	}
 	return r.fakeRepo.Create(ctx, in)
 }

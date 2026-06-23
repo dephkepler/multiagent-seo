@@ -2,7 +2,6 @@ package wppost
 
 import (
 	"context"
-	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -14,26 +13,24 @@ import (
 	"time"
 
 	"multiagent-seo/internal/domain/linkbuilding"
+	"multiagent-seo/pkg/httpx"
 )
-
-const userAgent = "Mozilla/5.0 (compatible; multiagent-seo-bot/1.0)"
 
 type Client struct {
 	http *http.Client
 	log  *slog.Logger
 }
 
-func New(log *slog.Logger) *Client {
+func New(log *slog.Logger, timeout time.Duration) *Client {
 	if log == nil {
 		log = slog.Default()
 	}
 	return &Client{
-		http: &http.Client{
-			Timeout: 25 * time.Second,
-			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // G402: own-network linkbuilding tool
-			},
-		},
+		http: httpx.New(
+			httpx.WithTimeout(timeout),
+			httpx.BlockPrivateIPs(),
+			httpx.InsecureTLS(),
+		),
 		log: log,
 	}
 }
@@ -49,7 +46,6 @@ func (c *Client) LatestPost(ctx context.Context, cred linkbuilding.DonorCredenti
 	if err != nil {
 		return linkbuilding.DonorPost{}, fmt.Errorf("wppost new request: %w", err)
 	}
-	req.Header.Set("User-Agent", userAgent)
 	req.Header.Set("Authorization", basicAuth(cred.Login, cred.AppPassword))
 
 	resp, err := c.http.Do(req)
@@ -57,7 +53,7 @@ func (c *Client) LatestPost(ctx context.Context, cred linkbuilding.DonorCredenti
 		return linkbuilding.DonorPost{}, fmt.Errorf("wppost list: %w", err)
 	}
 	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, httpx.MaxPageBytes))
 	if err != nil {
 		return linkbuilding.DonorPost{}, fmt.Errorf("wppost list read response: %w", err)
 	}
@@ -104,7 +100,6 @@ func (c *Client) UpdatePostContent(ctx context.Context, cred linkbuilding.DonorC
 	if err != nil {
 		return fmt.Errorf("wppost new request: %w", err)
 	}
-	req.Header.Set("User-Agent", userAgent)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", basicAuth(cred.Login, cred.AppPassword))
 
@@ -113,7 +108,7 @@ func (c *Client) UpdatePostContent(ctx context.Context, cred linkbuilding.DonorC
 		return fmt.Errorf("wppost update: %w", err)
 	}
 	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, httpx.MaxResponseBytes))
 	if err != nil {
 		return fmt.Errorf("wppost update read response: %w", err)
 	}

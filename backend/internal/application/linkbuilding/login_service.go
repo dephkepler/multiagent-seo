@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand"
-	"strings"
 	"time"
 
 	domain "multiagent-seo/internal/domain/linkbuilding"
@@ -49,8 +48,7 @@ func NewLoginService(creds domain.CredentialSource, auth domain.SiteAuthenticato
 }
 
 type LoginRequest struct {
-	Sheet  string
-	Topics []string
+	Sheet string
 }
 
 type LoginQueued struct {
@@ -68,27 +66,9 @@ func (s *LoginService) LoginToSites(ctx context.Context, req LoginRequest) (Logi
 		return LoginQueued{}, fmt.Errorf("list credentials: %w", err)
 	}
 
-	topicAllow := make(map[string]struct{}, len(req.Topics))
-	for _, t := range req.Topics {
-		t = strings.TrimSpace(strings.ToLower(t))
-		if t != "" {
-			topicAllow[t] = struct{}{}
-		}
-	}
 	queued := creds
-	skippedTopic := 0
-	if len(topicAllow) > 0 {
-		queued = make([]domain.SiteCredential, 0, len(creds))
-		for _, c := range creds {
-			if _, ok := topicAllow[strings.TrimSpace(strings.ToLower(c.Topic))]; ok {
-				queued = append(queued, c)
-				continue
-			}
-			skippedTopic++
-		}
-	}
 
-	jobLog := s.log.With("sheet", req.Sheet, "sites", len(queued), "skipped_topic_mismatch", skippedTopic)
+	jobLog := s.log.With("sheet", req.Sheet, "sites", len(queued))
 	s.runner.Go(ctx, func(bg context.Context) {
 		s.loginAll(bg, jobLog, req.Sheet, queued)
 	})
@@ -98,10 +78,6 @@ func (s *LoginService) LoginToSites(ctx context.Context, req LoginRequest) (Logi
 }
 
 func (s *LoginService) loginAll(ctx context.Context, log *slog.Logger, sheet string, creds []domain.SiteCredential) {
-	if err := s.creds.ClearStaleStatuses(ctx, sheet); err != nil {
-		log.WarnContext(ctx, "clear stale statuses failed", "err", err)
-	}
-
 	pending := make([]domain.LoginResult, 0, loginWriteChunk)
 	processed := 0
 

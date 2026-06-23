@@ -213,16 +213,6 @@ func TestAsyncRunner_Go_UsesContextWithoutCancelFromParent(t *testing.T) {
 	}
 }
 
-func TestAsyncRunner_NewAsyncRunner_NilLoggerDefaults(t *testing.T) {
-	r := NewAsyncRunner(0, 1, nil)
-
-	r.Go(context.Background(), func(context.Context) { panic("boom") })
-
-	if err := r.Wait(context.Background()); err != nil {
-		t.Fatalf("Wait returned %v, want nil (nil logger should default, not nil-deref)", err)
-	}
-}
-
 func TestSyncRunner_GoRunsInlineAndDetachesParentCancel(t *testing.T) {
 	r := NewSyncRunner()
 

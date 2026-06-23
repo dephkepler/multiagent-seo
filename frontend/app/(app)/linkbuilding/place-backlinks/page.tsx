@@ -12,6 +12,19 @@ import { Select } from '@/components/ui/select'
 interface PlaceBacklinksAccepted {
   sheet: string
   sites_queued: number
+  run_id: string
+}
+
+interface Placement {
+  id: number
+  donor_url: string
+  target_url: string
+  ok: boolean
+  status: string
+  post_url?: string
+  edit_url?: string
+  anchor?: string
+  created_at: string
 }
 
 interface WordpressSite {
@@ -24,8 +37,12 @@ interface WordpressSite {
 export default function PlaceBacklinksPage() {
   const [sheet, setSheet] = useState('WEBSITES')
   const [targetSiteUrl, setTargetSiteUrl] = useState('')
-  const [topics, setTopics] = useState('')
+  const [count, setCount] = useState(3)
   const [provider, setProvider] = useState('')
+
+  const [runId, setRunId] = useState<string | null>(null)
+  const [queued, setQueued] = useState(0)
+  const [target, setTarget] = useState(0)
 
   const sites = useQuery({
     queryKey: ['wordpress-sites'],
@@ -39,23 +56,38 @@ export default function PlaceBacklinksPage() {
     }
   }, [siteOptions, targetSiteUrl])
 
+  const placements = useQuery({
+    queryKey: ['placements', runId],
+    queryFn: () => api<Placement[]>(`/linkbuilding/placements?run_id=${runId}`),
+    enabled: runId != null,
+    refetchInterval: (q) => {
+      const data = (q.state.data as Placement[] | undefined) || []
+      const ok = data.filter((p) => p.ok).length
+      return ok >= target || data.length >= queued ? false : 2000
+    },
+  })
+
+  const results = placements.data || []
+  const succeeded = results.filter((p) => p.ok).length
+  const done = runId != null && (succeeded >= target || results.length >= queued)
+
   const run = useMutation({
-    mutationFn: () => {
-      const topicList = topics
-        .split(',')
-        .map((t) => t.trim())
-        .filter(Boolean)
-      return api<PlaceBacklinksAccepted>('/linkbuilding/place-backlinks', {
+    mutationFn: () =>
+      api<PlaceBacklinksAccepted>('/linkbuilding/place-backlinks', {
         method: 'POST',
         body: JSON.stringify({
           sheet,
           target_site_url: targetSiteUrl,
-          ...(topicList.length ? { topics: topicList } : {}),
+          count,
           ...(provider ? { provider } : {}),
         }),
-      })
+      }),
+    onSuccess: (r) => {
+      setRunId(r.run_id)
+      setQueued(r.sites_queued)
+      setTarget(count)
+      toast.success(`Started — up to ${count} placements across ${r.sites_queued} donors`)
     },
-    onSuccess: (r) => toast.success(`Queued ${r.sites_queued} donor sites in ${r.sheet}`),
     onError: (e: Error) => toast.error(e.message),
   })
 
@@ -64,8 +96,9 @@ export default function PlaceBacklinksPage() {
       <Card>
         <h1 className='mb-1 text-lg font-semibold'>Place backlinks on donor sites</h1>
         <p className='mb-6 text-sm text-gray-500'>
-          Reads donors where column D=<code className='rounded bg-gray-100 px-1'>yes</code> and H is empty or <code className='rounded bg-gray-100 px-1'>login ok</code>, picks each donor&apos;s latest post via WP REST,
-          asks the LLM to weave in a contextual <code className='rounded bg-gray-100 px-1'>{'<a>'}</code> linking to your site, and writes the result into column I.
+          For each donor (url + login + password in columns E–G) it logs into WordPress, picks the latest post via WP REST, asks the LLM to weave in a contextual{' '}
+          <code className='rounded bg-gray-100 px-1'>{'<a>'}</code> linking to your site, updates the post, and records the result in column I. Already-placed donors are skipped;
+          it stops once it reaches the requested number of successful placements.
         </p>
         <form
           onSubmit={(e) => {
@@ -90,8 +123,8 @@ export default function PlaceBacklinksPage() {
             </Select>
           </div>
           <div>
-            <Label>Topics filter (optional, comma-separated)</Label>
-            <Input value={topics} onChange={(e) => setTopics(e.target.value)} placeholder='education, tech' />
+            <Label>How many to place today (stops after this many successful)</Label>
+            <Input type='number' min={1} value={count} onChange={(e) => setCount(Math.max(1, Math.floor(+e.target.value) || 1))} required />
           </div>
           <div>
             <Label>Provider (optional)</Label>
@@ -106,6 +139,42 @@ export default function PlaceBacklinksPage() {
           </Button>
         </form>
       </Card>
+
+      {runId && (
+        <Card>
+          <div className='mb-2 flex items-center justify-between text-sm'>
+            <span className='font-medium'>{done ? 'Done' : 'Placing…'}</span>
+            <span className='text-gray-500'>
+              {succeeded}/{target} placed · {results.length} tried
+            </span>
+          </div>
+          <div className='mb-4 h-2 w-full overflow-hidden rounded bg-gray-100'>
+            <div className='h-2 rounded bg-emerald-500 transition-all' style={{ width: `${Math.min(100, (succeeded / Math.max(1, target)) * 100)}%` }} />
+          </div>
+          <ul className='space-y-1 text-sm'>
+            {results.length === 0 && <li className='text-gray-400'>Waiting for the first result…</li>}
+            {results.map((p) => {
+              const link = p.post_url || p.edit_url
+              return (
+                <li key={p.id} className='flex items-center justify-between gap-3 border-b border-gray-50 py-1'>
+                  <span className='truncate'>
+                    {p.ok ? '✅' : '❌'} <span className='text-gray-700'>{p.donor_url}</span>
+                  </span>
+                  {p.ok && link ? (
+                    <a href={link} target='_blank' rel='noreferrer' className='shrink-0 text-sky-600 hover:underline'>
+                      article ↗
+                    </a>
+                  ) : (
+                    <span className='shrink-0 max-w-[55%] truncate text-xs text-gray-400' title={p.status}>
+                      {p.status}
+                    </span>
+                  )}
+                </li>
+              )
+            })}
+          </ul>
+        </Card>
+      )}
     </div>
   )
 }

@@ -217,12 +217,16 @@ type LoginResponse struct {
 
 // PlaceBacklinksAccepted defines model for PlaceBacklinksAccepted.
 type PlaceBacklinksAccepted struct {
+	RunId       string `json:"run_id"`
 	Sheet       string `json:"sheet"`
 	SitesQueued int    `json:"sites_queued"`
 }
 
 // PlaceBacklinksRequest defines model for PlaceBacklinksRequest.
 type PlaceBacklinksRequest struct {
+	// Count Stop after this many SUCCESSFUL placements (failures don't count). Defaults to 3 when omitted.
+	Count *int `json:"count,omitempty"`
+
 	// Model Override the default LLM model for this run only. Falls back to LLM_BACKLINK_MODEL (or LLM_MODEL) when empty.
 	Model *string `json:"model,omitempty"`
 
@@ -232,28 +236,19 @@ type PlaceBacklinksRequest struct {
 
 	// TargetSiteUrl Public URL of one of the user's wordpress_sites; the backend rejects URLs not present in that table.
 	TargetSiteUrl string `json:"target_site_url" validate:"required,url"`
-
-	// Topics Optional Flow 1 topic allow-list. When set, only donors whose column B matches one of these (case-insensitive) are tried.
-	Topics []string `json:"topics,omitempty"`
 }
 
-// QualifyAccepted defines model for QualifyAccepted.
-type QualifyAccepted struct {
-	Sheet          string `json:"sheet"`
-	WebsitesQueued int    `json:"websites_queued"`
-}
-
-// QualifyRequest defines model for QualifyRequest.
-type QualifyRequest struct {
-	AcceptedTopics  []string `json:"accepted_topics" validate:"required,min=1"`
-	CandidateTopics []string `json:"candidate_topics,omitempty"`
-
-	// Model Override the default LLM model for this run only. Falls back to LLM_QUALIFY_MODEL (or LLM_MODEL) when empty.
-	Model *string `json:"model,omitempty"`
-
-	// Provider Override the default LLM provider for this run only. Falls back to LLM_QUALIFY_PROVIDER (or LLM_PROVIDER) when empty.
-	Provider *string `json:"provider,omitempty"`
-	Sheet    string  `json:"sheet" validate:"required,min=1"`
+// Placement defines model for Placement.
+type Placement struct {
+	Anchor    *string   `json:"anchor,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+	DonorUrl  string    `json:"donor_url"`
+	EditUrl   *string   `json:"edit_url,omitempty"`
+	Id        int64     `json:"id"`
+	Ok        bool      `json:"ok"`
+	PostUrl   *string   `json:"post_url,omitempty"`
+	Status    string    `json:"status"`
+	TargetUrl string    `json:"target_url"`
 }
 
 // RateArticleRequest defines model for RateArticleRequest.
@@ -294,9 +289,6 @@ type SiteLoginAccepted struct {
 // SiteLoginRequest defines model for SiteLoginRequest.
 type SiteLoginRequest struct {
 	Sheet string `json:"sheet" validate:"required,min=1"`
-
-	// Topics Optional Flow 1 topic allow-list. When set, only donors whose column B matches one of these (case-insensitive) are tried.
-	Topics []string `json:"topics,omitempty"`
 }
 
 // UpdateWordpressSiteRequest defines model for UpdateWordpressSiteRequest.
@@ -347,6 +339,11 @@ type ListArticlesParams struct {
 	Offset *int `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
+// ListPlacementsParams defines parameters for ListPlacements.
+type ListPlacementsParams struct {
+	RunId string `form:"run_id" json:"run_id"`
+}
+
 // CreateApiTokenJSONRequestBody defines body for CreateApiToken for application/json ContentType.
 type CreateApiTokenJSONRequestBody = CreateApiTokenRequest
 
@@ -370,9 +367,6 @@ type LoginToSitesJSONRequestBody = SiteLoginRequest
 
 // PlaceBacklinksJSONRequestBody defines body for PlaceBacklinks for application/json ContentType.
 type PlaceBacklinksJSONRequestBody = PlaceBacklinksRequest
-
-// QualifyWebsitesJSONRequestBody defines body for QualifyWebsites for application/json ContentType.
-type QualifyWebsitesJSONRequestBody = QualifyRequest
 
 // CreateWordpressSiteJSONRequestBody defines body for CreateWordpressSite for application/json ContentType.
 type CreateWordpressSiteJSONRequestBody = CreateWordpressSiteRequest
@@ -430,9 +424,9 @@ type ServerInterface interface {
 	// Place a backlink to one of our WordPress sites in each suitable donor's latest post
 	// (POST /linkbuilding/place-backlinks)
 	PlaceBacklinks(w http.ResponseWriter, r *http.Request)
-	// Qualify donor websites listed in a sheet
-	// (POST /linkbuilding/qualify)
-	QualifyWebsites(w http.ResponseWriter, r *http.Request)
+	// Per-donor results of a placement run
+	// (GET /linkbuilding/placements)
+	ListPlacements(w http.ResponseWriter, r *http.Request, params ListPlacementsParams)
 	// List users
 	// (GET /users)
 	ListUsers(w http.ResponseWriter, r *http.Request)
@@ -553,9 +547,9 @@ func (_ Unimplemented) PlaceBacklinks(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Qualify donor websites listed in a sheet
-// (POST /linkbuilding/qualify)
-func (_ Unimplemented) QualifyWebsites(w http.ResponseWriter, r *http.Request) {
+// Per-donor results of a placement run
+// (GET /linkbuilding/placements)
+func (_ Unimplemented) ListPlacements(w http.ResponseWriter, r *http.Request, params ListPlacementsParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -1016,8 +1010,11 @@ func (siw *ServerInterfaceWrapper) PlaceBacklinks(w http.ResponseWriter, r *http
 	handler.ServeHTTP(w, r)
 }
 
-// QualifyWebsites operation middleware
-func (siw *ServerInterfaceWrapper) QualifyWebsites(w http.ResponseWriter, r *http.Request) {
+// ListPlacements operation middleware
+func (siw *ServerInterfaceWrapper) ListPlacements(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
 
 	ctx := r.Context()
 
@@ -1025,8 +1022,24 @@ func (siw *ServerInterfaceWrapper) QualifyWebsites(w http.ResponseWriter, r *htt
 
 	r = r.WithContext(ctx)
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListPlacementsParams
+
+	// ------------- Required query parameter "run_id" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "run_id", r.URL.Query(), &params.RunId, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "run_id"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "run_id", Err: err})
+		}
+		return
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.QualifyWebsites(w, r)
+		siw.Handler.ListPlacements(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1354,7 +1367,7 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Post(options.BaseURL+"/linkbuilding/place-backlinks", wrapper.PlaceBacklinks)
 	})
 	r.Group(func(r chi.Router) {
-		r.Post(options.BaseURL+"/linkbuilding/qualify", wrapper.QualifyWebsites)
+		r.Get(options.BaseURL+"/linkbuilding/placements", wrapper.ListPlacements)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/users", wrapper.ListUsers)
@@ -1378,1693 +1391,71 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	return r
 }
 
-type BadRequestApplicationProblemPlusJSONResponse ErrorResponse
-
-type ConflictApplicationProblemPlusJSONResponse ErrorResponse
-
-type NotFoundApplicationProblemPlusJSONResponse ErrorResponse
-
-type UnauthorizedApplicationProblemPlusJSONResponse ErrorResponse
-
-type ListApiTokensRequestObject struct {
-}
-
-type ListApiTokensResponseObject interface {
-	VisitListApiTokensResponse(w http.ResponseWriter) error
-}
-
-type ListApiTokens200JSONResponse []ApiToken
-
-func (response ListApiTokens200JSONResponse) VisitListApiTokensResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(200)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type CreateApiTokenRequestObject struct {
-	Body *CreateApiTokenJSONRequestBody
-}
-
-type CreateApiTokenResponseObject interface {
-	VisitCreateApiTokenResponse(w http.ResponseWriter) error
-}
-
-type CreateApiToken201JSONResponse ApiTokenCreated
-
-func (response CreateApiToken201JSONResponse) VisitCreateApiTokenResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(201)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type CreateApiToken400ApplicationProblemPlusJSONResponse struct {
-	BadRequestApplicationProblemPlusJSONResponse
-}
-
-func (response CreateApiToken400ApplicationProblemPlusJSONResponse) VisitCreateApiTokenResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/problem+json")
-	w.WriteHeader(400)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type DeleteApiTokenRequestObject struct {
-	Id openapi_types.UUID `json:"id"`
-}
-
-type DeleteApiTokenResponseObject interface {
-	VisitDeleteApiTokenResponse(w http.ResponseWriter) error
-}
-
-type DeleteApiToken204Response struct {
-}
-
-func (response DeleteApiToken204Response) VisitDeleteApiTokenResponse(w http.ResponseWriter) error {
-	w.WriteHeader(204)
-	return nil
-}
-
-type DeleteApiToken404ApplicationProblemPlusJSONResponse struct {
-	NotFoundApplicationProblemPlusJSONResponse
-}
-
-func (response DeleteApiToken404ApplicationProblemPlusJSONResponse) VisitDeleteApiTokenResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/problem+json")
-	w.WriteHeader(404)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type ListArticlesRequestObject struct {
-	Params ListArticlesParams
-}
-
-type ListArticlesResponseObject interface {
-	VisitListArticlesResponse(w http.ResponseWriter) error
-}
-
-type ListArticles200JSONResponse ArticleList
-
-func (response ListArticles200JSONResponse) VisitListArticlesResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(200)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type GetArticleRequestObject struct {
-	Id int64 `json:"id"`
-}
-
-type GetArticleResponseObject interface {
-	VisitGetArticleResponse(w http.ResponseWriter) error
-}
-
-type GetArticle200JSONResponse Article
-
-func (response GetArticle200JSONResponse) VisitGetArticleResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(200)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type GetArticle404ApplicationProblemPlusJSONResponse struct {
-	NotFoundApplicationProblemPlusJSONResponse
-}
-
-func (response GetArticle404ApplicationProblemPlusJSONResponse) VisitGetArticleResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/problem+json")
-	w.WriteHeader(404)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type PublishArticleRequestObject struct {
-	Id int64 `json:"id"`
-}
-
-type PublishArticleResponseObject interface {
-	VisitPublishArticleResponse(w http.ResponseWriter) error
-}
-
-type PublishArticle200JSONResponse Article
-
-func (response PublishArticle200JSONResponse) VisitPublishArticleResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(200)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type PublishArticle404ApplicationProblemPlusJSONResponse struct {
-	NotFoundApplicationProblemPlusJSONResponse
-}
-
-func (response PublishArticle404ApplicationProblemPlusJSONResponse) VisitPublishArticleResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/problem+json")
-	w.WriteHeader(404)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type PublishArticle409ApplicationProblemPlusJSONResponse struct {
-	ConflictApplicationProblemPlusJSONResponse
-}
-
-func (response PublishArticle409ApplicationProblemPlusJSONResponse) VisitPublishArticleResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/problem+json")
-	w.WriteHeader(409)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type RateArticleRequestObject struct {
-	Id   int64 `json:"id"`
-	Body *RateArticleJSONRequestBody
-}
-
-type RateArticleResponseObject interface {
-	VisitRateArticleResponse(w http.ResponseWriter) error
-}
-
-type RateArticle204Response struct {
-}
-
-func (response RateArticle204Response) VisitRateArticleResponse(w http.ResponseWriter) error {
-	w.WriteHeader(204)
-	return nil
-}
-
-type RateArticle404ApplicationProblemPlusJSONResponse struct {
-	NotFoundApplicationProblemPlusJSONResponse
-}
-
-func (response RateArticle404ApplicationProblemPlusJSONResponse) VisitRateArticleResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/problem+json")
-	w.WriteHeader(404)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type LoginRequestObject struct {
-	Body *LoginJSONRequestBody
-}
-
-type LoginResponseObject interface {
-	VisitLoginResponse(w http.ResponseWriter) error
-}
-
-type Login200JSONResponse LoginResponse
-
-func (response Login200JSONResponse) VisitLoginResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(200)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type Login400ApplicationProblemPlusJSONResponse struct {
-	BadRequestApplicationProblemPlusJSONResponse
-}
-
-func (response Login400ApplicationProblemPlusJSONResponse) VisitLoginResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/problem+json")
-	w.WriteHeader(400)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type Login401ApplicationProblemPlusJSONResponse struct {
-	UnauthorizedApplicationProblemPlusJSONResponse
-}
-
-func (response Login401ApplicationProblemPlusJSONResponse) VisitLoginResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/problem+json")
-	w.WriteHeader(401)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type ScrapeEmailsRequestObject struct {
-	Body *ScrapeEmailsJSONRequestBody
-}
-
-type ScrapeEmailsResponseObject interface {
-	VisitScrapeEmailsResponse(w http.ResponseWriter) error
-}
-
-type ScrapeEmails202JSONResponse ScrapeEmailsAccepted
-
-func (response ScrapeEmails202JSONResponse) VisitScrapeEmailsResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(202)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type ScrapeEmails400ApplicationProblemPlusJSONResponse struct {
-	BadRequestApplicationProblemPlusJSONResponse
-}
-
-func (response ScrapeEmails400ApplicationProblemPlusJSONResponse) VisitScrapeEmailsResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/problem+json")
-	w.WriteHeader(400)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type GetScrapeJobRequestObject struct {
-	Id string `json:"id"`
-}
-
-type GetScrapeJobResponseObject interface {
-	VisitGetScrapeJobResponse(w http.ResponseWriter) error
-}
-
-type GetScrapeJob200JSONResponse ScrapeJob
-
-func (response GetScrapeJob200JSONResponse) VisitGetScrapeJobResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(200)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type GetScrapeJob404ApplicationProblemPlusJSONResponse struct {
-	NotFoundApplicationProblemPlusJSONResponse
-}
-
-func (response GetScrapeJob404ApplicationProblemPlusJSONResponse) VisitGetScrapeJobResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/problem+json")
-	w.WriteHeader(404)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type CancelScrapeJobRequestObject struct {
-	Id string `json:"id"`
-}
-
-type CancelScrapeJobResponseObject interface {
-	VisitCancelScrapeJobResponse(w http.ResponseWriter) error
-}
-
-type CancelScrapeJob202Response struct {
-}
-
-func (response CancelScrapeJob202Response) VisitCancelScrapeJobResponse(w http.ResponseWriter) error {
-	w.WriteHeader(202)
-	return nil
-}
-
-type CancelScrapeJob404ApplicationProblemPlusJSONResponse struct {
-	NotFoundApplicationProblemPlusJSONResponse
-}
-
-func (response CancelScrapeJob404ApplicationProblemPlusJSONResponse) VisitCancelScrapeJobResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/problem+json")
-	w.WriteHeader(404)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type GenerateArticleRequestObject struct {
-	Body *GenerateArticleJSONRequestBody
-}
-
-type GenerateArticleResponseObject interface {
-	VisitGenerateArticleResponse(w http.ResponseWriter) error
-}
-
-type GenerateArticle202JSONResponse GenerateAccepted
-
-func (response GenerateArticle202JSONResponse) VisitGenerateArticleResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(202)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type GenerateArticle400ApplicationProblemPlusJSONResponse struct {
-	BadRequestApplicationProblemPlusJSONResponse
-}
-
-func (response GenerateArticle400ApplicationProblemPlusJSONResponse) VisitGenerateArticleResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/problem+json")
-	w.WriteHeader(400)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type GenerateArticle404ApplicationProblemPlusJSONResponse struct {
-	NotFoundApplicationProblemPlusJSONResponse
-}
-
-func (response GenerateArticle404ApplicationProblemPlusJSONResponse) VisitGenerateArticleResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/problem+json")
-	w.WriteHeader(404)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type GenerateBatchRequestObject struct {
-	Body *GenerateBatchJSONRequestBody
-}
-
-type GenerateBatchResponseObject interface {
-	VisitGenerateBatchResponse(w http.ResponseWriter) error
-}
-
-type GenerateBatch202JSONResponse GenerateBatchAccepted
-
-func (response GenerateBatch202JSONResponse) VisitGenerateBatchResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(202)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type GenerateBatch400ApplicationProblemPlusJSONResponse struct {
-	BadRequestApplicationProblemPlusJSONResponse
-}
-
-func (response GenerateBatch400ApplicationProblemPlusJSONResponse) VisitGenerateBatchResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/problem+json")
-	w.WriteHeader(400)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type GetHealthzRequestObject struct {
-}
-
-type GetHealthzResponseObject interface {
-	VisitGetHealthzResponse(w http.ResponseWriter) error
-}
-
-type GetHealthz200JSONResponse HealthResponse
-
-func (response GetHealthz200JSONResponse) VisitGetHealthzResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(200)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type GetHealthz503JSONResponse HealthResponse
-
-func (response GetHealthz503JSONResponse) VisitGetHealthzResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(503)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type LoginToSitesRequestObject struct {
-	Body *LoginToSitesJSONRequestBody
-}
-
-type LoginToSitesResponseObject interface {
-	VisitLoginToSitesResponse(w http.ResponseWriter) error
-}
-
-type LoginToSites202JSONResponse SiteLoginAccepted
-
-func (response LoginToSites202JSONResponse) VisitLoginToSitesResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(202)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type LoginToSites400ApplicationProblemPlusJSONResponse struct {
-	BadRequestApplicationProblemPlusJSONResponse
-}
-
-func (response LoginToSites400ApplicationProblemPlusJSONResponse) VisitLoginToSitesResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/problem+json")
-	w.WriteHeader(400)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type PlaceBacklinksRequestObject struct {
-	Body *PlaceBacklinksJSONRequestBody
-}
-
-type PlaceBacklinksResponseObject interface {
-	VisitPlaceBacklinksResponse(w http.ResponseWriter) error
-}
-
-type PlaceBacklinks202JSONResponse PlaceBacklinksAccepted
-
-func (response PlaceBacklinks202JSONResponse) VisitPlaceBacklinksResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(202)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type PlaceBacklinks400ApplicationProblemPlusJSONResponse struct {
-	BadRequestApplicationProblemPlusJSONResponse
-}
-
-func (response PlaceBacklinks400ApplicationProblemPlusJSONResponse) VisitPlaceBacklinksResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/problem+json")
-	w.WriteHeader(400)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type QualifyWebsitesRequestObject struct {
-	Body *QualifyWebsitesJSONRequestBody
-}
-
-type QualifyWebsitesResponseObject interface {
-	VisitQualifyWebsitesResponse(w http.ResponseWriter) error
-}
-
-type QualifyWebsites202JSONResponse QualifyAccepted
-
-func (response QualifyWebsites202JSONResponse) VisitQualifyWebsitesResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(202)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type QualifyWebsites400ApplicationProblemPlusJSONResponse struct {
-	BadRequestApplicationProblemPlusJSONResponse
-}
-
-func (response QualifyWebsites400ApplicationProblemPlusJSONResponse) VisitQualifyWebsitesResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/problem+json")
-	w.WriteHeader(400)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type ListUsersRequestObject struct {
-}
-
-type ListUsersResponseObject interface {
-	VisitListUsersResponse(w http.ResponseWriter) error
-}
-
-type ListUsers200JSONResponse []User
-
-func (response ListUsers200JSONResponse) VisitListUsersResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(200)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type ListWordpressSitesRequestObject struct {
-}
-
-type ListWordpressSitesResponseObject interface {
-	VisitListWordpressSitesResponse(w http.ResponseWriter) error
-}
-
-type ListWordpressSites200JSONResponse []WordpressSite
-
-func (response ListWordpressSites200JSONResponse) VisitListWordpressSitesResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(200)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type CreateWordpressSiteRequestObject struct {
-	Body *CreateWordpressSiteJSONRequestBody
-}
-
-type CreateWordpressSiteResponseObject interface {
-	VisitCreateWordpressSiteResponse(w http.ResponseWriter) error
-}
-
-type CreateWordpressSite201JSONResponse WordpressSite
-
-func (response CreateWordpressSite201JSONResponse) VisitCreateWordpressSiteResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(201)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type CreateWordpressSite400ApplicationProblemPlusJSONResponse struct {
-	BadRequestApplicationProblemPlusJSONResponse
-}
-
-func (response CreateWordpressSite400ApplicationProblemPlusJSONResponse) VisitCreateWordpressSiteResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/problem+json")
-	w.WriteHeader(400)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type CreateWordpressSite409ApplicationProblemPlusJSONResponse struct {
-	ConflictApplicationProblemPlusJSONResponse
-}
-
-func (response CreateWordpressSite409ApplicationProblemPlusJSONResponse) VisitCreateWordpressSiteResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/problem+json")
-	w.WriteHeader(409)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type DeleteWordpressSiteRequestObject struct {
-	Id openapi_types.UUID `json:"id"`
-}
-
-type DeleteWordpressSiteResponseObject interface {
-	VisitDeleteWordpressSiteResponse(w http.ResponseWriter) error
-}
-
-type DeleteWordpressSite204Response struct {
-}
-
-func (response DeleteWordpressSite204Response) VisitDeleteWordpressSiteResponse(w http.ResponseWriter) error {
-	w.WriteHeader(204)
-	return nil
-}
-
-type DeleteWordpressSite404ApplicationProblemPlusJSONResponse struct {
-	NotFoundApplicationProblemPlusJSONResponse
-}
-
-func (response DeleteWordpressSite404ApplicationProblemPlusJSONResponse) VisitDeleteWordpressSiteResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/problem+json")
-	w.WriteHeader(404)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type GetWordpressSiteRequestObject struct {
-	Id openapi_types.UUID `json:"id"`
-}
-
-type GetWordpressSiteResponseObject interface {
-	VisitGetWordpressSiteResponse(w http.ResponseWriter) error
-}
-
-type GetWordpressSite200JSONResponse WordpressSite
-
-func (response GetWordpressSite200JSONResponse) VisitGetWordpressSiteResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(200)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type GetWordpressSite404ApplicationProblemPlusJSONResponse struct {
-	NotFoundApplicationProblemPlusJSONResponse
-}
-
-func (response GetWordpressSite404ApplicationProblemPlusJSONResponse) VisitGetWordpressSiteResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/problem+json")
-	w.WriteHeader(404)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type UpdateWordpressSiteRequestObject struct {
-	Id   openapi_types.UUID `json:"id"`
-	Body *UpdateWordpressSiteJSONRequestBody
-}
-
-type UpdateWordpressSiteResponseObject interface {
-	VisitUpdateWordpressSiteResponse(w http.ResponseWriter) error
-}
-
-type UpdateWordpressSite200JSONResponse WordpressSite
-
-func (response UpdateWordpressSite200JSONResponse) VisitUpdateWordpressSiteResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(200)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type UpdateWordpressSite400ApplicationProblemPlusJSONResponse struct {
-	BadRequestApplicationProblemPlusJSONResponse
-}
-
-func (response UpdateWordpressSite400ApplicationProblemPlusJSONResponse) VisitUpdateWordpressSiteResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/problem+json")
-	w.WriteHeader(400)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type UpdateWordpressSite404ApplicationProblemPlusJSONResponse struct {
-	NotFoundApplicationProblemPlusJSONResponse
-}
-
-func (response UpdateWordpressSite404ApplicationProblemPlusJSONResponse) VisitUpdateWordpressSiteResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/problem+json")
-	w.WriteHeader(404)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-// StrictServerInterface represents all server handlers.
-type StrictServerInterface interface {
-	// List your API tokens (metadata only)
-	// (GET /api-tokens)
-	ListApiTokens(ctx context.Context, request ListApiTokensRequestObject) (ListApiTokensResponseObject, error)
-	// Create an API token (the secret is returned only once)
-	// (POST /api-tokens)
-	CreateApiToken(ctx context.Context, request CreateApiTokenRequestObject) (CreateApiTokenResponseObject, error)
-	// Revoke an API token
-	// (DELETE /api-tokens/{id})
-	DeleteApiToken(ctx context.Context, request DeleteApiTokenRequestObject) (DeleteApiTokenResponseObject, error)
-	// List articles (paginated, newest first)
-	// (GET /articles)
-	ListArticles(ctx context.Context, request ListArticlesRequestObject) (ListArticlesResponseObject, error)
-	// Get an article
-	// (GET /articles/{id})
-	GetArticle(ctx context.Context, request GetArticleRequestObject) (GetArticleResponseObject, error)
-	// Publish a draft article
-	// (POST /articles/{id}/publish)
-	PublishArticle(ctx context.Context, request PublishArticleRequestObject) (PublishArticleResponseObject, error)
-	// Rate an article (copywriter 👍/👎)
-	// (POST /articles/{id}/rating)
-	RateArticle(ctx context.Context, request RateArticleRequestObject) (RateArticleResponseObject, error)
-	// Authenticate and receive a JWT
-	// (POST /auth/login)
-	Login(ctx context.Context, request LoginRequestObject) (LoginResponseObject, error)
-	// Crawl the sites listed in a sheet and scrape their email addresses
-	// (POST /emailscrape)
-	ScrapeEmails(ctx context.Context, request ScrapeEmailsRequestObject) (ScrapeEmailsResponseObject, error)
-	// Get the progress and state of a scrape job
-	// (GET /emailscrape/jobs/{id})
-	GetScrapeJob(ctx context.Context, request GetScrapeJobRequestObject) (GetScrapeJobResponseObject, error)
-	// Request cancellation of a running scrape job
-	// (POST /emailscrape/jobs/{id}/cancel)
-	CancelScrapeJob(ctx context.Context, request CancelScrapeJobRequestObject) (CancelScrapeJobResponseObject, error)
-	// Queue an article for generation
-	// (POST /generate)
-	GenerateArticle(ctx context.Context, request GenerateArticleRequestObject) (GenerateArticleResponseObject, error)
-	// Queue a batch from the next N unused sheet topics
-	// (POST /generate/batch)
-	GenerateBatch(ctx context.Context, request GenerateBatchRequestObject) (GenerateBatchResponseObject, error)
-	// Health check
-	// (GET /healthz)
-	GetHealthz(ctx context.Context, request GetHealthzRequestObject) (GetHealthzResponseObject, error)
-	// Log into the WordPress sites listed in a sheet's credential columns
-	// (POST /linkbuilding/login)
-	LoginToSites(ctx context.Context, request LoginToSitesRequestObject) (LoginToSitesResponseObject, error)
-	// Place a backlink to one of our WordPress sites in each suitable donor's latest post
-	// (POST /linkbuilding/place-backlinks)
-	PlaceBacklinks(ctx context.Context, request PlaceBacklinksRequestObject) (PlaceBacklinksResponseObject, error)
-	// Qualify donor websites listed in a sheet
-	// (POST /linkbuilding/qualify)
-	QualifyWebsites(ctx context.Context, request QualifyWebsitesRequestObject) (QualifyWebsitesResponseObject, error)
-	// List users
-	// (GET /users)
-	ListUsers(ctx context.Context, request ListUsersRequestObject) (ListUsersResponseObject, error)
-	// List WordPress sites
-	// (GET /wordpress-sites)
-	ListWordpressSites(ctx context.Context, request ListWordpressSitesRequestObject) (ListWordpressSitesResponseObject, error)
-	// Add a WordPress site
-	// (POST /wordpress-sites)
-	CreateWordpressSite(ctx context.Context, request CreateWordpressSiteRequestObject) (CreateWordpressSiteResponseObject, error)
-	// Soft-delete a WordPress site
-	// (DELETE /wordpress-sites/{id})
-	DeleteWordpressSite(ctx context.Context, request DeleteWordpressSiteRequestObject) (DeleteWordpressSiteResponseObject, error)
-	// Get a WordPress site
-	// (GET /wordpress-sites/{id})
-	GetWordpressSite(ctx context.Context, request GetWordpressSiteRequestObject) (GetWordpressSiteResponseObject, error)
-	// Update a WordPress site
-	// (PATCH /wordpress-sites/{id})
-	UpdateWordpressSite(ctx context.Context, request UpdateWordpressSiteRequestObject) (UpdateWordpressSiteResponseObject, error)
-}
-
-type StrictHandlerFunc func(ctx context.Context, w http.ResponseWriter, r *http.Request, request any) (any, error)
-type StrictMiddlewareFunc func(f StrictHandlerFunc, operationID string) StrictHandlerFunc
-
-type StrictHTTPServerOptions struct {
-	RequestErrorHandlerFunc  func(w http.ResponseWriter, r *http.Request, err error)
-	ResponseErrorHandlerFunc func(w http.ResponseWriter, r *http.Request, err error)
-}
-
-func NewStrictHandler(ssi StrictServerInterface, middlewares []StrictMiddlewareFunc) ServerInterface {
-	return &strictHandler{ssi: ssi, middlewares: middlewares, options: StrictHTTPServerOptions{
-		RequestErrorHandlerFunc: func(w http.ResponseWriter, r *http.Request, err error) {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-		},
-		ResponseErrorHandlerFunc: func(w http.ResponseWriter, r *http.Request, err error) {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-		},
-	}}
-}
-
-func NewStrictHandlerWithOptions(ssi StrictServerInterface, middlewares []StrictMiddlewareFunc, options StrictHTTPServerOptions) ServerInterface {
-	return &strictHandler{ssi: ssi, middlewares: middlewares, options: options}
-}
-
-type strictHandler struct {
-	ssi         StrictServerInterface
-	middlewares []StrictMiddlewareFunc
-	options     StrictHTTPServerOptions
-}
-
-// ListApiTokens operation middleware
-func (sh *strictHandler) ListApiTokens(w http.ResponseWriter, r *http.Request) {
-	var request ListApiTokensRequestObject
-
-	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.ListApiTokens(ctx, request.(ListApiTokensRequestObject))
-	}
-	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "ListApiTokens")
-	}
-
-	response, err := handler(r.Context(), w, r, request)
-
-	if err != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(ListApiTokensResponseObject); ok {
-		if err := validResponse.VisitListApiTokensResponse(w); err != nil {
-			sh.options.ResponseErrorHandlerFunc(w, r, err)
-		}
-	} else if response != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
-	}
-}
-
-// CreateApiToken operation middleware
-func (sh *strictHandler) CreateApiToken(w http.ResponseWriter, r *http.Request) {
-	var request CreateApiTokenRequestObject
-
-	var body CreateApiTokenJSONRequestBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
-		return
-	}
-	request.Body = &body
-
-	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.CreateApiToken(ctx, request.(CreateApiTokenRequestObject))
-	}
-	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "CreateApiToken")
-	}
-
-	response, err := handler(r.Context(), w, r, request)
-
-	if err != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(CreateApiTokenResponseObject); ok {
-		if err := validResponse.VisitCreateApiTokenResponse(w); err != nil {
-			sh.options.ResponseErrorHandlerFunc(w, r, err)
-		}
-	} else if response != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
-	}
-}
-
-// DeleteApiToken operation middleware
-func (sh *strictHandler) DeleteApiToken(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
-	var request DeleteApiTokenRequestObject
-
-	request.Id = id
-
-	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.DeleteApiToken(ctx, request.(DeleteApiTokenRequestObject))
-	}
-	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "DeleteApiToken")
-	}
-
-	response, err := handler(r.Context(), w, r, request)
-
-	if err != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(DeleteApiTokenResponseObject); ok {
-		if err := validResponse.VisitDeleteApiTokenResponse(w); err != nil {
-			sh.options.ResponseErrorHandlerFunc(w, r, err)
-		}
-	} else if response != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
-	}
-}
-
-// ListArticles operation middleware
-func (sh *strictHandler) ListArticles(w http.ResponseWriter, r *http.Request, params ListArticlesParams) {
-	var request ListArticlesRequestObject
-
-	request.Params = params
-
-	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.ListArticles(ctx, request.(ListArticlesRequestObject))
-	}
-	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "ListArticles")
-	}
-
-	response, err := handler(r.Context(), w, r, request)
-
-	if err != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(ListArticlesResponseObject); ok {
-		if err := validResponse.VisitListArticlesResponse(w); err != nil {
-			sh.options.ResponseErrorHandlerFunc(w, r, err)
-		}
-	} else if response != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
-	}
-}
-
-// GetArticle operation middleware
-func (sh *strictHandler) GetArticle(w http.ResponseWriter, r *http.Request, id int64) {
-	var request GetArticleRequestObject
-
-	request.Id = id
-
-	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.GetArticle(ctx, request.(GetArticleRequestObject))
-	}
-	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "GetArticle")
-	}
-
-	response, err := handler(r.Context(), w, r, request)
-
-	if err != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(GetArticleResponseObject); ok {
-		if err := validResponse.VisitGetArticleResponse(w); err != nil {
-			sh.options.ResponseErrorHandlerFunc(w, r, err)
-		}
-	} else if response != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
-	}
-}
-
-// PublishArticle operation middleware
-func (sh *strictHandler) PublishArticle(w http.ResponseWriter, r *http.Request, id int64) {
-	var request PublishArticleRequestObject
-
-	request.Id = id
-
-	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.PublishArticle(ctx, request.(PublishArticleRequestObject))
-	}
-	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "PublishArticle")
-	}
-
-	response, err := handler(r.Context(), w, r, request)
-
-	if err != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(PublishArticleResponseObject); ok {
-		if err := validResponse.VisitPublishArticleResponse(w); err != nil {
-			sh.options.ResponseErrorHandlerFunc(w, r, err)
-		}
-	} else if response != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
-	}
-}
-
-// RateArticle operation middleware
-func (sh *strictHandler) RateArticle(w http.ResponseWriter, r *http.Request, id int64) {
-	var request RateArticleRequestObject
-
-	request.Id = id
-
-	var body RateArticleJSONRequestBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
-		return
-	}
-	request.Body = &body
-
-	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.RateArticle(ctx, request.(RateArticleRequestObject))
-	}
-	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "RateArticle")
-	}
-
-	response, err := handler(r.Context(), w, r, request)
-
-	if err != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(RateArticleResponseObject); ok {
-		if err := validResponse.VisitRateArticleResponse(w); err != nil {
-			sh.options.ResponseErrorHandlerFunc(w, r, err)
-		}
-	} else if response != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
-	}
-}
-
-// Login operation middleware
-func (sh *strictHandler) Login(w http.ResponseWriter, r *http.Request) {
-	var request LoginRequestObject
-
-	var body LoginJSONRequestBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
-		return
-	}
-	request.Body = &body
-
-	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.Login(ctx, request.(LoginRequestObject))
-	}
-	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "Login")
-	}
-
-	response, err := handler(r.Context(), w, r, request)
-
-	if err != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(LoginResponseObject); ok {
-		if err := validResponse.VisitLoginResponse(w); err != nil {
-			sh.options.ResponseErrorHandlerFunc(w, r, err)
-		}
-	} else if response != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
-	}
-}
-
-// ScrapeEmails operation middleware
-func (sh *strictHandler) ScrapeEmails(w http.ResponseWriter, r *http.Request) {
-	var request ScrapeEmailsRequestObject
-
-	var body ScrapeEmailsJSONRequestBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
-		return
-	}
-	request.Body = &body
-
-	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.ScrapeEmails(ctx, request.(ScrapeEmailsRequestObject))
-	}
-	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "ScrapeEmails")
-	}
-
-	response, err := handler(r.Context(), w, r, request)
-
-	if err != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(ScrapeEmailsResponseObject); ok {
-		if err := validResponse.VisitScrapeEmailsResponse(w); err != nil {
-			sh.options.ResponseErrorHandlerFunc(w, r, err)
-		}
-	} else if response != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
-	}
-}
-
-// GetScrapeJob operation middleware
-func (sh *strictHandler) GetScrapeJob(w http.ResponseWriter, r *http.Request, id string) {
-	var request GetScrapeJobRequestObject
-
-	request.Id = id
-
-	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.GetScrapeJob(ctx, request.(GetScrapeJobRequestObject))
-	}
-	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "GetScrapeJob")
-	}
-
-	response, err := handler(r.Context(), w, r, request)
-
-	if err != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(GetScrapeJobResponseObject); ok {
-		if err := validResponse.VisitGetScrapeJobResponse(w); err != nil {
-			sh.options.ResponseErrorHandlerFunc(w, r, err)
-		}
-	} else if response != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
-	}
-}
-
-// CancelScrapeJob operation middleware
-func (sh *strictHandler) CancelScrapeJob(w http.ResponseWriter, r *http.Request, id string) {
-	var request CancelScrapeJobRequestObject
-
-	request.Id = id
-
-	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.CancelScrapeJob(ctx, request.(CancelScrapeJobRequestObject))
-	}
-	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "CancelScrapeJob")
-	}
-
-	response, err := handler(r.Context(), w, r, request)
-
-	if err != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(CancelScrapeJobResponseObject); ok {
-		if err := validResponse.VisitCancelScrapeJobResponse(w); err != nil {
-			sh.options.ResponseErrorHandlerFunc(w, r, err)
-		}
-	} else if response != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
-	}
-}
-
-// GenerateArticle operation middleware
-func (sh *strictHandler) GenerateArticle(w http.ResponseWriter, r *http.Request) {
-	var request GenerateArticleRequestObject
-
-	var body GenerateArticleJSONRequestBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
-		return
-	}
-	request.Body = &body
-
-	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.GenerateArticle(ctx, request.(GenerateArticleRequestObject))
-	}
-	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "GenerateArticle")
-	}
-
-	response, err := handler(r.Context(), w, r, request)
-
-	if err != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(GenerateArticleResponseObject); ok {
-		if err := validResponse.VisitGenerateArticleResponse(w); err != nil {
-			sh.options.ResponseErrorHandlerFunc(w, r, err)
-		}
-	} else if response != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
-	}
-}
-
-// GenerateBatch operation middleware
-func (sh *strictHandler) GenerateBatch(w http.ResponseWriter, r *http.Request) {
-	var request GenerateBatchRequestObject
-
-	var body GenerateBatchJSONRequestBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
-		return
-	}
-	request.Body = &body
-
-	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.GenerateBatch(ctx, request.(GenerateBatchRequestObject))
-	}
-	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "GenerateBatch")
-	}
-
-	response, err := handler(r.Context(), w, r, request)
-
-	if err != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(GenerateBatchResponseObject); ok {
-		if err := validResponse.VisitGenerateBatchResponse(w); err != nil {
-			sh.options.ResponseErrorHandlerFunc(w, r, err)
-		}
-	} else if response != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
-	}
-}
-
-// GetHealthz operation middleware
-func (sh *strictHandler) GetHealthz(w http.ResponseWriter, r *http.Request) {
-	var request GetHealthzRequestObject
-
-	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.GetHealthz(ctx, request.(GetHealthzRequestObject))
-	}
-	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "GetHealthz")
-	}
-
-	response, err := handler(r.Context(), w, r, request)
-
-	if err != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(GetHealthzResponseObject); ok {
-		if err := validResponse.VisitGetHealthzResponse(w); err != nil {
-			sh.options.ResponseErrorHandlerFunc(w, r, err)
-		}
-	} else if response != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
-	}
-}
-
-// LoginToSites operation middleware
-func (sh *strictHandler) LoginToSites(w http.ResponseWriter, r *http.Request) {
-	var request LoginToSitesRequestObject
-
-	var body LoginToSitesJSONRequestBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
-		return
-	}
-	request.Body = &body
-
-	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.LoginToSites(ctx, request.(LoginToSitesRequestObject))
-	}
-	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "LoginToSites")
-	}
-
-	response, err := handler(r.Context(), w, r, request)
-
-	if err != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(LoginToSitesResponseObject); ok {
-		if err := validResponse.VisitLoginToSitesResponse(w); err != nil {
-			sh.options.ResponseErrorHandlerFunc(w, r, err)
-		}
-	} else if response != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
-	}
-}
-
-// PlaceBacklinks operation middleware
-func (sh *strictHandler) PlaceBacklinks(w http.ResponseWriter, r *http.Request) {
-	var request PlaceBacklinksRequestObject
-
-	var body PlaceBacklinksJSONRequestBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
-		return
-	}
-	request.Body = &body
-
-	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.PlaceBacklinks(ctx, request.(PlaceBacklinksRequestObject))
-	}
-	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "PlaceBacklinks")
-	}
-
-	response, err := handler(r.Context(), w, r, request)
-
-	if err != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(PlaceBacklinksResponseObject); ok {
-		if err := validResponse.VisitPlaceBacklinksResponse(w); err != nil {
-			sh.options.ResponseErrorHandlerFunc(w, r, err)
-		}
-	} else if response != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
-	}
-}
-
-// QualifyWebsites operation middleware
-func (sh *strictHandler) QualifyWebsites(w http.ResponseWriter, r *http.Request) {
-	var request QualifyWebsitesRequestObject
-
-	var body QualifyWebsitesJSONRequestBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
-		return
-	}
-	request.Body = &body
-
-	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.QualifyWebsites(ctx, request.(QualifyWebsitesRequestObject))
-	}
-	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "QualifyWebsites")
-	}
-
-	response, err := handler(r.Context(), w, r, request)
-
-	if err != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(QualifyWebsitesResponseObject); ok {
-		if err := validResponse.VisitQualifyWebsitesResponse(w); err != nil {
-			sh.options.ResponseErrorHandlerFunc(w, r, err)
-		}
-	} else if response != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
-	}
-}
-
-// ListUsers operation middleware
-func (sh *strictHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
-	var request ListUsersRequestObject
-
-	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.ListUsers(ctx, request.(ListUsersRequestObject))
-	}
-	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "ListUsers")
-	}
-
-	response, err := handler(r.Context(), w, r, request)
-
-	if err != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(ListUsersResponseObject); ok {
-		if err := validResponse.VisitListUsersResponse(w); err != nil {
-			sh.options.ResponseErrorHandlerFunc(w, r, err)
-		}
-	} else if response != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
-	}
-}
-
-// ListWordpressSites operation middleware
-func (sh *strictHandler) ListWordpressSites(w http.ResponseWriter, r *http.Request) {
-	var request ListWordpressSitesRequestObject
-
-	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.ListWordpressSites(ctx, request.(ListWordpressSitesRequestObject))
-	}
-	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "ListWordpressSites")
-	}
-
-	response, err := handler(r.Context(), w, r, request)
-
-	if err != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(ListWordpressSitesResponseObject); ok {
-		if err := validResponse.VisitListWordpressSitesResponse(w); err != nil {
-			sh.options.ResponseErrorHandlerFunc(w, r, err)
-		}
-	} else if response != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
-	}
-}
-
-// CreateWordpressSite operation middleware
-func (sh *strictHandler) CreateWordpressSite(w http.ResponseWriter, r *http.Request) {
-	var request CreateWordpressSiteRequestObject
-
-	var body CreateWordpressSiteJSONRequestBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
-		return
-	}
-	request.Body = &body
-
-	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.CreateWordpressSite(ctx, request.(CreateWordpressSiteRequestObject))
-	}
-	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "CreateWordpressSite")
-	}
-
-	response, err := handler(r.Context(), w, r, request)
-
-	if err != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(CreateWordpressSiteResponseObject); ok {
-		if err := validResponse.VisitCreateWordpressSiteResponse(w); err != nil {
-			sh.options.ResponseErrorHandlerFunc(w, r, err)
-		}
-	} else if response != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
-	}
-}
-
-// DeleteWordpressSite operation middleware
-func (sh *strictHandler) DeleteWordpressSite(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
-	var request DeleteWordpressSiteRequestObject
-
-	request.Id = id
-
-	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.DeleteWordpressSite(ctx, request.(DeleteWordpressSiteRequestObject))
-	}
-	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "DeleteWordpressSite")
-	}
-
-	response, err := handler(r.Context(), w, r, request)
-
-	if err != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(DeleteWordpressSiteResponseObject); ok {
-		if err := validResponse.VisitDeleteWordpressSiteResponse(w); err != nil {
-			sh.options.ResponseErrorHandlerFunc(w, r, err)
-		}
-	} else if response != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
-	}
-}
-
-// GetWordpressSite operation middleware
-func (sh *strictHandler) GetWordpressSite(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
-	var request GetWordpressSiteRequestObject
-
-	request.Id = id
-
-	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.GetWordpressSite(ctx, request.(GetWordpressSiteRequestObject))
-	}
-	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "GetWordpressSite")
-	}
-
-	response, err := handler(r.Context(), w, r, request)
-
-	if err != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(GetWordpressSiteResponseObject); ok {
-		if err := validResponse.VisitGetWordpressSiteResponse(w); err != nil {
-			sh.options.ResponseErrorHandlerFunc(w, r, err)
-		}
-	} else if response != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
-	}
-}
-
-// UpdateWordpressSite operation middleware
-func (sh *strictHandler) UpdateWordpressSite(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
-	var request UpdateWordpressSiteRequestObject
-
-	request.Id = id
-
-	var body UpdateWordpressSiteJSONRequestBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
-		return
-	}
-	request.Body = &body
-
-	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.UpdateWordpressSite(ctx, request.(UpdateWordpressSiteRequestObject))
-	}
-	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "UpdateWordpressSite")
-	}
-
-	response, err := handler(r.Context(), w, r, request)
-
-	if err != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(UpdateWordpressSiteResponseObject); ok {
-		if err := validResponse.VisitUpdateWordpressSiteResponse(w); err != nil {
-			sh.options.ResponseErrorHandlerFunc(w, r, err)
-		}
-	} else if response != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
-	}
-}
-
 // Base64 encoded, compressed with deflate, json marshaled OpenAPI spec.
 // Stored as a slice of fixed-width chunks rather than one concatenated
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"7Fzvbtu4sn8VQvcCTXHtOO22d/dmsR+SNu1mN22zSXuLRREYtDS2WFOkSlJxvIWB8wLnAAuc7/tu5wn2",
-	"EQ74R7IkU7KdRk4PzvnUWCKHw5kfZ4Yzo34OQp6knAFTMjj8HAiQKWcSzI9jHF3Apwyk0r9CzhQw8ydO",
-	"U0pCrAhng1TwEYXkfz5KzvQ7GcaQYP3XfwsYB4fBfw2WSwzsWzk4EYKLC7dYsFgsekEEMhQk1USDw+CU",
-	"XWNKIiQcA4te8IyzMSXhPTCTr4xmRMUIbohUhE2QAMkzEYJm7jVXL3jGot0zd+G4QIwrNDY8LHrBO4Yz",
-	"FXNBfoN74OkVkVJLiAtEnCJHgAUIpPgUWKBnOGJ6raOUvDXPDz8HqeApCEUsBEMBWEF0ZBgfc5FgFRwG",
-	"EVbQVySBoBeoeQrBYSCVIGyid06iytgsI5FvGMMJ6IErL1IBY3LjebXoBRqNRGiJfggMWUOlmNMr8XtV",
-	"rMlHHyE0CM73+cyO+rq32wtUrpNbCMLOXSsQoUhIYVUQmAxlyIV5wzJK8UiPUiKDggrLkhEITSWMIZwO",
-	"BciMqpYJbtlecNOf8L57qIG/f4Fnr0BKPDFHWQMeFFFcDCOs8F1QtEIY4i30GmcJZkOBtaVpYWHEOQXM",
-	"ihnkNxiG85BaMTZMIkzBxMquBh/C1P8+CbwDEzwBOXT22IK3ZZTk9HrNIDklado0ZgrzGReRH7LZiBIZ",
-	"twu0YetLKp8yTImaD/l0M/G6nQ9TLHAi7wAVAmbY7nAtwiVR/tOrXwz9JmCtAKTCKpPNJ39DBGVptDW4",
-	"Z+kQIqKGmaDe9WfpMOVSDTdGZz7BT9BnsHKAFXKoHNPKtlos1xmxwVHVehEFSfWPNm+aG8FFsQwWAs+t",
-	"HhSmG4mgvkWzcE7AtwHrg3KPVIrzqlvx+w2NbY5T0g95BBNgfbhRAvcVnphJxuNjDdmCqV5C2A+Pegm+",
-	"+eHRwYGNGcoMm3Wa+XzPRZQKkPKSKGhkFlOCZSfc9nTUdI6l9Bul265gKHsxewuKmo6hJ0F0oLbHT5+u",
-	"qs1K3O6htHJVXD61VkPIw8/1oPbFM/TtdwffIhegoggUJlSaEKOscvvca0QIkwqzsMFw1o1fyZgooqh/",
-	"ln2wzr7Y+cUavu2/BAZCn78whLQtFNzKrG5sLtu8a8IjoA2hIr8mEYhGT7RLF2VfNXoQmU0mJk4ZtmgT",
-	"iwmooRNG1WA3qD43zdt7lDYUHGMVxs1QwNZBDEmNxw0UXXcoIc/sJXCN/7DjepWl1+6g2S6ToYoFyJjT",
-	"MuaW8Q3OFB+6sK40oBR9NTF+J7adsJBmEQxtYLpZOEgxm2Q6kvOeIXxTisJX1aLfL2Ms//sCk57XhLW+",
-	"vv0JHm5yndxe5quOIwdYvmgbuLrElWF9KLKqqspOpASNIVZKkFFmndQmKLkNshqN85e5b4f1/+B2O9w6",
-	"+oqnJFzv+ks+oAXYPwKmKi5HP1VcL90esCzRdPk06AURTASOoEyz5J+Ijfg2iRRqTBfuyoz2MXzGJ6T5",
-	"jgCJNwS7BVwtJc1f2kWsXdu3Xa20VsvWm1QFNykRILfJ2G2YVsszaMsVfOydUxzCMQ6nlLCpbI4hZAyg",
-	"Go+PHH7KIPPnYupgMYRq09Zz1gie4tBXLwBvrkEIEgFSMaAIxjijCp2dvUJmPBpzgVRMJBIZQ5zR+T56",
-	"gSmVaITDKVJcDx0eHz37+ez09c/DV2+en5yhPS7MY/PrIZrFwBAkqZrv+7RUNjkbspZP2ZK784s3/3/6",
-	"/OSiYDB/UOcRbnCSas8RhBRnkRdchZ6Xg9+fHF+evj25vAN7WLq1uuDZmDkXhFfFdK7dbojeXZwhPkac",
-	"gf5Hi0zfEh9INMuv9IaG/N680wICFiEBGkZSz5amsKFHAlOIMKRirJDSPrQqlFipVB4OBinF8zSjEvYV",
-	"hHHQK3kFQe5CCPlF2/gE6QGI+QNT9ILyGXqEzDiEKeWzPiVS7aP3Wq8SVM+gA0WccSHRLOYSUMhpljB0",
-	"jBIdU4MsiU4C2guxhD5hEpgkilzDQ4QFICUIRBVxfAiUwNdgkj+3vNXkR72uat9p/yXDlIzntzFAMxjd",
-	"0gbVZ7Yw1hxDOo6HS21+iQy/6EyFmEXmdSszvcDhGkKeJCBCbQggymxJT986sSSM6/s1zLRbj024YQ4C",
-	"16HJGMvYjhxrCYfxNhjpdWmxf3l3dHb64tev02DnzP0r2uuGA1QHv+8AXWAFLkXdeIiWZao8YKVkqvcb",
-	"Een+YpyBJ3CtMeYI+fi4DAVO4UTHbC1xzkc+cneBZlF3EgL18qXX8d4oRA8Unr95/eaieyA0s/wTH3nK",
-	"G1HTJS0EKZsqei3iV7ghd1jUP9aVO8yNK1eLIZdPLvPl3SdRYGL8ryl2LpjaBiwdxXn/FkGOTwnvTAVw",
-	"R5Unnmj+UzXvrvRUW8KQBqbj6MifG/vCwtRyvbusTPkEVZSmVnUobUDwxW02DTmOTRtwfPYqTz+0t8hU",
-	"8Lcx8Ba9W22yDQ0bNhq5uvk2yzqctV7TWtHjFW9jaTLfZVlEZb5XtaAtPYSZIGp+GcaQWNHbjrajTMXL",
-	"Xy/yPfz0/m3getyMHM3b5a70XdVClrAxX7WuR6fo8uQNcl17aGIz4YQzlFKstKRMDGxLW8EzO8xY4qPz",
-	"06AXXIOQltLB/qP9Ay0+ngLDKQkOg2/2D/a/MXkvFZudDPTJW+Z1J9azaJiZNU+j4DA4I1Ll3QJarJVO",
-	"0ccHBy1NhqvNhZv1ReRdgasmfKXh8FeeCYRD7SuQ20hZa8Hhh6q+PlwtrnqBzJIEi7nbHZprIkfnp44C",
-	"2ktA4QgrbBzYQ3MT1vboQ6AHOUlc6ciHS4/Eqh0WQdFBdMyj+VbSahOSv42jFucpkcFiRWWP7oyJel+j",
-	"r4XWvkL/+MvfkcTX9i5m5IwYn/UQUSjE7IFCI0ACtKe/hghRrGzw+MQCzMdEsatBqV95K+Vb3hBmS+Wj",
-	"Pc2fhFCAQvpeCCoTDCIbynAWQiMcFr3yeRp8JtHCnm8K1oBXUfLcPK+gpKKlJ57mCLjmU4isXJ6sl0vR",
-	"m7yVVOwqFam0nAAscAIKhDR0iWZTm5e8M/TQ2uQqJHsleK3zn1dGrPYausZI5YP8XH3KQMyXbFGSEBWU",
-	"OXEJguDw8VNfm5WfDB+PJTTQOfCQufpCA7pBP5lpTfOcxCOU4okJtnNx9hCDGUiFxkRse3aM4cwJob0U",
-	"TwjTB71Ks3JYcv24o+J+FgfFq9iXkOs16F5yXqktm/Q6PHMvQekDh4uteoR2l4etsZvwakU1g1IZfRcM",
-	"NHnVc8vG/aLhPO9AvgUe9IT/Wz+h+NplKwA5xhBGkcBj1Y6kVR0v83j3qeJSxrGjqMmT09woZPI5Yxvx",
-	"dOuKXXjilIX2Qp7OZ4IoEOjPP37/6+DPP37/W5uNzVQ8oHxC7Bc2XqGbdFNH4q6ksjYS9MFdr938rZIW",
-	"OTClqeeK3DLW1FMerZ9S+STL6L9QcJkHhE39MwR9l8HIXiQLxWp8WKWa9IE0WdpmrZYTzx0p15fb3kjH",
-	"jzthoUjjelRtx6G86vG9/VwOWUkauacg+pIoQLYnxqQd9UFTwIpakLkZmKxh9xcTPKN2PaJAIkqkvkMR",
-	"hrDlwPBsMaCHEWH3gnAUCZDSBME5dIx4kBXBKoQGH/lofQy2LAp0eGKXi3hU+BMfOd3sIBTTkk8Fn2hZ",
-	"WlErfUB16JxL/aORRYOM7yBU896DvHobhJiFtjB796s25jjMmi2weLzqMe0catNZy+/Jur7NmnVQWF7c",
-	"KFJkjBE22UihWvguF9didIvm/k5jmHp37I5t7soXDJ7D+nKZtlza3JRTil6evEXV2NPU4Msn+xZOuDP0",
-	"/JJBVonANLPLpGxz5JWDZTDCKozXQ8b00XcMmEqv/j2hpvrFgwc6ZgByJdKu/axTLzJKQmPBE2P6Gdwo",
-	"9BplLJMQOYfryqGNCre9Nr+1OdEf3ZAOXWitwdgXCoG4JiEgIpFl2bT2PD345n54yFub0R7sT/ZRhBUe",
-	"YQkoYwJwGOMRhYe1mNnSR+bj75I+7GOnDUrYdJQRGhE22egC9JZf6kirq1C5XtbfdZy80uvg0YoZULbX",
-	"tZCYyHuMiM/4BBHmlnzPRXRuYrOG8PiBRKGASN+sMHU9B+Wze0bYFB07fPggk1IcQn+UNzE3g6fa7NwR",
-	"fPwd1TvGUEPDuS9JpkcmwFQNTKYRxIOmMpAeSHTqFNY5pgyfxvrbTWlGXDsKz8QKyghD2iQhmRHThGwb",
-	"Wx5IU6ySChmAbIGxT7ZBtRlbroP1vWt27QhctT7ZHaOq3j7sgZMd4siXIGX/34/7vqq7DVgwoLwxedUk",
-	"rUFGJs2lraW89c6M2EX93fTObFB7P6IUWb63rxxlbjee/FbxfUDfwr5NKJUmmd1Ip9qXs6GYGGd9WwiO",
-	"rDW5hchq9qgkvOUbK4Z1rQnVLXTZn+Btottxk0JNYY0tCre+fXZW1DmKIoRrem9Vu+f4bNiHsAqJdfUP",
-	"O6/r9M0lHyt3crYTRa/xGrZmqwe7A15uQbouLG8nt+5bOkwHms2KVLXj6bztyDy19PjuuE61FiWW1ejr",
-	"S45Zxra0UGYBcZ2jq3YgcAKIC2IuotJ+tsNDifZmXEwl0uEfm6OYSzVIuTDdJaaHNBgEi94KMYUntsXY",
-	"jsk/E0wyqgieAFN9CXz/uxAotV8M6u051uvEzsg1sLwaIABHxPwySQi5PBkuCbHKTKnQZ/OGboKR7Orw",
-	"peBc9wVhE2Q/xyutVhevRwYnb4rUZamX1FS8CsIlbvKc1iql5zq+7bv4Fn0qx+TL+dXIdpXIGWeTPiXX",
-	"YAtuOgg0TWZTmJe2VWoxW1wt/hkAAP//",
+	"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",
+	"mr6wBaxKqyx1ha0v1/8OAAD//w==",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

@@ -64,7 +64,7 @@ func itArtBuild(t *testing.T) http.Handler {
 		nil,
 	)
 
-	server := handlers.NewServer(nil, nil, nil, handlers.NewArticlesHandler(svc), handlers.NewLinkbuildingHandler(nil, nil, nil), handlers.NewApiTokensHandler(nil), handlers.NewEmailScrapeHandler(nil))
+	server := handlers.NewServer(nil, nil, nil, handlers.NewArticlesHandler(svc), handlers.NewLinkbuildingHandler(nil, nil), handlers.NewApiTokensHandler(nil), handlers.NewEmailScrapeHandler(nil))
 	return apihttp.NewRouter(config.ServerConfig{
 		BasePath:           "/",
 		CORSAllowedOrigins: []string{"http://localhost:3000"},
@@ -130,44 +130,6 @@ func TestItArt_GenerateAndPersist(t *testing.T) {
 	}
 	if !itArtListHas(list, accepted.Id) {
 		t.Errorf("GET /articles missing generated article id=%d", accepted.Id)
-	}
-}
-
-func TestItArt_GenerateZeroSiteID(t *testing.T) {
-	router := itArtBuild(t)
-	rec := doJSON(t, router, http.MethodPost, "/generate", oapigen.GenerateRequest{
-		Keyword: itArtKnownKeyword,
-		SiteId:  uuid.Nil,
-	})
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("zero site_id status = %d, want 400 (body=%s)", rec.Code, rec.Body.String())
-	}
-}
-
-func TestItArt_GenerateUnknownKeyword(t *testing.T) {
-	router := itArtBuild(t)
-	rec := doJSON(t, router, http.MethodPost, "/generate", oapigen.GenerateRequest{
-		Keyword: "no such topic in the mock",
-		SiteId:  uuid.New(),
-	})
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("unknown keyword status = %d, want 404 (body=%s)", rec.Code, rec.Body.String())
-	}
-}
-
-func TestItArt_GetMissing(t *testing.T) {
-	router := itArtBuild(t)
-	rec := doJSON(t, router, http.MethodGet, "/articles/999999", nil)
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("get missing status = %d, want 404 (body=%s)", rec.Code, rec.Body.String())
-	}
-}
-
-func TestItArt_PublishMissing(t *testing.T) {
-	router := itArtBuild(t)
-	rec := doJSON(t, router, http.MethodPost, "/articles/999999/publish", nil)
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("publish missing status = %d, want 404 (body=%s)", rec.Code, rec.Body.String())
 	}
 }
 

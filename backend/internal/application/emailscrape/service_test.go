@@ -5,10 +5,20 @@ import (
 	"slices"
 	"sync"
 	"testing"
+	"time"
 
 	domain "multiagent-seo/internal/domain/emailscrape"
 	"multiagent-seo/pkg/jobrunner"
 )
+
+var testSettings = Settings{
+	Concurrency:     2,
+	FlushBatch:      10,
+	WriteTimeout:    5 * time.Second,
+	MaxContactPages: 3,
+	PerHostRPS:      1000,
+	PerHostBurst:    1000,
+}
 
 type fakeSites struct {
 	list    []domain.Site
@@ -68,7 +78,7 @@ func TestScrapeEmails_HomeAndContactPage(t *testing.T) {
 	}}
 	store := &fakeStore{}
 
-	svc := NewService(sites, fetcher, store, fakeJobs{}, jobrunner.NewSyncRunner(), nil)
+	svc := NewService(sites, fetcher, store, fakeJobs{}, jobrunner.NewSyncRunner(), nil, testSettings)
 
 	res, err := svc.ScrapeEmails(context.Background(), ScrapeRequest{Sheet: "list1"})
 	if err != nil {
@@ -100,7 +110,7 @@ func TestScrapeEmails_HomeAndContactPage(t *testing.T) {
 }
 
 func TestScrapeEmails_NoSheet(t *testing.T) {
-	svc := NewService(&fakeSites{}, &fakeFetcher{}, &fakeStore{}, fakeJobs{}, jobrunner.NewSyncRunner(), nil)
+	svc := NewService(&fakeSites{}, &fakeFetcher{}, &fakeStore{}, fakeJobs{}, jobrunner.NewSyncRunner(), nil, testSettings)
 	if _, err := svc.ScrapeEmails(context.Background(), ScrapeRequest{}); err != ErrNoSheet {
 		t.Errorf("err = %v, want ErrNoSheet", err)
 	}

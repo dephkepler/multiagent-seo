@@ -18,15 +18,7 @@ import (
 	"multiagent-seo/pkg/workpool"
 )
 
-const (
-	maxConcurrentSites = 15
-	resultFlushBatch   = 50
-	resultWriteTimeout = 30 * time.Second
-	maxContactPages    = 8
-	perHostRPS         = 1.0
-	perHostBurst       = 1
-	maxStatusReason    = 200
-)
+const maxStatusReason = 200
 
 var ErrNoSheet = errors.New("sheet name is required")
 
@@ -34,25 +26,34 @@ var contactKeywords = []string{
 	"contact", "kontakt", "kontakty", "contato", "contacto", "contatti", "contacter",
 	"about", "über", "uber", "impressum", "imprint", "legal", "mentions", "aviso",
 	"privacy", "datenschutz",
-	// visible-text keywords (matched against anchor text, often non-latin)
 	"контакт", "связ", "о нас", "о компании", "реквизит",
 }
 
-type Service struct {
-	sites   domain.SiteSource
-	fetcher domain.PageFetcher
-	store   domain.EmailStore
-	jobs    domain.JobStore
-	runner  jobrunner.JobRunner
-	log     *slog.Logger
-	cancels sync.Map // jobID -> context.CancelFunc, for jobs running in this process
+type Settings struct {
+	Concurrency     int
+	FlushBatch      int
+	WriteTimeout    time.Duration
+	MaxContactPages int
+	PerHostRPS      float64
+	PerHostBurst    int
 }
 
-func NewService(sites domain.SiteSource, fetcher domain.PageFetcher, store domain.EmailStore, jobs domain.JobStore, runner jobrunner.JobRunner, log *slog.Logger) *Service {
+type Service struct {
+	sites    domain.SiteSource
+	fetcher  domain.PageFetcher
+	store    domain.EmailStore
+	jobs     domain.JobStore
+	runner   jobrunner.JobRunner
+	log      *slog.Logger
+	settings Settings
+	cancels  sync.Map // jobID -> context.CancelFunc, for jobs running in this process
+}
+
+func NewService(sites domain.SiteSource, fetcher domain.PageFetcher, store domain.EmailStore, jobs domain.JobStore, runner jobrunner.JobRunner, log *slog.Logger, settings Settings) *Service {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Service{sites: sites, fetcher: fetcher, store: store, jobs: jobs, runner: runner, log: log}
+	return &Service{sites: sites, fetcher: fetcher, store: store, jobs: jobs, runner: runner, log: log, settings: settings}
 }
 
 type ScrapeRequest struct {
@@ -84,7 +85,7 @@ func (s *Service) ScrapeEmails(ctx context.Context, req ScrapeRequest) (ScrapeRe
 	}
 
 	jobLog := s.log.With("sheet", req.Sheet, "sites", len(sites), "job_id", jobID)
-	limiter := hostlimit.New(perHostRPS, perHostBurst)
+	limiter := hostlimit.New(s.settings.PerHostRPS, s.settings.PerHostBurst)
 	s.runner.Go(ctx, func(bg context.Context) {
 		jobCtx, cancel := context.WithCancel(bg)
 		s.cancels.Store(jobID, cancel)
@@ -136,7 +137,7 @@ func (s *Service) scrapeAll(ctx context.Context, log *slog.Logger, jobID, sheet 
 			log.InfoContext(ctx, "email scrape progress", "processed", n, "total", len(sites))
 			return nil
 		},
-		workpool.Options{Concurrency: maxConcurrentSites, FlushEvery: resultFlushBatch, FlushTimeout: resultWriteTimeout},
+		workpool.Options{Concurrency: s.settings.Concurrency, FlushEvery: s.settings.FlushBatch, FlushTimeout: s.settings.WriteTimeout},
 	)
 
 	state, errMsg := domain.JobDone, ""
@@ -151,7 +152,7 @@ func (s *Service) scrapeAll(ctx context.Context, log *slog.Logger, jobID, sheet 
 		log.InfoContext(ctx, "email scrape done", "processed", processed)
 	}
 
-	finishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), resultWriteTimeout)
+	finishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), s.settings.WriteTimeout)
 	defer cancel()
 	if err := s.jobs.Finish(finishCtx, jobID, state, errMsg); err != nil {
 		log.ErrorContext(ctx, "finish job failed", "job_id", jobID, "err", err)
@@ -172,7 +173,7 @@ func (s *Service) scrapeOne(ctx context.Context, log *slog.Logger, site domain.S
 		found[e] = struct{}{}
 	}
 
-	for _, link := range pickContactLinks(home, maxContactPages) {
+	for _, link := range pickContactLinks(home, s.settings.MaxContactPages) {
 		if ctx.Err() != nil {
 			break
 		}

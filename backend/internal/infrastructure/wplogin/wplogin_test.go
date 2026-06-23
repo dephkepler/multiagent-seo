@@ -8,9 +8,17 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"multiagent-seo/internal/domain/linkbuilding"
+	"multiagent-seo/pkg/httpx"
 )
+
+func testAuth() *Authenticator {
+	a := New(nil, 20*time.Second)
+	a.transport = httpx.NewTransport(httpx.BlockPrivateIPs(), httpx.AllowLoopback(), httpx.InsecureTLS())
+	return a
+}
 
 const (
 	basicForm = `<form id="loginform">
@@ -82,7 +90,7 @@ func TestLoginSuccess(t *testing.T) {
 	srv := wpServer(t, basicForm, validCreds)
 	defer srv.Close()
 
-	res, err := New(nil).Login(context.Background(), cred(srv.URL))
+	res, err := testAuth().Login(context.Background(), cred(srv.URL))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -98,7 +106,7 @@ func TestLoginBadCredentials(t *testing.T) {
 	srv := wpServer(t, basicForm, func(url.Values) bool { return false })
 	defer srv.Close()
 
-	res, err := New(nil).Login(context.Background(), cred(srv.URL))
+	res, err := testAuth().Login(context.Background(), cred(srv.URL))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -113,7 +121,7 @@ func TestLoginSolvesMathCaptcha(t *testing.T) {
 	})
 	defer srv.Close()
 
-	res, err := New(nil).Login(context.Background(), cred(srv.URL))
+	res, err := testAuth().Login(context.Background(), cred(srv.URL))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -128,7 +136,7 @@ func TestLoginUnsolvableChallenge(t *testing.T) {
 	})
 	defer srv.Close()
 
-	res, err := New(nil).Login(context.Background(), cred(srv.URL))
+	res, err := testAuth().Login(context.Background(), cred(srv.URL))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -144,7 +152,7 @@ func TestLoginRealCaptchaIsManual(t *testing.T) {
 	})
 	defer srv.Close()
 
-	res, err := New(nil).Login(context.Background(), cred(srv.URL))
+	res, err := testAuth().Login(context.Background(), cred(srv.URL))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -159,7 +167,7 @@ func TestLoginCarriesHiddenFields(t *testing.T) {
 	})
 	defer srv.Close()
 
-	res, err := New(nil).Login(context.Background(), cred(srv.URL))
+	res, err := testAuth().Login(context.Background(), cred(srv.URL))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -172,7 +180,7 @@ func TestLoginEndpointMissing(t *testing.T) {
 	srv := httptest.NewServer(http.NotFoundHandler())
 	defer srv.Close()
 
-	res, err := New(nil).Login(context.Background(), cred(srv.URL))
+	res, err := testAuth().Login(context.Background(), cred(srv.URL))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -186,7 +194,7 @@ func TestLoginUnreachable(t *testing.T) {
 	base := srv.URL
 	srv.Close()
 
-	res, err := New(nil).Login(context.Background(), cred(base))
+	res, err := testAuth().Login(context.Background(), cred(base))
 	if err != nil {
 		t.Fatalf("network failure must not be an error, got: %v", err)
 	}
@@ -202,7 +210,7 @@ func TestLoginContextCancelledReturnsError(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	res, err := New(nil).Login(ctx, cred(srv.URL))
+	res, err := testAuth().Login(ctx, cred(srv.URL))
 	if err == nil {
 		t.Fatal("cancelled context must return an error so the run aborts")
 	}
@@ -231,7 +239,7 @@ func TestLoginCustomPhpPath(t *testing.T) {
 	defer srv.Close()
 
 	c := linkbuilding.SiteCredential{Row: 1, BaseURL: srv.URL + "/secret-login.php", Login: "monamedia", Password: "MonaM@123"}
-	res, err := New(nil).Login(context.Background(), c)
+	res, err := testAuth().Login(context.Background(), c)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -254,7 +262,7 @@ func TestLoginOverSelfSignedTLS(t *testing.T) {
 	srv := httptest.NewTLSServer(loginMux(basicForm, validCreds))
 	defer srv.Close()
 
-	res, err := New(nil).Login(context.Background(), cred(srv.URL))
+	res, err := testAuth().Login(context.Background(), cred(srv.URL))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -264,7 +272,7 @@ func TestLoginOverSelfSignedTLS(t *testing.T) {
 }
 
 func TestLoginInvalidURL(t *testing.T) {
-	res, err := New(nil).Login(context.Background(), cred("not a url"))
+	res, err := testAuth().Login(context.Background(), cred("not a url"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

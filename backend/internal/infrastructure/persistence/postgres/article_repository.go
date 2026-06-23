@@ -35,24 +35,29 @@ func NewArticleRepository(pool *pgxpool.Pool) *ArticleRepository {
 	return &ArticleRepository{db: pool}
 }
 
-func (r *ArticleRepository) Create(ctx context.Context, in articles.CreateArticle) (int64, error) {
+func (r *ArticleRepository) Create(ctx context.Context, in articles.CreateArticle) (articles.Article, error) {
 	const q = `
 		INSERT INTO articles (keyword, site_id, site, status, request_params)
 		VALUES (@keyword, @site_id, @site, @status, @request_params)
-		RETURNING id`
+		RETURNING id, keyword, site_id, site, status,
+		          COALESCE(wp_post_id, 0), COALESCE(wp_edit_url, ''), COALESCE(wp_post_url, ''),
+		          images_requested, images_resolved, images_skipped,
+		          competitor_data, check_result, request_params,
+		          created_at, updated_at, published_at, human_rating,
+		          NULL::double precision, NULL::double precision, NULL::boolean, NULL::integer, NULL::integer`
 
-	var id int64
-	err := r.db.QueryRow(ctx, q, pgx.NamedArgs{
+	row := r.db.QueryRow(ctx, q, pgx.NamedArgs{
 		"keyword":        in.Keyword,
 		"site_id":        in.SiteID,
 		"site":           in.Site,
 		"status":         articles.StatusGenerating,
 		"request_params": in.RequestParams,
-	}).Scan(&id)
+	})
+	a, err := scanArticleFull(row)
 	if err != nil {
-		return 0, fmt.Errorf("create article: %w", mapPGError(err))
+		return articles.Article{}, fmt.Errorf("create article: %w", mapPGError(err))
 	}
-	return id, nil
+	return a, nil
 }
 
 func (r *ArticleRepository) Get(ctx context.Context, id int64) (*articles.Article, error) {

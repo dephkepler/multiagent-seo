@@ -37,11 +37,12 @@ func main() {
 	}
 
 	ctx := context.Background()
-	pool, err := db.NewPool(ctx, cfg.Database)
-	if err != nil {
+	database := db.NewDatabase(cfg.Database)
+	if err := database.Initialize(ctx); err != nil {
 		log.Fatal().Err(err).Msg("database connect")
 	}
-	defer pool.Close()
+	defer database.Close()
+	pool := database.Pool()
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {

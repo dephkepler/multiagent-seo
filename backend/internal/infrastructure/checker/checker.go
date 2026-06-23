@@ -13,9 +13,6 @@ type MockClient struct {
 }
 
 func NewMock(aiThreshold float64) *MockClient {
-	if aiThreshold == 0 {
-		aiThreshold = 0.8
-	}
 	return &MockClient{AIThreshold: aiThreshold}
 }
 

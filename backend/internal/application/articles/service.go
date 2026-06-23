@@ -18,9 +18,8 @@ import (
 	"multiagent-seo/pkg/jobrunner"
 )
 
-var ErrNoCluster = errors.New("no keyword cluster for topic")
-
 var (
+	ErrNoCluster        = errors.New("no keyword cluster for topic")
 	ErrArticleNotFound  = errors.New("article not found")
 	ErrAlreadyPublished = errors.New("article already published")
 	ErrNoDraftToPublish = errors.New("article has no draft to publish")
@@ -57,10 +56,7 @@ type GenerateRequest struct {
 	AIThreshold             float64
 	IncludeImages           *bool
 	IncludeImageAttribution *bool
-
-	// cluster, when set, skips the per-keyword sheet Lookup in resolve. Set
-	// only inside this package (batch generation) — never from HTTP input.
-	cluster *articles.Cluster
+	cluster                 *articles.Cluster
 }
 
 type Service struct {
@@ -158,6 +154,34 @@ func (s *Service) Generate(ctx context.Context, req GenerateRequest) (GenerateRe
 		return GenerateResult{}, fmt.Errorf("resolve generation settings (keyword=%q site_id=%s): %w", req.Keyword, req.SiteID, err)
 	}
 
+	article, err := s.createArticle(ctx, settings)
+	if err != nil {
+		return GenerateResult{}, err
+	}
+	id := article.ID
+
+	jobLog := s.log.With(
+		"article_id", id,
+		"keyword", settings.keyword,
+		"site_id", settings.siteID,
+		"provider", settings.provider,
+		"model", settings.model,
+	)
+	s.runner.Go(ctx, func(bg context.Context) {
+		s.runGeneration(bg, jobLog, id, settings)
+	})
+	jobLog.InfoContext(ctx, "generation accepted", "target_keywords", len(settings.cluster.Keywords))
+
+	return GenerateResult{
+		Article:        article,
+		TargetKeywords: settings.cluster.Keywords,
+		SuggestedTitle: settings.cluster.Title,
+		Provider:       settings.provider,
+		Model:          settings.model,
+	}, nil
+}
+
+func (s *Service) createArticle(ctx context.Context, settings genSettings) (articles.Article, error) {
 	reqParams, err := json.Marshal(articleRequestParams{
 		MinWords:      settings.minWords,
 		MaxWords:      settings.maxWords,
@@ -171,43 +195,18 @@ func (s *Service) Generate(ctx context.Context, req GenerateRequest) (GenerateRe
 		IncludeImages: settings.includeImages,
 	})
 	if err != nil {
-		return GenerateResult{}, fmt.Errorf("marshal request params: %w", err)
+		return articles.Article{}, fmt.Errorf("marshal request params: %w", err)
 	}
 
-	id, err := s.repo.Create(ctx, articles.CreateArticle{
+	article, err := s.repo.Create(ctx, articles.CreateArticle{
 		Keyword:       settings.keyword,
 		SiteID:        settings.siteID,
 		RequestParams: reqParams,
 	})
 	if err != nil {
-		return GenerateResult{}, fmt.Errorf("create article: %w", err)
+		return articles.Article{}, err
 	}
-
-	article, err := s.repo.Get(ctx, id)
-	if err != nil {
-		return GenerateResult{}, fmt.Errorf("fetch article: %w", err)
-	}
-
-	jobLog := s.log.With(
-		"article_id", id,
-		"keyword", settings.keyword,
-		"site_id", settings.siteID,
-		"provider", settings.provider,
-		"model", settings.model,
-	)
-
-	s.runner.Go(ctx, func(bg context.Context) {
-		s.runGeneration(bg, jobLog, id, settings)
-	})
-
-	jobLog.InfoContext(ctx, "generation accepted", "target_keywords", len(settings.cluster.Keywords))
-	return GenerateResult{
-		Article:        *article,
-		TargetKeywords: settings.cluster.Keywords,
-		SuggestedTitle: settings.cluster.Title,
-		Provider:       settings.provider,
-		Model:          settings.model,
-	}, nil
+	return article, nil
 }
 
 func (s *Service) resolve(ctx context.Context, req GenerateRequest) (genSettings, error) {
@@ -347,125 +346,6 @@ func (s *Service) writerTemplate(ctx context.Context) (body string, variantID in
 	return pick.Body, pick.ID
 }
 
-const promoteMinSamples = 30
-
-const worstSampleSize = 5
-
-const maxCandidates = 2
-
-const evolveMaxTokens = 2000
-
-const canaryMinSamples = 10
-
-func (s *Service) PromotePrompts(ctx context.Context) {
-	if s.prompts == nil {
-		return
-	}
-	stage := articles.PromptStageWriter
-	stats, err := s.prompts.SelectionStats(ctx, stage, time.Now().Add(-writerSelectionWindow))
-	if err != nil {
-		s.log.WarnContext(ctx, "promote: load stats failed", "stage", stage, "err", err)
-		return
-	}
-	for _, id := range articles.ShouldRetire(stats, canaryMinSamples) {
-		if err := s.prompts.SetVariantStatus(ctx, id, articles.VariantRetired); err != nil {
-			s.log.WarnContext(ctx, "canary: retire weak candidate failed", "id", id, "err", err)
-		} else {
-			s.log.InfoContext(ctx, "canary: retired weak candidate", "id", id)
-		}
-	}
-
-	promote, retire, ok := articles.ShouldPromote(stats, promoteMinSamples)
-	if !ok {
-		return
-	}
-	if retire != 0 {
-		if err := s.prompts.SetVariantStatus(ctx, retire, articles.VariantRetired); err != nil {
-			s.log.WarnContext(ctx, "promote: retire old champion failed", "id", retire, "err", err)
-			return
-		}
-	}
-	if err := s.prompts.SetVariantStatus(ctx, promote, articles.VariantChampion); err != nil {
-		s.log.ErrorContext(ctx, "promote: set new champion failed", "id", promote, "err", err)
-		return
-	}
-	s.log.InfoContext(ctx, "promoted prompt variant", "stage", stage, "new_champion", promote, "retired", retire)
-}
-
-func (s *Service) GenerateCandidate(ctx context.Context) {
-	if s.prompts == nil {
-		return
-	}
-	stage := articles.PromptStageWriter
-	since := time.Now().Add(-writerSelectionWindow)
-
-	stats, err := s.prompts.SelectionStats(ctx, stage, since)
-	if err != nil {
-		s.log.WarnContext(ctx, "evolve: load stats failed", "stage", stage, "err", err)
-		return
-	}
-
-	var champion *articles.PromptVariant
-	candidates := 0
-	for i := range stats {
-		switch stats[i].Variant.Status {
-		case articles.VariantChampion:
-			champion = &stats[i].Variant
-		case articles.VariantCandidate:
-			candidates++
-		}
-	}
-	if champion == nil {
-		s.log.WarnContext(ctx, "evolve: no champion, skip")
-		return
-	}
-	if candidates >= maxCandidates {
-		s.log.InfoContext(ctx, "evolve: candidate slots full, skip", "candidates", candidates)
-		return
-	}
-
-	failures, err := s.prompts.WorstOutcomes(ctx, champion.ID, since, worstSampleSize)
-	if err != nil {
-		s.log.WarnContext(ctx, "evolve: load failures failed", "err", err)
-		return
-	}
-	if len(failures) == 0 {
-		s.log.InfoContext(ctx, "evolve: no failures yet, skip")
-		return
-	}
-
-	frozen, evolving := prompt.SplitWriter(champion.Body)
-
-	client, err := s.llm.ForModel("claude", "")
-	if err != nil {
-		s.log.WarnContext(ctx, "evolve: claude client failed", "err", err)
-		return
-	}
-	newEvolving, _, err := client.Complete(ctx, prompt.EvolveWriter(evolving, failures), evolveMaxTokens)
-	if err != nil {
-		s.log.WarnContext(ctx, "evolve: claude completion failed", "err", err)
-		return
-	}
-	newEvolving = strings.TrimSpace(newEvolving)
-	if newEvolving == "" {
-		s.log.WarnContext(ctx, "evolve: claude returned empty, skip")
-		return
-	}
-
-	id, err := s.prompts.InsertVariant(ctx, articles.PromptVariant{
-		Stage:    stage,
-		Body:     prompt.JoinWriter(frozen, newEvolving),
-		Status:   articles.VariantCandidate,
-		Origin:   articles.OriginGenerated,
-		ParentID: &champion.ID,
-	})
-	if err != nil {
-		s.log.WarnContext(ctx, "evolve: insert candidate failed", "err", err)
-		return
-	}
-	s.log.InfoContext(ctx, "evolve: generated new candidate", "id", id, "parent", champion.ID, "failures", len(failures))
-}
-
 const maxBatchCount = 100
 
 func (s *Service) GenerateBatch(ctx context.Context, count int, shared GenerateRequest) ([]int64, error) {
@@ -538,9 +418,6 @@ func (s *Service) RateArticle(ctx context.Context, articleID int64, rating *bool
 		human = &v
 	}
 	weight := s.defaults.HumanWeight
-	if weight <= 0 || weight > 1 {
-		weight = 0.65
-	}
 	if err := s.prompts.UpdateOutcomeReward(ctx, articleID, articles.PromptStageWriter, human, weight); err != nil {
 		return fmt.Errorf("update outcome reward: %w", err)
 	}
@@ -824,14 +701,11 @@ func (s *Service) checkAndHumanize(ctx context.Context, log *slog.Logger,
 ) checkOutcome {
 	maxCycles := settings.maxCycles
 	if maxCycles <= 0 {
-		maxCycles = 3
+		maxCycles = s.defaults.MaxCycles
 	}
 	threshold := settings.aiThreshold
 	if threshold == 0 {
 		threshold = s.defaults.AIThreshold
-	}
-	if threshold <= 0 {
-		threshold = 0.8
 	}
 
 	out := checkOutcome{content: content}

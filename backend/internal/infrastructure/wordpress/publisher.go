@@ -11,9 +11,8 @@ import (
 	"time"
 
 	"multiagent-seo/internal/domain/articles"
+	"multiagent-seo/pkg/httpx"
 )
-
-const maxResponseBytes = 1 << 20
 
 const maxLoggedBodyBytes = 4 << 10
 
@@ -26,16 +25,14 @@ type Publisher struct {
 	log         *slog.Logger
 }
 
-func New(url, username, appPassword, siteID string, log *slog.Logger) articles.Publisher {
+func New(url, username, appPassword, siteID string, log *slog.Logger, timeout time.Duration) articles.Publisher {
 	return &Publisher{
 		url:         url,
 		username:    username,
 		appPassword: appPassword,
 		siteID:      siteID,
-		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
-		},
-		log: log,
+		httpClient:  httpx.New(httpx.WithTimeout(timeout), httpx.BlockPrivateIPs()),
+		log:         log,
 	}
 }
 
@@ -90,7 +87,7 @@ func (p *Publisher) request(ctx context.Context, method, url string, body any, w
 		"duration_ms", time.Since(start).Milliseconds(),
 	)
 
-	limited := io.LimitReader(resp.Body, maxResponseBytes)
+	limited := io.LimitReader(resp.Body, httpx.MaxResponseBytes)
 
 	if resp.StatusCode != wantStatus {
 		b, err := io.ReadAll(limited)

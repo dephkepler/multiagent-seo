@@ -3,7 +3,6 @@ package handlers
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"strings"
 
@@ -37,9 +36,6 @@ func NewWordpressSitesHandler(sites WordpressService) *WordpressSitesHandler {
 }
 
 func (h *WordpressSitesHandler) ListWordpressSites(w http.ResponseWriter, r *http.Request) {
-	if h.unavailable(w) {
-		return
-	}
 	sites, err := h.sites.List(r.Context())
 	if err != nil {
 		h.writeError(r.Context(), w, "list_sites", err)
@@ -53,9 +49,6 @@ func (h *WordpressSitesHandler) ListWordpressSites(w http.ResponseWriter, r *htt
 }
 
 func (h *WordpressSitesHandler) CreateWordpressSite(w http.ResponseWriter, r *http.Request) {
-	if h.unavailable(w) {
-		return
-	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 	var body oapigen.CreateWordpressSiteRequest
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -83,9 +76,6 @@ func (h *WordpressSitesHandler) CreateWordpressSite(w http.ResponseWriter, r *ht
 }
 
 func (h *WordpressSitesHandler) GetWordpressSite(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
-	if h.unavailable(w) {
-		return
-	}
 	site, err := h.sites.Get(r.Context(), id)
 	if err != nil {
 		h.writeError(r.Context(), w, "get_site", err)
@@ -95,9 +85,6 @@ func (h *WordpressSitesHandler) GetWordpressSite(w http.ResponseWriter, r *http.
 }
 
 func (h *WordpressSitesHandler) UpdateWordpressSite(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
-	if h.unavailable(w) {
-		return
-	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 	var body oapigen.UpdateWordpressSiteRequest
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -126,9 +113,6 @@ func (h *WordpressSitesHandler) UpdateWordpressSite(w http.ResponseWriter, r *ht
 }
 
 func (h *WordpressSitesHandler) DeleteWordpressSite(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
-	if h.unavailable(w) {
-		return
-	}
 	if err := h.sites.Delete(r.Context(), id); err != nil {
 		h.writeError(r.Context(), w, "delete_site", err)
 		return
@@ -136,25 +120,13 @@ func (h *WordpressSitesHandler) DeleteWordpressSite(w http.ResponseWriter, r *ht
 	response.NoContent(w)
 }
 
-func (h *WordpressSitesHandler) unavailable(w http.ResponseWriter) bool {
-	if h.sites == nil {
-		problem.Write(w, http.StatusServiceUnavailable, "database unavailable")
-		return true
-	}
-	return false
-}
+var wordpressErrMap = newErrMap("handlers.wordpress_sites",
+	E(domainwp.ErrNotFound, http.StatusNotFound, "wordpress site not found"),
+	E(domainwp.ErrAliasExists, http.StatusConflict, "alias already in use"),
+)
 
 func (h *WordpressSitesHandler) writeError(ctx context.Context, w http.ResponseWriter, op string, err error) {
-	switch {
-	case errors.Is(err, domainwp.ErrNotFound):
-		problem.Write(w, http.StatusNotFound, "wordpress site not found")
-	case errors.Is(err, domainwp.ErrAliasExists):
-		problem.Write(w, http.StatusConflict, "alias already in use")
-	default:
-		log := logger.New(ctx, "handlers.wordpress_sites")
-		log.Error().Err(err).Str("op", op).Msg("internal error")
-		problem.Write(w, http.StatusInternalServerError, "internal error")
-	}
+	wordpressErrMap.Handle(ctx, w, op, err)
 }
 
 func toAPISite(s domainwp.Site) oapigen.WordpressSite {
