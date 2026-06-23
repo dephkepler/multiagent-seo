@@ -11,6 +11,8 @@ const (
 	OutcomeTwoFactor      = "two_factor"
 	OutcomeDNS            = "dns"
 	OutcomeNoMarker       = "no_marker"
+	OutcomeAppPasswordsOff = "app_passwords_off"
+	OutcomeNoTarget       = "no_target"
 	OutcomeLoginFailed    = "login_failed"
 	OutcomePostFailed     = "post_failed"
 	OutcomeError          = "error"
@@ -24,19 +26,23 @@ var outcomeLabel = map[string]string{
 	OutcomeLocked:         "locked",
 	OutcomeTwoFactor:      "2fa",
 	OutcomeDNS:            "dead domain",
-	OutcomeNoMarker:       "custom login",
-	OutcomeLoginFailed:    "login failed",
-	OutcomePostFailed:     "post failed",
-	OutcomeError:          "error",
+	OutcomeNoMarker:        "custom login",
+	OutcomeAppPasswordsOff: "app passwords off",
+	OutcomeNoTarget:        "no editable target",
+	OutcomeLoginFailed:     "login failed",
+	OutcomePostFailed:      "post failed",
+	OutcomeError:           "error",
 }
 
 // permanentOutcomes won't change on a retry without manual action (fix creds,
 // solve captcha by hand), so a re-run skips donors marked with one of these.
 var permanentOutcomes = map[string]bool{
-	OutcomeBadCredentials: true,
-	OutcomeCaptcha:        true,
-	OutcomeTwoFactor:      true,
-	OutcomeDNS:            true,
+	OutcomeBadCredentials:  true,
+	OutcomeCaptcha:         true,
+	OutcomeTwoFactor:       true,
+	OutcomeDNS:             true,
+	OutcomeAppPasswordsOff: true,
+	OutcomeNoTarget:        true,
 }
 
 func NormalizeDonorURL(s string) string {
@@ -81,6 +87,8 @@ func ClassifyLoginOutcome(reason string) string {
 		return OutcomeBadCredentials
 	case strings.Contains(low, "rate-limited") || strings.Contains(low, "lockout") || strings.Contains(low, "locked") || strings.Contains(low, "too many"):
 		return OutcomeLocked
+	case strings.Contains(low, "application_passwords_disabled") || strings.Contains(low, "application passwords"):
+		return OutcomeAppPasswordsOff
 	case strings.Contains(low, "two-factor") || strings.Contains(low, "2fa"):
 		return OutcomeTwoFactor
 	case strings.Contains(low, "no such host") || strings.Contains(low, "lookup ") || strings.Contains(low, "dial tcp"):

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand"
+	"net/url"
 	"regexp"
 	"strings"
 	"sync"
@@ -307,39 +308,102 @@ func (s *BacklinkService) placeOne(ctx context.Context, log *slog.Logger, c doma
 		}
 	}
 
-	post, err := s.editor.LatestPost(ctx, donor)
-	if err != nil {
-		reason := sanitizeReason(err.Error())
-		log.WarnContext(ctx, "donor stage failed", "stage", "latest post", "url", c.BaseURL, "reason", reason)
-		res.Outcome = domain.OutcomePostFailed
-		res.Status = "failed: latest post: " + reason
-		return res
+	return s.placeOnDonor(ctx, log, res, donor, targetURL, placer)
+}
+
+// placeOnDonor walks the placement priority chain for a single logged-in donor:
+// 1) a hidden link on the static homepage, 2) a contextual link in an existing
+// editable post, 3) a freshly published post. It stops at the first tier that
+// succeeds. A tier that is merely unavailable (no homepage, no editable post,
+// no rights to create) is skipped; only a transient failure (LLM, network) is
+// surfaced as a retriable post_failed, otherwise the donor is marked no_target.
+func (s *BacklinkService) placeOnDonor(ctx context.Context, log *slog.Logger, res domain.PlacementResult, donor domain.DonorCredential, targetURL string, placer domain.BacklinkPlacer) domain.PlacementResult {
+	url := res.DonorURL
+	var hardErr string
+	fail := func(tier, stage, reason string) {
+		log.WarnContext(ctx, "tier failed", "tier", tier, "stage", stage, "url", url, "reason", reason)
+		if !isPermissionReason(reason) {
+			hardErr = reason
+		}
 	}
 
-	ins, err := placer.Place(ctx, post.Content, targetURL)
-	if err != nil {
-		reason := sanitizeReason(err.Error())
-		log.WarnContext(ctx, "donor stage failed", "stage", "llm", "url", c.BaseURL, "reason", reason)
-		res.Outcome = domain.OutcomePostFailed
-		res.Status = "failed: llm: " + reason
-		return res
+	if page, ok, err := s.editor.FrontPage(ctx, donor); err != nil {
+		fail("homepage", "front page", sanitizeReason(err.Error()))
+	} else if ok {
+		anchor := anchorFromURL(targetURL)
+		if err := s.editor.UpdatePageContent(ctx, donor, page.ID, page.Content+hiddenLink(targetURL, anchor)); err != nil {
+			fail("homepage", "update", sanitizeReason(err.Error()))
+		} else {
+			return placed(res, "homepage", page.PublicURL, page.EditURL, anchor)
+		}
 	}
 
-	if err := s.editor.UpdatePostContent(ctx, donor, post.ID, ins.ModifiedHTML); err != nil {
-		reason := sanitizeReason(err.Error())
-		log.WarnContext(ctx, "donor stage failed", "stage", "update post", "url", c.BaseURL, "reason", reason)
-		res.Outcome = domain.OutcomePostFailed
-		res.Status = "failed: update post: " + reason
-		return res
+	if post, ok, err := s.editor.LatestEditablePost(ctx, donor); err != nil {
+		fail("post", "find post", sanitizeReason(err.Error()))
+	} else if ok {
+		if ins, err := placer.Place(ctx, post.Content, targetURL); err != nil {
+			fail("post", "llm", sanitizeReason(err.Error()))
+		} else if err := s.editor.UpdatePostContent(ctx, donor, post.ID, ins.ModifiedHTML); err != nil {
+			fail("post", "update", sanitizeReason(err.Error()))
+		} else {
+			return placed(res, "post", post.PublicURL, post.EditURL, ins.Anchor)
+		}
 	}
 
+	if composed, err := placer.Compose(ctx, targetURL); err != nil {
+		fail("new_post", "llm", sanitizeReason(err.Error()))
+	} else if created, err := s.editor.CreatePost(ctx, donor, composed.Title, composed.HTML); err != nil {
+		fail("new_post", "create", sanitizeReason(err.Error()))
+	} else {
+		return placed(res, "new_post", created.PublicURL, created.EditURL, composed.Anchor)
+	}
+
+	if hardErr != "" {
+		res.Outcome = domain.OutcomePostFailed
+		res.Status = "failed: " + hardErr
+	} else {
+		res.Outcome = domain.OutcomeNoTarget
+		res.Status = "failed: no editable target (homepage/post/new-post all unavailable)"
+	}
+	return res
+}
+
+func placed(res domain.PlacementResult, method, publicURL, editURL, anchor string) domain.PlacementResult {
 	res.OK = true
 	res.Outcome = domain.OutcomePlaced
-	res.PostURL = post.PublicURL
-	res.EditURL = post.EditURL
-	res.Anchor = ins.Anchor
-	res.Status = fmt.Sprintf("placed: %s | edit: %s (anchor: %s)", post.PublicURL, post.EditURL, ins.Anchor)
+	res.PostURL = publicURL
+	res.EditURL = editURL
+	res.Anchor = anchor
+	res.Status = fmt.Sprintf("placed (%s): %s | edit: %s (anchor: %s)", method, publicURL, editURL, anchor)
 	return res
+}
+
+func hiddenLink(targetURL, anchor string) string {
+	return fmt.Sprintf(`<div style="display:none"><a href="%s" rel="noopener">%s</a></div>`, targetURL, anchor)
+}
+
+func anchorFromURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return "link"
+	}
+	host := strings.TrimPrefix(u.Host, "www.")
+	if i := strings.IndexByte(host, '.'); i > 0 {
+		host = host[:i]
+	}
+	if host == "" {
+		return "link"
+	}
+	return host
+}
+
+func isPermissionReason(reason string) bool {
+	low := strings.ToLower(reason)
+	return strings.Contains(low, "401") ||
+		strings.Contains(low, "403") ||
+		strings.Contains(low, "cannot_") ||
+		strings.Contains(low, "not allowed") ||
+		strings.Contains(low, "no editable")
 }
 
 func (s *BacklinkService) sleep(ctx context.Context) {

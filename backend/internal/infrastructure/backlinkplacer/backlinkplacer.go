@@ -57,6 +57,56 @@ func (p *Placer) Place(ctx context.Context, html, targetURL string) (linkbuildin
 	return linkbuilding.BacklinkInsertion{Anchor: anchor, ModifiedHTML: full}, nil
 }
 
+func (p *Placer) Compose(ctx context.Context, targetURL string) (linkbuilding.ComposedPost, error) {
+	reply, err := p.llm.Complete(ctx, prompt.Compose(targetURL), maxTokens)
+	if err != nil {
+		return linkbuilding.ComposedPost{}, fmt.Errorf("compose llm: %w", err)
+	}
+
+	title, anchor, body, err := parseCompose(reply)
+	if err != nil {
+		return linkbuilding.ComposedPost{}, fmt.Errorf("compose llm parse: %w (reply head: %s)", err, head(reply, 300))
+	}
+	if !strings.Contains(body, targetURL) {
+		return linkbuilding.ComposedPost{}, fmt.Errorf("compose llm: target URL missing from body (reply head: %s)", head(reply, 300))
+	}
+	return linkbuilding.ComposedPost{Title: title, HTML: body, Anchor: anchor}, nil
+}
+
+func parseCompose(reply string) (title, anchor, body string, err error) {
+	s := strings.TrimSpace(reply)
+	bodyIdx := strings.Index(s, prompt.SepBody)
+	if bodyIdx < 0 {
+		return "", "", "", fmt.Errorf("compose llm: separator %q missing from reply", prompt.SepBody)
+	}
+	headPart := s[:bodyIdx]
+	body = strings.TrimSpace(s[bodyIdx+len(prompt.SepBody):])
+	for _, fence := range []string{"```html", "```"} {
+		body = strings.TrimPrefix(body, fence)
+	}
+	body = strings.TrimSpace(strings.TrimSuffix(body, "```"))
+
+	for _, line := range strings.Split(headPart, "\n") {
+		line = strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(strings.ToUpper(line), "TITLE:"):
+			title = strings.TrimSpace(strings.Trim(strings.TrimSpace(line[len("TITLE:"):]), "\"'`"))
+		case strings.HasPrefix(strings.ToUpper(line), "ANCHOR:"):
+			anchor = strings.TrimSpace(strings.Trim(strings.TrimSpace(line[len("ANCHOR:"):]), "\"'`"))
+		}
+	}
+	if title == "" {
+		return "", "", "", fmt.Errorf("compose llm: TITLE line missing")
+	}
+	if anchor == "" {
+		return "", "", "", fmt.Errorf("compose llm: ANCHOR line missing")
+	}
+	if body == "" {
+		return "", "", "", fmt.Errorf("compose llm: body empty")
+	}
+	return title, anchor, body, nil
+}
+
 func parseReply(reply string) (anchor, original, modified string, err error) {
 	s := strings.TrimSpace(reply)
 	s = strings.TrimPrefix(s, "```html")

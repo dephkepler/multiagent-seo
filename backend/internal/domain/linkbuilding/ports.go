@@ -32,10 +32,14 @@ type DonorAppPasswordIssuer interface {
 }
 
 type DonorPostEditor interface {
-	LatestPost(ctx context.Context, cred DonorCredential) (DonorPost, error)
+	FrontPage(ctx context.Context, cred DonorCredential) (DonorPost, bool, error)
+	UpdatePageContent(ctx context.Context, cred DonorCredential, pageID int64, newHTML string) error
+	LatestEditablePost(ctx context.Context, cred DonorCredential) (DonorPost, bool, error)
 	UpdatePostContent(ctx context.Context, cred DonorCredential, postID int64, newHTML string) error
+	CreatePost(ctx context.Context, cred DonorCredential, title, html string) (DonorPost, error)
 }
 
 type BacklinkPlacer interface {
 	Place(ctx context.Context, html, targetURL string) (BacklinkInsertion, error)
+	Compose(ctx context.Context, targetURL string) (ComposedPost, error)
 }
