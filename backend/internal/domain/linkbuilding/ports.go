@@ -15,6 +15,11 @@ type PlacementSink interface {
 	WritePlacementStatus(ctx context.Context, sheet string, results []PlacementResult) error
 }
 
+type PlacementStore interface {
+	Save(ctx context.Context, p Placement) error
+	ListByRun(ctx context.Context, runID string) ([]Placement, error)
+}
+
 type DonorCredentialStore interface {
 	Get(ctx context.Context, donorURL string) (DonorCredential, bool, error)
 	Save(ctx context.Context, cred DonorCredential) error

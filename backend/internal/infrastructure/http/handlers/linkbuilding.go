@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	applb "multiagent-seo/internal/application/linkbuilding"
+	domainlb "multiagent-seo/internal/domain/linkbuilding"
 	"multiagent-seo/internal/infrastructure/http/problem"
 	"multiagent-seo/internal/infrastructure/http/response"
 	"multiagent-seo/internal/oapigen"
@@ -29,6 +30,7 @@ type linkbuildingLoginService interface {
 
 type linkbuildingBacklinkService interface {
 	PlaceBacklinks(ctx context.Context, req applb.PlaceBacklinksRequest) (applb.PlaceBacklinksQueued, error)
+	ListPlacements(ctx context.Context, runID string) ([]domainlb.Placement, error)
 }
 
 type LinkbuildingHandler struct {
@@ -108,7 +110,35 @@ func (h *LinkbuildingHandler) PlaceBacklinks(w http.ResponseWriter, r *http.Requ
 	response.WriteJSON(r.Context(), w, http.StatusAccepted, oapigen.PlaceBacklinksAccepted{
 		Sheet:       res.Sheet,
 		SitesQueued: res.SitesQueued,
+		RunId:       res.RunID,
 	})
+}
+
+func (h *LinkbuildingHandler) ListPlacements(w http.ResponseWriter, r *http.Request, params oapigen.ListPlacementsParams) {
+	if isNil(h.backlinkSvc) {
+		problem.Write(w, http.StatusServiceUnavailable, "link building unavailable")
+		return
+	}
+	items, err := h.backlinkSvc.ListPlacements(r.Context(), params.RunId)
+	if err != nil {
+		linkbuildingErrMap.Handle(r.Context(), w, "list_placements", err)
+		return
+	}
+	out := make([]oapigen.Placement, len(items))
+	for i, p := range items {
+		out[i] = oapigen.Placement{
+			Id:        p.ID,
+			DonorUrl:  p.DonorURL,
+			TargetUrl: p.TargetURL,
+			Ok:        p.OK,
+			Status:    p.Status,
+			PostUrl:   ptr(p.PostURL),
+			EditUrl:   ptr(p.EditURL),
+			Anchor:    ptr(p.Anchor),
+			CreatedAt: p.CreatedAt,
+		}
+	}
+	response.WriteJSON(r.Context(), w, http.StatusOK, out)
 }
 
 func derefStr(p *string) string {

@@ -1,5 +1,7 @@
 package linkbuilding
 
+import "time"
+
 type SiteCredential struct {
 	Row             int
 	BaseURL         string
@@ -40,4 +42,21 @@ type PlacementResult struct {
 	DonorURL string
 	OK       bool
 	Status   string
+	PostURL  string
+	EditURL  string
+	Anchor   string
+}
+
+type Placement struct {
+	ID        int64
+	RunID     string
+	Sheet     string
+	DonorURL  string
+	TargetURL string
+	OK        bool
+	Status    string
+	PostURL   string
+	EditURL   string
+	Anchor    string
+	CreatedAt time.Time
 }

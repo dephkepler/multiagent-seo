@@ -54,3 +54,4 @@ services:
 
 volumes:
   postgres_data:
+    name: contentflow_postgres_data

@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	domain "multiagent-seo/internal/domain/linkbuilding"
 	"multiagent-seo/pkg/jobrunner"
 )
@@ -27,6 +29,7 @@ type BacklinkPlacerBuilder func(provider, model string) (domain.BacklinkPlacer, 
 type BacklinkService struct {
 	creds         domain.CredentialSource
 	placements    domain.PlacementSink
+	store         domain.PlacementStore
 	donors        domain.DonorCredentialStore
 	issuer        domain.DonorAppPasswordIssuer
 	editor        domain.DonorPostEditor
@@ -48,6 +51,7 @@ func WithBacklinkDelay(min, max time.Duration) BacklinkOption {
 func NewBacklinkService(
 	creds domain.CredentialSource,
 	placements domain.PlacementSink,
+	store domain.PlacementStore,
 	donors domain.DonorCredentialStore,
 	issuer domain.DonorAppPasswordIssuer,
 	editor domain.DonorPostEditor,
@@ -64,6 +68,7 @@ func NewBacklinkService(
 	s := &BacklinkService{
 		creds:         creds,
 		placements:    placements,
+		store:         store,
 		donors:        donors,
 		issuer:        issuer,
 		editor:        editor,
@@ -92,6 +97,7 @@ type PlaceBacklinksRequest struct {
 type PlaceBacklinksQueued struct {
 	Sheet       string
 	SitesQueued int
+	RunID       string
 }
 
 func (s *BacklinkService) PlaceBacklinks(ctx context.Context, req PlaceBacklinksRequest) (PlaceBacklinksQueued, error) {
@@ -141,11 +147,13 @@ func (s *BacklinkService) PlaceBacklinks(ctx context.Context, req PlaceBacklinks
 	if target <= 0 {
 		target = 3
 	}
+	runID := uuid.New().String()
 
 	jobLog := s.log.With(
 		"sheet", req.Sheet,
 		"sites", len(queued),
 		"success_target", target,
+		"run_id", runID,
 		"skipped_login_failed", skippedLogin,
 		"skipped_already_placed", skippedAlreadyPlaced,
 		"target_url", targetURL,
@@ -153,14 +161,18 @@ func (s *BacklinkService) PlaceBacklinks(ctx context.Context, req PlaceBacklinks
 		"model", model,
 	)
 	s.runner.Go(ctx, func(bg context.Context) {
-		s.placeAll(bg, jobLog, req.Sheet, queued, targetURL, placer, target)
+		s.placeAll(bg, jobLog, runID, req.Sheet, queued, targetURL, placer, target)
 	})
 
 	jobLog.InfoContext(ctx, "backlink placement accepted")
-	return PlaceBacklinksQueued{Sheet: req.Sheet, SitesQueued: len(queued)}, nil
+	return PlaceBacklinksQueued{Sheet: req.Sheet, SitesQueued: len(queued), RunID: runID}, nil
 }
 
-func (s *BacklinkService) placeAll(ctx context.Context, log *slog.Logger, sheet string, creds []domain.SiteCredential, targetURL string, placer domain.BacklinkPlacer, target int) {
+func (s *BacklinkService) ListPlacements(ctx context.Context, runID string) ([]domain.Placement, error) {
+	return s.store.ListByRun(ctx, runID)
+}
+
+func (s *BacklinkService) placeAll(ctx context.Context, log *slog.Logger, runID, sheet string, creds []domain.SiteCredential, targetURL string, placer domain.BacklinkPlacer, target int) {
 	pending := make([]domain.PlacementResult, 0, placeWriteChunk)
 	processed := 0
 	succeeded := 0
@@ -203,6 +215,7 @@ func (s *BacklinkService) placeAll(ctx context.Context, log *slog.Logger, sheet 
 		if res.OK {
 			succeeded++
 		}
+		s.savePlacement(ctx, log, runID, sheet, targetURL, res)
 		log.InfoContext(ctx, "donor placement", "row", c.Row, "url", c.BaseURL, "ok", res.OK, "status", res.Status)
 
 		if len(pending) >= placeWriteChunk {
@@ -221,6 +234,24 @@ func (s *BacklinkService) placeAll(ctx context.Context, log *slog.Logger, sheet 
 		return
 	}
 	log.InfoContext(ctx, "backlink placement done", "processed", processed, "succeeded", succeeded)
+}
+
+func (s *BacklinkService) savePlacement(ctx context.Context, log *slog.Logger, runID, sheet, targetURL string, res domain.PlacementResult) {
+	saveCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	if err := s.store.Save(saveCtx, domain.Placement{
+		RunID:     runID,
+		Sheet:     sheet,
+		DonorURL:  res.DonorURL,
+		TargetURL: targetURL,
+		OK:        res.OK,
+		Status:    res.Status,
+		PostURL:   res.PostURL,
+		EditURL:   res.EditURL,
+		Anchor:    res.Anchor,
+	}); err != nil {
+		log.WarnContext(ctx, "save placement record failed", "url", res.DonorURL, "err", err)
+	}
 }
 
 func (s *BacklinkService) placeOne(ctx context.Context, log *slog.Logger, c domain.SiteCredential, targetURL string, placer domain.BacklinkPlacer) domain.PlacementResult {
@@ -274,6 +305,9 @@ func (s *BacklinkService) placeOne(ctx context.Context, log *slog.Logger, c doma
 	}
 
 	res.OK = true
+	res.PostURL = post.PublicURL
+	res.EditURL = post.EditURL
+	res.Anchor = ins.Anchor
 	res.Status = fmt.Sprintf("placed: %s | edit: %s (anchor: %s)", post.PublicURL, post.EditURL, ins.Anchor)
 	return res
 }
