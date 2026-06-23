@@ -18,6 +18,8 @@ type PlacementSink interface {
 type PlacementStore interface {
 	Save(ctx context.Context, p Placement) error
 	ListByRun(ctx context.Context, runID string) ([]Placement, error)
+	ListPlaced(ctx context.Context, limit, offset int) ([]Placement, int, error)
+	PlacedDonors(ctx context.Context, targetURL string) (map[string]bool, error)
 }
 
 type DonorCredentialStore interface {

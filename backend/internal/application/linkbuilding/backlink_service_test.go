@@ -37,6 +37,24 @@ func (f *fakePlacementStore) ListByRun(_ context.Context, runID string) ([]domai
 	}
 	return out, nil
 }
+func (f *fakePlacementStore) ListPlaced(_ context.Context, limit, offset int) ([]domain.Placement, int, error) {
+	var ok []domain.Placement
+	for _, p := range f.saved {
+		if p.OK {
+			ok = append(ok, p)
+		}
+	}
+	return ok, len(ok), nil
+}
+func (f *fakePlacementStore) PlacedDonors(_ context.Context, targetURL string) (map[string]bool, error) {
+	out := make(map[string]bool)
+	for _, p := range f.saved {
+		if p.OK && p.TargetURL == targetURL {
+			out[domain.NormalizeDonorURL(p.DonorURL)] = true
+		}
+	}
+	return out, nil
+}
 
 type fakeDonorStore struct {
 	saved   []domain.DonorCredential

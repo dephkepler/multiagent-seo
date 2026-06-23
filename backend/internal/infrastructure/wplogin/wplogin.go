@@ -109,7 +109,11 @@ func (a *Authenticator) Login(ctx context.Context, cred linkbuilding.SiteCredent
 		res.Status = "request build failed"
 		return res, nil
 	}
+	setBrowserHeaders(req)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Origin", origin.String())
+	req.Header.Set("Referer", loginURL)
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -165,6 +169,7 @@ func (a *Authenticator) fetchLoginForm(ctx context.Context, client *http.Client,
 	if err != nil {
 		return loginForm{}, 0, err
 	}
+	setBrowserHeaders(req)
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -174,6 +179,23 @@ func (a *Authenticator) fetchLoginForm(ctx context.Context, client *http.Client,
 
 	form, perr := parseLoginForm(io.LimitReader(resp.Body, httpx.MaxResponseBytes))
 	return form, resp.StatusCode, perr
+}
+
+// setBrowserHeaders makes the request look like a real Chrome navigation so that
+// passive WAF/Cloudflare checks that only fingerprint headers let it through. It
+// does not defeat active JS challenges or CAPTCHAs.
+func setBrowserHeaders(req *http.Request) {
+	h := req.Header
+	h.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
+	h.Set("Accept-Language", "en-US,en;q=0.9")
+	h.Set("Upgrade-Insecure-Requests", "1")
+	h.Set("Sec-CH-UA", `"Chromium";v="140", "Not=A?Brand";v="24", "Google Chrome";v="140"`)
+	h.Set("Sec-CH-UA-Mobile", "?0")
+	h.Set("Sec-CH-UA-Platform", `"Windows"`)
+	h.Set("Sec-Fetch-Dest", "document")
+	h.Set("Sec-Fetch-Mode", "navigate")
+	h.Set("Sec-Fetch-Site", "same-origin")
+	h.Set("Sec-Fetch-User", "?1")
 }
 
 func hasLoggedInCookie(jar http.CookieJar, u *url.URL) bool {

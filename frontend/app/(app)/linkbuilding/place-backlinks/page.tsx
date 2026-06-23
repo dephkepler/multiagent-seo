@@ -20,11 +20,17 @@ interface Placement {
   donor_url: string
   target_url: string
   ok: boolean
+  outcome?: string
   status: string
   post_url?: string
   edit_url?: string
   anchor?: string
   created_at: string
+}
+
+interface PlacementList {
+  items: Placement[]
+  total: number
 }
 
 interface WordpressSite {
@@ -33,6 +39,8 @@ interface WordpressSite {
   url: string
   enabled: boolean
 }
+
+const HISTORY_PAGE = 20
 
 export default function PlaceBacklinksPage() {
   const [sheet, setSheet] = useState('WEBSITES')
@@ -43,6 +51,9 @@ export default function PlaceBacklinksPage() {
   const [runId, setRunId] = useState<string | null>(null)
   const [queued, setQueued] = useState(0)
   const [target, setTarget] = useState(0)
+  const [canceled, setCanceled] = useState(false)
+
+  const [historyOffset, setHistoryOffset] = useState(0)
 
   const sites = useQuery({
     queryKey: ['wordpress-sites'],
@@ -61,6 +72,7 @@ export default function PlaceBacklinksPage() {
     queryFn: () => api<Placement[]>(`/linkbuilding/placements?run_id=${runId}`),
     enabled: runId != null,
     refetchInterval: (q) => {
+      if (canceled) return false
       const data = (q.state.data as Placement[] | undefined) || []
       const ok = data.filter((p) => p.ok).length
       return ok >= target || data.length >= queued ? false : 2000
@@ -69,7 +81,17 @@ export default function PlaceBacklinksPage() {
 
   const results = placements.data || []
   const succeeded = results.filter((p) => p.ok).length
-  const done = runId != null && (succeeded >= target || results.length >= queued)
+  const done = runId != null && (canceled || succeeded >= target || results.length >= queued)
+
+  const history = useQuery({
+    queryKey: ['placement-history', historyOffset],
+    queryFn: () => api<PlacementList>(`/linkbuilding/placements/history?limit=${HISTORY_PAGE}&offset=${historyOffset}`),
+  })
+
+  useEffect(() => {
+    if (done) history.refetch()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [done])
 
   const run = useMutation({
     mutationFn: () =>
@@ -83,6 +105,7 @@ export default function PlaceBacklinksPage() {
         }),
       }),
     onSuccess: (r) => {
+      setCanceled(false)
       setRunId(r.run_id)
       setQueued(r.sites_queued)
       setTarget(count)
@@ -91,14 +114,25 @@ export default function PlaceBacklinksPage() {
     onError: (e: Error) => toast.error(e.message),
   })
 
+  const cancel = useMutation({
+    mutationFn: () => api(`/linkbuilding/placements/${runId}/cancel`, { method: 'POST' }),
+    onSuccess: () => {
+      setCanceled(true)
+      toast.success('Cancellation requested')
+    },
+    onError: (e: Error) => toast.error(e.message),
+  })
+
+  const total = history.data?.total || 0
+
   return (
     <div className='max-w-2xl space-y-6'>
       <Card>
         <h1 className='mb-1 text-lg font-semibold'>Place backlinks on donor sites</h1>
         <p className='mb-6 text-sm text-gray-500'>
           For each donor (url + login + password in columns E–G) it logs into WordPress, picks the latest post via WP REST, asks the LLM to weave in a contextual{' '}
-          <code className='rounded bg-gray-100 px-1'>{'<a>'}</code> linking to your site, updates the post, and records the result in column I. Already-placed donors are skipped;
-          it stops once it reaches the requested number of successful placements.
+          <code className='rounded bg-gray-100 px-1'>{'<a>'}</code> linking to your site, updates the post, and records the result in columns H–I. Already-placed and
+          permanently-blocked donors are skipped; it stops once it reaches the requested number of successful placements.
         </p>
         <form
           onSubmit={(e) => {
@@ -143,10 +177,17 @@ export default function PlaceBacklinksPage() {
       {runId && (
         <Card>
           <div className='mb-2 flex items-center justify-between text-sm'>
-            <span className='font-medium'>{done ? 'Done' : 'Placing…'}</span>
-            <span className='text-gray-500'>
-              {succeeded}/{target} placed · {results.length} tried
-            </span>
+            <span className='font-medium'>{canceled ? 'Canceled' : done ? 'Done' : 'Placing…'}</span>
+            <div className='flex items-center gap-3'>
+              <span className='text-gray-500'>
+                {succeeded}/{target} placed · {results.length} tried
+              </span>
+              {!done && (
+                <Button type='button' variant='secondary' size='sm' onClick={() => cancel.mutate()} disabled={cancel.isPending}>
+                  {cancel.isPending ? 'Canceling…' : 'Cancel'}
+                </Button>
+              )}
+            </div>
           </div>
           <div className='mb-4 h-2 w-full overflow-hidden rounded bg-gray-100'>
             <div className='h-2 rounded bg-emerald-500 transition-all' style={{ width: `${Math.min(100, (succeeded / Math.max(1, target)) * 100)}%` }} />
@@ -175,6 +216,48 @@ export default function PlaceBacklinksPage() {
           </ul>
         </Card>
       )}
+
+      <Card>
+        <div className='mb-3 flex items-center justify-between'>
+          <h2 className='text-base font-semibold'>Placed before</h2>
+          <span className='text-sm text-gray-500'>{total} total</span>
+        </div>
+        <ul className='space-y-1 text-sm'>
+          {history.isLoading && <li className='text-gray-400'>Loading…</li>}
+          {!history.isLoading && (history.data?.items.length || 0) === 0 && <li className='text-gray-400'>No successful placements yet.</li>}
+          {(history.data?.items || []).map((p) => {
+            const link = p.post_url || p.edit_url
+            return (
+              <li key={p.id} className='flex items-center justify-between gap-3 border-b border-gray-50 py-1'>
+                <span className='min-w-0'>
+                  <span className='block truncate text-gray-700'>{p.donor_url}</span>
+                  <span className='block text-xs text-gray-400'>
+                    → {p.target_url} · {p.created_at.slice(0, 10)}
+                  </span>
+                </span>
+                {link && (
+                  <a href={link} target='_blank' rel='noreferrer' className='shrink-0 text-sky-600 hover:underline'>
+                    article ↗
+                  </a>
+                )}
+              </li>
+            )
+          })}
+        </ul>
+        {total > HISTORY_PAGE && (
+          <div className='mt-3 flex items-center justify-between text-sm'>
+            <Button type='button' variant='secondary' size='sm' onClick={() => setHistoryOffset((o) => Math.max(0, o - HISTORY_PAGE))} disabled={historyOffset === 0}>
+              ← Prev
+            </Button>
+            <span className='text-gray-500'>
+              {historyOffset + 1}–{Math.min(historyOffset + HISTORY_PAGE, total)} of {total}
+            </span>
+            <Button type='button' variant='secondary' size='sm' onClick={() => setHistoryOffset((o) => o + HISTORY_PAGE)} disabled={historyOffset + HISTORY_PAGE >= total}>
+              Next →
+            </Button>
+          </div>
+        )}
+      </Card>
     </div>
   )
 }

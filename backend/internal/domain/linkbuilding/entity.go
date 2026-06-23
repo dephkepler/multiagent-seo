@@ -41,6 +41,7 @@ type PlacementResult struct {
 	Row      int
 	DonorURL string
 	OK       bool
+	Outcome  string
 	Status   string
 	PostURL  string
 	EditURL  string
@@ -54,6 +55,7 @@ type Placement struct {
 	DonorURL  string
 	TargetURL string
 	OK        bool
+	Outcome   string
 	Status    string
 	PostURL   string
 	EditURL   string
