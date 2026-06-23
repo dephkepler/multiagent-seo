@@ -65,7 +65,11 @@ func (a *Authenticator) IssueAppPassword(ctx context.Context, donorURL, login, p
 	if err != nil {
 		return "", fmt.Errorf("login request: %w", err)
 	}
+	setBrowserHeaders(req)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Origin", origin.String())
+	req.Header.Set("Referer", loginURL)
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("login post: %w", err)

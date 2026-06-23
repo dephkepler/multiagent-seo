@@ -31,6 +31,8 @@ type linkbuildingLoginService interface {
 type linkbuildingBacklinkService interface {
 	PlaceBacklinks(ctx context.Context, req applb.PlaceBacklinksRequest) (applb.PlaceBacklinksQueued, error)
 	ListPlacements(ctx context.Context, runID string) ([]domainlb.Placement, error)
+	ListPlaced(ctx context.Context, limit, offset int) ([]domainlb.Placement, int, error)
+	Cancel(ctx context.Context, runID string)
 }
 
 type LinkbuildingHandler struct {
@@ -126,19 +128,66 @@ func (h *LinkbuildingHandler) ListPlacements(w http.ResponseWriter, r *http.Requ
 	}
 	out := make([]oapigen.Placement, len(items))
 	for i, p := range items {
-		out[i] = oapigen.Placement{
-			Id:        p.ID,
-			DonorUrl:  p.DonorURL,
-			TargetUrl: p.TargetURL,
-			Ok:        p.OK,
-			Status:    p.Status,
-			PostUrl:   ptr(p.PostURL),
-			EditUrl:   ptr(p.EditURL),
-			Anchor:    ptr(p.Anchor),
-			CreatedAt: p.CreatedAt,
-		}
+		out[i] = toAPIPlacement(p)
 	}
 	response.WriteJSON(r.Context(), w, http.StatusOK, out)
+}
+
+func (h *LinkbuildingHandler) ListPlacementHistory(w http.ResponseWriter, r *http.Request, params oapigen.ListPlacementHistoryParams) {
+	if isNil(h.backlinkSvc) {
+		problem.Write(w, http.StatusServiceUnavailable, "link building unavailable")
+		return
+	}
+	limit, offset := pageBounds(params.Limit, params.Offset, 20, 100)
+	items, total, err := h.backlinkSvc.ListPlaced(r.Context(), limit, offset)
+	if err != nil {
+		linkbuildingErrMap.Handle(r.Context(), w, "list_placement_history", err)
+		return
+	}
+	out := make([]oapigen.Placement, len(items))
+	for i, p := range items {
+		out[i] = toAPIPlacement(p)
+	}
+	response.WriteJSON(r.Context(), w, http.StatusOK, oapigen.PlacementList{Items: out, Total: total})
+}
+
+func (h *LinkbuildingHandler) CancelPlacement(w http.ResponseWriter, r *http.Request, runId string) {
+	if isNil(h.backlinkSvc) {
+		problem.Write(w, http.StatusServiceUnavailable, "link building unavailable")
+		return
+	}
+	h.backlinkSvc.Cancel(r.Context(), runId)
+	w.WriteHeader(http.StatusAccepted)
+}
+
+func toAPIPlacement(p domainlb.Placement) oapigen.Placement {
+	return oapigen.Placement{
+		Id:        p.ID,
+		DonorUrl:  p.DonorURL,
+		TargetUrl: p.TargetURL,
+		Ok:        p.OK,
+		Outcome:   ptr(p.Outcome),
+		Status:    p.Status,
+		PostUrl:   ptr(p.PostURL),
+		EditUrl:   ptr(p.EditURL),
+		Anchor:    ptr(p.Anchor),
+		CreatedAt: p.CreatedAt,
+	}
+}
+
+func pageBounds(limit, offset *int, defLimit, maxLimit int) (int, int) {
+	l := defLimit
+	if limit != nil && *limit > 0 {
+		l = *limit
+	}
+	if l > maxLimit {
+		l = maxLimit
+	}
+	o := 0
+	if offset != nil && *offset > 0 {
+		o = *offset
+	}
+	return l, o
 }
 
 func derefStr(p *string) string {
