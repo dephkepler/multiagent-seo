@@ -37,6 +37,12 @@ type BacklinkInsertion struct {
 	ModifiedHTML string
 }
 
+type ComposedPost struct {
+	Title  string
+	HTML   string
+	Anchor string
+}
+
 type PlacementResult struct {
 	Row      int
 	DonorURL string
