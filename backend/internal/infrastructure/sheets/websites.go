@@ -121,17 +121,25 @@ func (s *websiteSource) WritePlacementStatus(ctx context.Context, sheet string, 
 		}
 	}
 
-	now := time.Now().UTC().Format("2006-01-02 15:04:05")
-	valueRanges := make([]*sheets.ValueRange, 0, len(results))
+	now := time.Now().UTC()
+	stamp := now.Format("2006-01-02 15:04:05")
+	date := now.Format("2006-01-02")
+	valueRanges := make([]*sheets.ValueRange, 0, len(results)*2)
 	for _, r := range results {
-		entry := fmt.Sprintf("[%s] %s", now, r.Status)
+		entry := fmt.Sprintf("[%s] %s", stamp, r.Status)
 		if old := existingByRow[r.Row]; old != "" {
 			entry = entry + "\n" + old
 		}
-		valueRanges = append(valueRanges, &sheets.ValueRange{
-			Range:  colCell(sheet, colPlacement, r.Row),
-			Values: [][]any{{entry}},
-		})
+		valueRanges = append(valueRanges,
+			&sheets.ValueRange{
+				Range:  colCell(sheet, colPlacement, r.Row),
+				Values: [][]any{{entry}},
+			},
+			&sheets.ValueRange{
+				Range:  colCell(sheet, colLoginStatus, r.Row),
+				Values: [][]any{{linkbuilding.ShortStatus(r.OK, r.Outcome, date)}},
+			},
+		)
 	}
 
 	req := &sheets.BatchUpdateValuesRequest{

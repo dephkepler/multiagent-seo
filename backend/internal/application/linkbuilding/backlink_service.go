@@ -8,6 +8,7 @@ import (
 	"math/rand"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -40,6 +41,7 @@ type BacklinkService struct {
 	log           *slog.Logger
 	minDelay      time.Duration
 	maxDelay      time.Duration
+	cancels       sync.Map
 }
 
 type BacklinkOption func(*BacklinkService)
@@ -118,16 +120,20 @@ func (s *BacklinkService) PlaceBacklinks(ctx context.Context, req PlaceBacklinks
 		return PlaceBacklinksQueued{}, fmt.Errorf("list credentials: %w", err)
 	}
 
+	placed, err := s.store.PlacedDonors(ctx, targetURL)
+	if err != nil {
+		return PlaceBacklinksQueued{}, fmt.Errorf("list placed donors: %w", err)
+	}
+
 	queued := make([]domain.SiteCredential, 0, len(creds))
-	var skippedLogin, skippedAlreadyPlaced int
+	var skippedPlaced, skippedBlocked int
 	for _, c := range creds {
-		st := strings.TrimSpace(strings.ToLower(c.LoginStatus))
-		if st != "" && !strings.HasPrefix(st, "login ok") {
-			skippedLogin++
+		if placed[domain.NormalizeDonorURL(c.BaseURL)] || hasLatestPlaced(c.PlacementStatus) {
+			skippedPlaced++
 			continue
 		}
-		if hasLatestPlaced(c.PlacementStatus) {
-			skippedAlreadyPlaced++
+		if domain.IsPermanentStatus(c.LoginStatus) {
+			skippedBlocked++
 			continue
 		}
 		queued = append(queued, c)
@@ -154,14 +160,18 @@ func (s *BacklinkService) PlaceBacklinks(ctx context.Context, req PlaceBacklinks
 		"sites", len(queued),
 		"success_target", target,
 		"run_id", runID,
-		"skipped_login_failed", skippedLogin,
-		"skipped_already_placed", skippedAlreadyPlaced,
+		"skipped_placed", skippedPlaced,
+		"skipped_blocked", skippedBlocked,
 		"target_url", targetURL,
 		"provider", provider,
 		"model", model,
 	)
 	s.runner.Go(ctx, func(bg context.Context) {
-		s.placeAll(bg, jobLog, runID, req.Sheet, queued, targetURL, placer, target)
+		runCtx, cancel := context.WithCancel(bg)
+		s.cancels.Store(runID, cancel)
+		defer s.cancels.Delete(runID)
+		defer cancel()
+		s.placeAll(runCtx, jobLog, runID, req.Sheet, queued, targetURL, placer, target)
 	})
 
 	jobLog.InfoContext(ctx, "backlink placement accepted")
@@ -170,6 +180,18 @@ func (s *BacklinkService) PlaceBacklinks(ctx context.Context, req PlaceBacklinks
 
 func (s *BacklinkService) ListPlacements(ctx context.Context, runID string) ([]domain.Placement, error) {
 	return s.store.ListByRun(ctx, runID)
+}
+
+func (s *BacklinkService) ListPlaced(ctx context.Context, limit, offset int) ([]domain.Placement, int, error) {
+	return s.store.ListPlaced(ctx, limit, offset)
+}
+
+// Cancel stops a placement run executing in this process; a finished or unknown
+// run is a no-op.
+func (s *BacklinkService) Cancel(_ context.Context, runID string) {
+	if c, ok := s.cancels.Load(runID); ok {
+		c.(context.CancelFunc)()
+	}
 }
 
 func (s *BacklinkService) placeAll(ctx context.Context, log *slog.Logger, runID, sheet string, creds []domain.SiteCredential, targetURL string, placer domain.BacklinkPlacer, target int) {
@@ -245,6 +267,7 @@ func (s *BacklinkService) savePlacement(ctx context.Context, log *slog.Logger, r
 		DonorURL:  res.DonorURL,
 		TargetURL: targetURL,
 		OK:        res.OK,
+		Outcome:   res.Outcome,
 		Status:    res.Status,
 		PostURL:   res.PostURL,
 		EditURL:   res.EditURL,
@@ -261,6 +284,7 @@ func (s *BacklinkService) placeOne(ctx context.Context, log *slog.Logger, c doma
 	if err != nil {
 		reason := sanitizeReason(err.Error())
 		log.WarnContext(ctx, "donor stage failed", "stage", "load app password", "url", c.BaseURL, "reason", reason)
+		res.Outcome = domain.OutcomeError
 		res.Status = "failed: load app password: " + reason
 		return res
 	}
@@ -268,7 +292,8 @@ func (s *BacklinkService) placeOne(ctx context.Context, log *slog.Logger, c doma
 		appPwd, err := s.issuer.IssueAppPassword(ctx, c.BaseURL, c.Login, c.Password)
 		if err != nil {
 			reason := sanitizeReason(err.Error())
-			log.WarnContext(ctx, "donor stage failed", "stage", "issue app password", "url", c.BaseURL, "reason", reason)
+			res.Outcome = domain.ClassifyLoginOutcome(reason)
+			log.WarnContext(ctx, "donor stage failed", "stage", "issue app password", "url", c.BaseURL, "outcome", res.Outcome, "reason", reason)
 			res.Status = "failed: issue app password: " + reason
 			return res
 		}
@@ -276,6 +301,7 @@ func (s *BacklinkService) placeOne(ctx context.Context, log *slog.Logger, c doma
 		if err := s.donors.Save(ctx, donor); err != nil {
 			reason := sanitizeReason(err.Error())
 			log.ErrorContext(ctx, "donor stage failed", "stage", "persist credential", "url", c.BaseURL, "reason", reason)
+			res.Outcome = domain.OutcomeError
 			res.Status = "failed: persist credential: " + reason
 			return res
 		}
@@ -285,6 +311,7 @@ func (s *BacklinkService) placeOne(ctx context.Context, log *slog.Logger, c doma
 	if err != nil {
 		reason := sanitizeReason(err.Error())
 		log.WarnContext(ctx, "donor stage failed", "stage", "latest post", "url", c.BaseURL, "reason", reason)
+		res.Outcome = domain.OutcomePostFailed
 		res.Status = "failed: latest post: " + reason
 		return res
 	}
@@ -293,6 +320,7 @@ func (s *BacklinkService) placeOne(ctx context.Context, log *slog.Logger, c doma
 	if err != nil {
 		reason := sanitizeReason(err.Error())
 		log.WarnContext(ctx, "donor stage failed", "stage", "llm", "url", c.BaseURL, "reason", reason)
+		res.Outcome = domain.OutcomePostFailed
 		res.Status = "failed: llm: " + reason
 		return res
 	}
@@ -300,11 +328,13 @@ func (s *BacklinkService) placeOne(ctx context.Context, log *slog.Logger, c doma
 	if err := s.editor.UpdatePostContent(ctx, donor, post.ID, ins.ModifiedHTML); err != nil {
 		reason := sanitizeReason(err.Error())
 		log.WarnContext(ctx, "donor stage failed", "stage", "update post", "url", c.BaseURL, "reason", reason)
+		res.Outcome = domain.OutcomePostFailed
 		res.Status = "failed: update post: " + reason
 		return res
 	}
 
 	res.OK = true
+	res.Outcome = domain.OutcomePlaced
 	res.PostURL = post.PublicURL
 	res.EditURL = post.EditURL
 	res.Anchor = ins.Anchor
