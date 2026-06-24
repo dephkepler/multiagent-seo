@@ -20,6 +20,10 @@ func (f *fakePlacements) WritePlacementStatus(_ context.Context, _ string, r []d
 	return nil
 }
 
+type fakeProfileStore struct{}
+
+func (fakeProfileStore) Save(context.Context, domain.DonorProfile) error { return nil }
+
 type fakePlacementStore struct {
 	saved []domain.Placement
 }
@@ -79,6 +83,7 @@ func (s scriptedIssuer) IssueAppPassword(_ context.Context, donorURL, login, pas
 }
 
 type scriptedEditor struct {
+	caps       func(domain.DonorCredential) (domain.DonorCapabilities, error)
 	front      func(domain.DonorCredential) (domain.DonorPost, bool, error)
 	latest     func(domain.DonorCredential) (domain.DonorPost, bool, error)
 	update     func(domain.DonorCredential, int64, string) error
@@ -87,6 +92,12 @@ type scriptedEditor struct {
 	posted     []string
 }
 
+func (s *scriptedEditor) Capabilities(_ context.Context, c domain.DonorCredential) (domain.DonorCapabilities, error) {
+	if s.caps == nil {
+		return domain.DonorCapabilities{UserID: 1, CanEditPages: true, CanEditOthers: true, CanPublish: true, CanCreate: true}, nil
+	}
+	return s.caps(c)
+}
 func (s *scriptedEditor) FrontPage(_ context.Context, c domain.DonorCredential) (domain.DonorPost, bool, error) {
 	if s.front == nil {
 		return domain.DonorPost{}, false, nil
@@ -99,7 +110,7 @@ func (s *scriptedEditor) UpdatePageContent(_ context.Context, c domain.DonorCred
 	}
 	return s.updatePage(c, id, html)
 }
-func (s *scriptedEditor) LatestEditablePost(_ context.Context, c domain.DonorCredential) (domain.DonorPost, bool, error) {
+func (s *scriptedEditor) LatestEditablePost(_ context.Context, c domain.DonorCredential, _ domain.DonorCapabilities) (domain.DonorPost, bool, error) {
 	if s.latest == nil {
 		return domain.DonorPost{}, false, nil
 	}
@@ -118,6 +129,9 @@ func (s *scriptedEditor) CreatePost(_ context.Context, c domain.DonorCredential,
 	}
 	return s.create(c, title, html)
 }
+func (s *scriptedEditor) LatestTitles(_ context.Context, _ domain.DonorCredential, _ int) ([]string, error) {
+	return nil, nil
+}
 
 type scriptedPlacer struct {
 	place   func(html, target string) (domain.BacklinkInsertion, error)
@@ -130,7 +144,7 @@ func (s scriptedPlacer) Place(_ context.Context, html, target string) (domain.Ba
 	}
 	return s.place(html, target)
 }
-func (s scriptedPlacer) Compose(_ context.Context, target string) (domain.ComposedPost, error) {
+func (s scriptedPlacer) Compose(_ context.Context, target string, _ []string) (domain.ComposedPost, error) {
 	if s.compose == nil {
 		return domain.ComposedPost{}, errors.New("no compose script")
 	}
@@ -154,7 +168,7 @@ func newBacklinkSvc(
 	tg fakeTargets,
 ) *applb.BacklinkService {
 	placerBuilder := func(string, string) (domain.BacklinkPlacer, error) { return pr, nil }
-	return applb.NewBacklinkService(creds, pl, &fakePlacementStore{}, ds, is, ed, placerBuilder, applb.LLMDefaults{}, tg, jobrunner.NewSyncRunner(), nil, applb.WithBacklinkDelay(0, 0))
+	return applb.NewBacklinkService(creds, pl, &fakePlacementStore{}, fakeProfileStore{}, ds, is, ed, placerBuilder, applb.LLMDefaults{}, tg, jobrunner.NewSyncRunner(), nil, applb.WithBacklinkDelay(0, 0))
 }
 
 func TestPlaceBacklinks_HappyPathIssuesAndCachesCreds(t *testing.T) {

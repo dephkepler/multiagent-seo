@@ -58,6 +58,7 @@ func buildLinkbuilding(
 		creds,
 		placements,
 		postgres.NewBacklinkPlacementRepository(pool),
+		postgres.NewDonorSiteProfileRepository(pool),
 		postgres.NewDonorCredentialRepository(pool, cfg.WordPress.EncryptionKey),
 		wplogin.New(log, cfg.WordPress.HTTPTimeout),
 		wppost.New(log, cfg.WordPress.HTTPTimeout),

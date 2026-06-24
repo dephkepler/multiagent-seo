@@ -43,6 +43,25 @@ type ComposedPost struct {
 	Anchor string
 }
 
+type DonorCapabilities struct {
+	UserID        int64
+	Roles         []string
+	CanEditPages  bool
+	CanEditOthers bool
+	CanPublish    bool
+	CanCreate     bool
+}
+
+type DonorProfile struct {
+	DonorURL      string
+	Role          string
+	CanEditPages  bool
+	CanEditOthers bool
+	CanPublish    bool
+	CanCreate     bool
+	LastOutcome   string
+}
+
 type PlacementResult struct {
 	Row      int
 	DonorURL string

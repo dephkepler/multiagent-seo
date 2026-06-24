@@ -27,19 +27,25 @@ type DonorCredentialStore interface {
 	Save(ctx context.Context, cred DonorCredential) error
 }
 
+type DonorProfileStore interface {
+	Save(ctx context.Context, p DonorProfile) error
+}
+
 type DonorAppPasswordIssuer interface {
 	IssueAppPassword(ctx context.Context, donorURL, login, password string) (string, error)
 }
 
 type DonorPostEditor interface {
+	Capabilities(ctx context.Context, cred DonorCredential) (DonorCapabilities, error)
 	FrontPage(ctx context.Context, cred DonorCredential) (DonorPost, bool, error)
 	UpdatePageContent(ctx context.Context, cred DonorCredential, pageID int64, newHTML string) error
-	LatestEditablePost(ctx context.Context, cred DonorCredential) (DonorPost, bool, error)
+	LatestEditablePost(ctx context.Context, cred DonorCredential, caps DonorCapabilities) (DonorPost, bool, error)
 	UpdatePostContent(ctx context.Context, cred DonorCredential, postID int64, newHTML string) error
 	CreatePost(ctx context.Context, cred DonorCredential, title, html string) (DonorPost, error)
+	LatestTitles(ctx context.Context, cred DonorCredential, n int) ([]string, error)
 }
 
 type BacklinkPlacer interface {
 	Place(ctx context.Context, html, targetURL string) (BacklinkInsertion, error)
-	Compose(ctx context.Context, targetURL string) (ComposedPost, error)
+	Compose(ctx context.Context, targetURL string, titles []string) (ComposedPost, error)
 }
