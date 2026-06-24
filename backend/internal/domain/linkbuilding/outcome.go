@@ -14,6 +14,7 @@ const (
 	OutcomeAppPasswordsOff = "app_passwords_off"
 	OutcomeNoTarget       = "no_target"
 	OutcomePending        = "pending"
+	OutcomeLinkMissing    = "link_missing"
 	OutcomeLoginFailed    = "login_failed"
 	OutcomePostFailed     = "post_failed"
 	OutcomeError          = "error"
@@ -30,6 +31,7 @@ var outcomeLabel = map[string]string{
 	OutcomeNoMarker:        "custom login",
 	OutcomeAppPasswordsOff: "app passwords off",
 	OutcomeNoTarget:        "no editable target",
+	OutcomeLinkMissing:     "link not visible",
 	OutcomeLoginFailed:     "login failed",
 	OutcomePostFailed:      "post failed",
 	OutcomeError:           "error",

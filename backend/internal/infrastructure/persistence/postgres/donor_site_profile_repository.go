@@ -52,7 +52,7 @@ func (r *DonorSiteProfileRepository) RecentlyFailed(ctx context.Context, lockedC
 	const q = `
 		SELECT donor_url FROM donor_site_profiles
 		WHERE (last_outcome = 'locked' AND updated_at > @locked_cutoff)
-		   OR (last_outcome IN ('cloudflare', 'login_failed', 'no_marker', 'post_failed') AND updated_at > @fail_cutoff)`
+		   OR (last_outcome IN ('cloudflare', 'login_failed', 'no_marker', 'post_failed', 'link_missing') AND updated_at > @fail_cutoff)`
 
 	rows, err := r.db.Query(ctx, q, pgx.NamedArgs{"locked_cutoff": lockedCutoff, "fail_cutoff": failCutoff})
 	if err != nil {

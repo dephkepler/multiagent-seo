@@ -256,10 +256,6 @@ func (s *BacklinkService) placeAll(ctx context.Context, log *slog.Logger, runID,
 			break
 		}
 
-		if res.OK && res.PostURL != "" {
-			res.LinkCheck = s.verifyLink(ctx, log, res.PostURL, targetURL)
-		}
-
 		processed++
 		pending = append(pending, res)
 		if res.OK {
@@ -379,6 +375,7 @@ func (s *BacklinkService) placeOne(ctx context.Context, log *slog.Logger, c doma
 func (s *BacklinkService) placeOnDonor(ctx context.Context, log *slog.Logger, res domain.PlacementResult, donor domain.DonorCredential, targetURL string, placer domain.BacklinkPlacer) (domain.PlacementResult, domain.DonorCapabilities) {
 	url := res.DonorURL
 	var hardErr string
+	var sawMissing bool
 	fail := func(tier, stage, reason string) {
 		log.WarnContext(ctx, "tier failed", "tier", tier, "stage", stage, "url", url, "reason", reason)
 		if !isPermissionReason(reason) {
@@ -404,8 +401,10 @@ func (s *BacklinkService) placeOnDonor(ctx context.Context, log *slog.Logger, re
 			anchor := anchorFromURL(targetURL)
 			if err := s.editor.UpdatePageContent(ctx, donor, page.ID, page.Content+hiddenLink(targetURL, anchor)); err != nil {
 				fail("homepage", "update", sanitizeReason(err.Error()))
+			} else if r, ok := s.acceptIfLive(ctx, log, res, "homepage", page.PublicURL, page.EditURL, anchor, targetURL); ok {
+				return r, caps
 			} else {
-				return placed(res, "homepage", page.PublicURL, page.EditURL, anchor), caps
+				sawMissing = true
 			}
 		}
 	}
@@ -418,8 +417,10 @@ func (s *BacklinkService) placeOnDonor(ctx context.Context, log *slog.Logger, re
 				fail("post", "llm", sanitizeReason(err.Error()))
 			} else if err := s.editor.UpdatePostContent(ctx, donor, post.ID, ins.ModifiedHTML); err != nil {
 				fail("post", "update", sanitizeReason(err.Error()))
+			} else if r, ok := s.acceptIfLive(ctx, log, res, "post", post.PublicURL, post.EditURL, ins.Anchor, targetURL); ok {
+				return r, caps
 			} else {
-				return placed(res, "post", post.PublicURL, post.EditURL, ins.Anchor), caps
+				sawMissing = true
 			}
 		}
 	}
@@ -434,7 +435,10 @@ func (s *BacklinkService) placeOnDonor(ctx context.Context, log *slog.Logger, re
 		} else if created, err := s.editor.CreatePost(ctx, donor, composed.Title, composed.HTML); err != nil {
 			fail("new_post", "create", sanitizeReason(err.Error()))
 		} else if created.Status == "publish" {
-			return placed(res, "new_post", created.PublicURL, created.EditURL, composed.Anchor), caps
+			if r, ok := s.acceptIfLive(ctx, log, res, "new_post", created.PublicURL, created.EditURL, composed.Anchor, targetURL); ok {
+				return r, caps
+			}
+			sawMissing = true
 		} else {
 			res.Outcome = domain.OutcomePending
 			res.PostURL = created.PublicURL
@@ -448,11 +452,24 @@ func (s *BacklinkService) placeOnDonor(ctx context.Context, log *slog.Logger, re
 	if hardErr != "" {
 		res.Outcome = domain.OutcomePostFailed
 		res.Status = "failed: " + hardErr
+	} else if sawMissing {
+		res.Outcome = domain.OutcomeLinkMissing
+		res.Status = "placed but link not visible on rendered page (theme/cache?)"
 	} else {
 		res.Outcome = domain.OutcomeNoTarget
 		res.Status = "failed: no editable target (homepage/post/new-post all unavailable)"
 	}
 	return res, caps
+}
+
+func (s *BacklinkService) acceptIfLive(ctx context.Context, log *slog.Logger, res domain.PlacementResult, method, publicURL, editURL, anchor, targetURL string) (domain.PlacementResult, bool) {
+	check := s.verifyLink(ctx, log, publicURL, targetURL)
+	if check == domain.LinkMissing {
+		log.WarnContext(ctx, "placement not live, trying next tier", "tier", method, "url", res.DonorURL)
+		return res, false
+	}
+	res.LinkCheck = check
+	return placed(res, method, publicURL, editURL, anchor), true
 }
 
 func placed(res domain.PlacementResult, method, publicURL, editURL, anchor string) domain.PlacementResult {
