@@ -174,16 +174,19 @@ func (c *Client) createPostWithStatus(ctx context.Context, cred linkbuilding.Don
 		return linkbuilding.DonorPost{}, fmt.Errorf("wppost create status %d: %s", st, snippet(body))
 	}
 	var created struct {
-		ID   int64  `json:"id"`
-		Link string `json:"link"`
+		ID     int64  `json:"id"`
+		Link   string `json:"link"`
+		Status string `json:"status"`
 	}
 	if err := json.Unmarshal(body, &created); err != nil {
 		return linkbuilding.DonorPost{}, fmt.Errorf("wppost create decode: %w", err)
 	}
 	return linkbuilding.DonorPost{
-		ID:        created.ID,
-		PublicURL: created.Link,
-		EditURL:   fmt.Sprintf("%s/wp-admin/post.php?post=%d&action=edit", origin, created.ID),
+		ID:         created.ID,
+		PublicURL:  created.Link,
+		EditURL:    fmt.Sprintf("%s/wp-admin/post.php?post=%d&action=edit", origin, created.ID),
+		PreviewURL: fmt.Sprintf("%s/?p=%d&preview=true", origin, created.ID),
+		Status:     created.Status,
 	}, nil
 }
 

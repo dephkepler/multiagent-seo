@@ -8,6 +8,7 @@ const (
 	colPassword    = "G"
 	colLoginStatus = "H"
 	colPlacement   = "I"
+	colRights      = "J"
 
 	colEmailURL    = "A"
 	colEmailList   = "B"

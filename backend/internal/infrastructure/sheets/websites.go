@@ -124,7 +124,7 @@ func (s *websiteSource) WritePlacementStatus(ctx context.Context, sheet string, 
 	now := time.Now().UTC()
 	stamp := now.Format("2006-01-02 15:04:05")
 	date := now.Format("2006-01-02")
-	valueRanges := make([]*sheets.ValueRange, 0, len(results)*2)
+	valueRanges := make([]*sheets.ValueRange, 0, len(results)*3)
 	for _, r := range results {
 		entry := fmt.Sprintf("[%s] %s", stamp, r.Status)
 		if old := existingByRow[r.Row]; old != "" {
@@ -140,6 +140,12 @@ func (s *websiteSource) WritePlacementStatus(ctx context.Context, sheet string, 
 				Values: [][]any{{linkbuilding.ShortStatus(r.OK, r.Outcome, date)}},
 			},
 		)
+		if r.Rights != "" {
+			valueRanges = append(valueRanges, &sheets.ValueRange{
+				Range:  colCell(sheet, colRights, r.Row),
+				Values: [][]any{{r.Rights}},
+			})
+		}
 	}
 
 	req := &sheets.BatchUpdateValuesRequest{

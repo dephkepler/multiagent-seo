@@ -371,9 +371,10 @@ func (s *BacklinkService) placeOnDonor(ctx context.Context, log *slog.Logger, re
 		// Unknown rights: stay permissive and let each tier probe, as before.
 		log.WarnContext(ctx, "donor capabilities unknown", "url", url, "reason", sanitizeReason(err.Error()))
 		caps = domain.DonorCapabilities{CanEditPages: true, CanEditOthers: true, CanPublish: true, CanCreate: true}
+		res.Rights = "unknown"
 	} else {
-		log.InfoContext(ctx, "donor capabilities", "url", url, "roles", strings.Join(caps.Roles, ","),
-			"edit_pages", caps.CanEditPages, "edit_others", caps.CanEditOthers, "publish", caps.CanPublish, "create", caps.CanCreate)
+		res.Rights = domain.RightsSummary(caps)
+		log.InfoContext(ctx, "donor capabilities", "url", url, "rights", res.Rights)
 	}
 
 	if caps.CanEditPages {
@@ -412,8 +413,15 @@ func (s *BacklinkService) placeOnDonor(ctx context.Context, log *slog.Logger, re
 			fail("new_post", "llm", sanitizeReason(err.Error()))
 		} else if created, err := s.editor.CreatePost(ctx, donor, composed.Title, composed.HTML); err != nil {
 			fail("new_post", "create", sanitizeReason(err.Error()))
-		} else {
+		} else if created.Status == "publish" {
 			return placed(res, "new_post", created.PublicURL, created.EditURL, composed.Anchor), caps
+		} else {
+			res.Outcome = domain.OutcomePending
+			res.PostURL = created.PublicURL
+			res.EditURL = created.EditURL
+			res.Anchor = composed.Anchor
+			res.Status = fmt.Sprintf("pending review (not live, %s) — edit: %s | preview: %s | view: %s", created.Status, created.EditURL, created.PreviewURL, created.PublicURL)
+			return res, caps
 		}
 	}
 

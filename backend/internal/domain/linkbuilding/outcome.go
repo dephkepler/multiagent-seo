@@ -13,6 +13,7 @@ const (
 	OutcomeNoMarker       = "no_marker"
 	OutcomeAppPasswordsOff = "app_passwords_off"
 	OutcomeNoTarget       = "no_target"
+	OutcomePending        = "pending"
 	OutcomeLoginFailed    = "login_failed"
 	OutcomePostFailed     = "post_failed"
 	OutcomeError          = "error"
@@ -51,6 +52,9 @@ func NormalizeDonorURL(s string) string {
 }
 
 func ShortStatus(ok bool, outcome, date string) string {
+	if outcome == OutcomePending {
+		return "pending review (" + date + ")"
+	}
 	if ok {
 		return "ok (" + date + ")"
 	}
@@ -61,10 +65,41 @@ func ShortStatus(ok bool, outcome, date string) string {
 	return "fail: " + label + " (" + date + ")"
 }
 
+// RightsSummary is a human-readable digest of what we may do on a donor, written
+// to the sheet so the operator sees the role and abilities at a glance.
+func RightsSummary(caps DonorCapabilities) string {
+	var can []string
+	if caps.CanEditPages {
+		can = append(can, "pages")
+	}
+	if caps.CanEditOthers {
+		can = append(can, "edit-others")
+	}
+	if caps.CanPublish {
+		can = append(can, "publish")
+	}
+	if caps.CanCreate {
+		can = append(can, "create")
+	}
+	abilities := "nothing"
+	if len(can) > 0 {
+		abilities = strings.Join(can, "+")
+	}
+	role := strings.Join(caps.Roles, ",")
+	if role == "" {
+		return abilities
+	}
+	return role + ": " + abilities
+}
+
 // IsPermanentStatus reports whether a column-H cell marks a donor as not worth
 // retrying. Clearing the cell by hand re-enables the donor on the next run.
 func IsPermanentStatus(h string) bool {
 	low := strings.ToLower(strings.TrimSpace(h))
+	// A pending submission is skipped so a re-run doesn't pile up duplicate drafts.
+	if strings.HasPrefix(low, "pending") {
+		return true
+	}
 	if !strings.HasPrefix(low, "fail:") {
 		return false
 	}

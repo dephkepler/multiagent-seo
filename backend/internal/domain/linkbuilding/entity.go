@@ -25,11 +25,13 @@ type DonorCredential struct {
 }
 
 type DonorPost struct {
-	ID        int64
-	Title     string
-	Content   string
-	PublicURL string
-	EditURL   string
+	ID         int64
+	Title      string
+	Content    string
+	PublicURL  string
+	EditURL    string
+	PreviewURL string
+	Status     string
 }
 
 type BacklinkInsertion struct {
@@ -72,6 +74,7 @@ type PlacementResult struct {
 	EditURL   string
 	Anchor    string
 	LinkCheck string
+	Rights    string
 }
 
 type Placement struct {

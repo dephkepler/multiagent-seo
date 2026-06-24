@@ -195,15 +195,20 @@ export default function PlaceBacklinksPage() {
           <ul className='space-y-1 text-sm'>
             {results.length === 0 && <li className='text-gray-400'>Waiting for the first result…</li>}
             {results.map((p) => {
-              const link = p.post_url || p.edit_url
+              const pending = p.outcome === 'pending'
+              const icon = p.ok ? '✅' : pending ? '⏳' : '❌'
               return (
                 <li key={p.id} className='flex items-center justify-between gap-3 border-b border-gray-50 py-1'>
                   <span className='truncate'>
-                    {p.ok ? '✅' : '❌'} <span className='text-gray-700'>{p.donor_url}</span>
+                    {icon} <span className='text-gray-700'>{p.donor_url}</span>
                   </span>
-                  {p.ok && link ? (
-                    <a href={link} target='_blank' rel='noreferrer' className='shrink-0 text-sky-600 hover:underline'>
+                  {p.ok && (p.post_url || p.edit_url) ? (
+                    <a href={p.post_url || p.edit_url} target='_blank' rel='noreferrer' className='shrink-0 text-sky-600 hover:underline'>
                       article ↗
+                    </a>
+                  ) : pending && p.edit_url ? (
+                    <a href={p.edit_url} target='_blank' rel='noreferrer' className='shrink-0 text-amber-600 hover:underline' title={p.status}>
+                      pending — edit/publish ↗
                     </a>
                   ) : (
                     <span className='shrink-0 max-w-[55%] truncate text-xs text-gray-400' title={p.status}>
