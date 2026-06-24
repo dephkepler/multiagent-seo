@@ -145,13 +145,10 @@ type PromptConfig struct {
 }
 
 type LinkBuildingConfig struct {
-	LoginDelayMin  time.Duration `env:"LINKBUILDING_LOGIN_DELAY_MIN" envDefault:"1s"`
-	LoginDelayMax  time.Duration `env:"LINKBUILDING_LOGIN_DELAY_MAX" envDefault:"3s"`
 	PlaceDelayMin  time.Duration `env:"LINKBUILDING_PLACE_DELAY_MIN" envDefault:"2s"`
 	PlaceDelayMax  time.Duration `env:"LINKBUILDING_PLACE_DELAY_MAX" envDefault:"5s"`
 	LockedCooldown time.Duration `env:"LINKBUILDING_LOCKED_COOLDOWN" envDefault:"24h"`
 	FailCooldown   time.Duration `env:"LINKBUILDING_FAIL_COOLDOWN" envDefault:"6h"`
-	TierDelay      time.Duration `env:"LINKBUILDING_TIER_DELAY" envDefault:"2s"`
 }
 
 type EmailScrapeConfig struct {

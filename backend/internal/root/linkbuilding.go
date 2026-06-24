@@ -38,8 +38,7 @@ func buildLinkbuilding(
 	}
 	runner := jobrunner.NewAsyncRunner(cfg.Server.BackgroundJobTimeout, cfg.Server.BackgroundJobConcurrency, log)
 	factory := infrallm.NewFactory(cfg.LLM, log)
-	loginSvc := applinkbuilding.NewLoginService(creds, wplogin.New(log, cfg.WordPress.HTTPTimeout), runner, log,
-		applinkbuilding.WithLoginDelay(cfg.LinkBuilding.LoginDelayMin, cfg.LinkBuilding.LoginDelayMax))
+	loginSvc := applinkbuilding.NewLoginService(creds, wplogin.New(log, cfg.WordPress.HTTPTimeout), runner, log)
 
 	placements, err := sheets.NewPlacementSink(ctx, cfg.Sheets.CredentialsFile, cfg.Sheets.SpreadsheetID, log)
 	if err != nil {
@@ -69,7 +68,6 @@ func buildLinkbuilding(
 		log,
 		applinkbuilding.WithBacklinkDelay(cfg.LinkBuilding.PlaceDelayMin, cfg.LinkBuilding.PlaceDelayMax),
 		applinkbuilding.WithCooldown(cfg.LinkBuilding.LockedCooldown, cfg.LinkBuilding.FailCooldown),
-		applinkbuilding.WithTierDelay(cfg.LinkBuilding.TierDelay),
 	)
 	return loginSvc, backlinkSvc, runner
 }
