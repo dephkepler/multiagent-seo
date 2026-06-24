@@ -7,11 +7,6 @@ import (
 
 type CredentialSource interface {
 	ListCredentials(ctx context.Context, sheet string) ([]SiteCredential, error)
-	WriteLoginStatus(ctx context.Context, sheet string, results []LoginResult) error
-}
-
-type SiteAuthenticator interface {
-	Login(ctx context.Context, cred SiteCredential) (LoginResult, error)
 }
 
 type PlacementSink interface {

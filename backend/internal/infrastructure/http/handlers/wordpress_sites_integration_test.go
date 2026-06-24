@@ -34,7 +34,7 @@ func itWPServer(t *testing.T, pool *pgxpool.Pool) *httptest.Server {
 		handlers.NewWordpressSitesHandler(svc),
 		handlers.NewLoginHandler(nil),
 		handlers.NewArticlesHandler(nil),
-		handlers.NewLinkbuildingHandler(nil, nil),
+		handlers.NewLinkbuildingHandler(nil),
 		handlers.NewApiTokensHandler(nil), handlers.NewEmailScrapeHandler(nil),
 	)
 	router := apihttp.NewRouter(config.ServerConfig{

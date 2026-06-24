@@ -390,29 +390,6 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
-  /linkbuilding/login:
-    post:
-      operationId: loginToSites
-      security:
-        - bearerAuth: [ ]
-      tags: [ Link Building ]
-      summary: Log into the WordPress sites listed in a sheet's credential columns
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/SiteLoginRequest"
-      responses:
-        "202":
-          description: Login accepted; per-site status is written back to the sheet
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/SiteLoginAccepted"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-
   /linkbuilding/place-backlinks:
     post:
       operationId: placeBacklinks
@@ -698,25 +675,6 @@ components:
         total:
           type: integer
         processed:
-          type: integer
-
-    SiteLoginRequest:
-      type: object
-      required: [ sheet ]
-      properties:
-        sheet:
-          type: string
-          example: WEBSITES
-          x-oapi-codegen-extra-tags:
-            validate: "required,min=1"
-
-    SiteLoginAccepted:
-      type: object
-      required: [ sheet, sites_queued ]
-      properties:
-        sheet:
-          type: string
-        sites_queued:
           type: integer
 
     PlaceBacklinksRequest:

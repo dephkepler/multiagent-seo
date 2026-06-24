@@ -12,6 +12,14 @@ import (
 	"multiagent-seo/pkg/jobrunner"
 )
 
+type fakeCredSource struct {
+	creds []domain.SiteCredential
+}
+
+func (f *fakeCredSource) ListCredentials(_ context.Context, _ string) ([]domain.SiteCredential, error) {
+	return f.creds, nil
+}
+
 type fakePlacements struct {
 	written []domain.PlacementResult
 }

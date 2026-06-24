@@ -64,7 +64,7 @@ func itArtBuild(t *testing.T) http.Handler {
 		nil,
 	)
 
-	server := handlers.NewServer(nil, nil, nil, handlers.NewArticlesHandler(svc), handlers.NewLinkbuildingHandler(nil, nil), handlers.NewApiTokensHandler(nil), handlers.NewEmailScrapeHandler(nil))
+	server := handlers.NewServer(nil, nil, nil, handlers.NewArticlesHandler(svc), handlers.NewLinkbuildingHandler(nil), handlers.NewApiTokensHandler(nil), handlers.NewEmailScrapeHandler(nil))
 	return apihttp.NewRouter(config.ServerConfig{
 		BasePath:           "/",
 		CORSAllowedOrigins: []string{"http://localhost:3000"},

@@ -65,39 +65,6 @@ func (s *websiteSource) ListCredentials(ctx context.Context, sheet string) ([]li
 	return out, nil
 }
 
-func (s *websiteSource) WriteLoginStatus(ctx context.Context, sheet string, results []linkbuilding.LoginResult) error {
-	if len(results) == 0 {
-		return nil
-	}
-
-	valueRanges := make([]*sheets.ValueRange, 0, len(results))
-	for _, r := range results {
-		valueRanges = append(valueRanges, &sheets.ValueRange{
-			Range:  colCell(sheet, colLoginStatus, r.Row),
-			Values: [][]any{{r.Status}},
-		})
-	}
-
-	req := &sheets.BatchUpdateValuesRequest{
-		ValueInputOption: "RAW",
-		Data:             valueRanges,
-	}
-
-	_, err := s.svc.Spreadsheets.Values.
-		BatchUpdate(s.spreadsheetID, req).
-		Context(ctx).
-		Do()
-	if err != nil {
-		return fmt.Errorf("batch update login status in %s: %w", sheet, err)
-	}
-
-	s.log.DebugContext(ctx, "sheets login status write",
-		"sheet", sheet,
-		"results", len(results),
-	)
-	return nil
-}
-
 func (s *websiteSource) WritePlacementStatus(ctx context.Context, sheet string, results []linkbuilding.PlacementResult) error {
 	if len(results) == 0 {
 		return nil

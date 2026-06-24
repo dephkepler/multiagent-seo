@@ -27,23 +27,21 @@ func buildLinkbuilding(
 	log *slog.Logger,
 	pool *pgxpool.Pool,
 	wordpressRepo *postgres.WordpressSiteRepository,
-) (*applinkbuilding.LoginService,
-	*applinkbuilding.BacklinkService,
+) (*applinkbuilding.BacklinkService,
 	*jobrunner.AsyncRunner,
 ) {
 	creds, err := sheets.NewCredentialSource(ctx, cfg.Sheets.CredentialsFile, cfg.Sheets.SpreadsheetID, log)
 	if err != nil {
 		log.Warn("link-building disabled: credential source unavailable", "err", err)
-		return nil, nil, nil
+		return nil, nil
 	}
 	runner := jobrunner.NewAsyncRunner(cfg.Server.BackgroundJobTimeout, cfg.Server.BackgroundJobConcurrency, log)
 	factory := infrallm.NewFactory(cfg.LLM, log)
-	loginSvc := applinkbuilding.NewLoginService(creds, wplogin.New(log, cfg.WordPress.HTTPTimeout), runner, log)
 
 	placements, err := sheets.NewPlacementSink(ctx, cfg.Sheets.CredentialsFile, cfg.Sheets.SpreadsheetID, log)
 	if err != nil {
 		log.Warn("link-building backlinks disabled: placement sink unavailable", "err", err)
-		return loginSvc, nil, runner
+		return nil, runner
 	}
 	placerBuilder := func(provider, model string) (domainlinkbuilding.BacklinkPlacer, error) {
 		client, err := factory.ForModel(provider, model)
@@ -69,7 +67,7 @@ func buildLinkbuilding(
 		applinkbuilding.WithBacklinkDelay(cfg.LinkBuilding.PlaceDelayMin, cfg.LinkBuilding.PlaceDelayMax),
 		applinkbuilding.WithCooldown(cfg.LinkBuilding.LockedCooldown, cfg.LinkBuilding.FailCooldown),
 	)
-	return loginSvc, backlinkSvc, runner
+	return backlinkSvc, runner
 }
 
 type placerLLM struct{ c domainarticles.LLMClient }

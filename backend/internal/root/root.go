@@ -54,7 +54,7 @@ func Run(ctx context.Context, cfg config.Config) error {
 	apiTokenSvc := appapitoken.NewService(postgres.NewApiTokenRepository(pool))
 
 	articlesSvc, evolveSvc, articlesRunner := buildArticles(ctx, cfg, slogLog, pool, wordpressRepo)
-	linkbuildingLoginSvc, linkbuildingBacklinkSvc, lbRunner := buildLinkbuilding(ctx, cfg, slogLog, pool, wordpressRepo)
+	linkbuildingBacklinkSvc, lbRunner := buildLinkbuilding(ctx, cfg, slogLog, pool, wordpressRepo)
 	emailScrapeSvc, emailRunner := buildEmailScrape(ctx, cfg, slogLog, pool)
 
 	healthSvc := apphealth.NewService(domainhealth.NewService(healthRepo))
@@ -63,7 +63,7 @@ func Run(ctx context.Context, cfg config.Config) error {
 		handlers.NewWordpressSitesHandler(wordpressSvc),
 		handlers.NewLoginHandler(authSvc),
 		handlers.NewArticlesHandler(articlesSvc),
-		handlers.NewLinkbuildingHandler(linkbuildingLoginSvc, linkbuildingBacklinkSvc),
+		handlers.NewLinkbuildingHandler(linkbuildingBacklinkSvc),
 		handlers.NewApiTokensHandler(apiTokenSvc),
 		handlers.NewEmailScrapeHandler(emailScrapeSvc),
 	)

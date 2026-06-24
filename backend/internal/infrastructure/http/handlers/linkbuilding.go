@@ -24,10 +24,6 @@ func isNil(i any) bool {
 	return v.Kind() == reflect.Ptr && v.IsNil()
 }
 
-type linkbuildingLoginService interface {
-	LoginToSites(ctx context.Context, req applb.LoginRequest) (applb.LoginQueued, error)
-}
-
 type linkbuildingBacklinkService interface {
 	PlaceBacklinks(ctx context.Context, req applb.PlaceBacklinksRequest) (applb.PlaceBacklinksQueued, error)
 	ListPlacements(ctx context.Context, runID string) ([]domainlb.Placement, error)
@@ -36,48 +32,17 @@ type linkbuildingBacklinkService interface {
 }
 
 type LinkbuildingHandler struct {
-	loginSvc    linkbuildingLoginService
 	backlinkSvc linkbuildingBacklinkService
 }
 
-func NewLinkbuildingHandler(loginSvc linkbuildingLoginService, backlinkSvc linkbuildingBacklinkService) *LinkbuildingHandler {
-	return &LinkbuildingHandler{loginSvc: loginSvc, backlinkSvc: backlinkSvc}
+func NewLinkbuildingHandler(backlinkSvc linkbuildingBacklinkService) *LinkbuildingHandler {
+	return &LinkbuildingHandler{backlinkSvc: backlinkSvc}
 }
 
 var linkbuildingErrMap = newErrMap("handlers.linkbuilding",
 	EMsg(applb.ErrNoSheet, http.StatusBadRequest),
 	EMsg(applb.ErrNoTargetSite, http.StatusBadRequest),
 )
-
-func (h *LinkbuildingHandler) LoginToSites(w http.ResponseWriter, r *http.Request) {
-	if isNil(h.loginSvc) {
-		problem.Write(w, http.StatusServiceUnavailable, "link building unavailable")
-		return
-	}
-	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
-	var body oapigen.SiteLoginRequest
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		log := logger.New(r.Context(), "handlers.linkbuilding")
-		log.Debug().Err(err).Msg("decode login body")
-		problem.Write(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
-	if err := validate.Validate(body); err != nil {
-		problem.Write(w, http.StatusBadRequest, strings.Join(validate.MissingFields(err), ", "))
-		return
-	}
-
-	res, err := h.loginSvc.LoginToSites(r.Context(), applb.LoginRequest{Sheet: body.Sheet})
-	if err != nil {
-		linkbuildingErrMap.Handle(r.Context(), w, "login_to_sites", err)
-		return
-	}
-
-	response.WriteJSON(r.Context(), w, http.StatusAccepted, oapigen.SiteLoginAccepted{
-		Sheet:       res.Sheet,
-		SitesQueued: res.SitesQueued,
-	})
-}
 
 func (h *LinkbuildingHandler) PlaceBacklinks(w http.ResponseWriter, r *http.Request) {
 	if isNil(h.backlinkSvc) {

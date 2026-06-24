@@ -11,13 +11,6 @@ type SiteCredential struct {
 	PlacementStatus string
 }
 
-type LoginResult struct {
-	Row     int
-	BaseURL string
-	OK      bool
-	Status  string
-}
-
 type DonorCredential struct {
 	DonorURL    string
 	Login       string
