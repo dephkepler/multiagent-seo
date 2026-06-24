@@ -32,6 +32,7 @@ type BacklinkService struct {
 	creds         domain.CredentialSource
 	placements    domain.PlacementSink
 	store         domain.PlacementStore
+	profiles      domain.DonorProfileStore
 	donors        domain.DonorCredentialStore
 	issuer        domain.DonorAppPasswordIssuer
 	editor        domain.DonorPostEditor
@@ -55,6 +56,7 @@ func NewBacklinkService(
 	creds domain.CredentialSource,
 	placements domain.PlacementSink,
 	store domain.PlacementStore,
+	profiles domain.DonorProfileStore,
 	donors domain.DonorCredentialStore,
 	issuer domain.DonorAppPasswordIssuer,
 	editor domain.DonorPostEditor,
@@ -72,6 +74,7 @@ func NewBacklinkService(
 		creds:         creds,
 		placements:    placements,
 		store:         store,
+		profiles:      profiles,
 		donors:        donors,
 		issuer:        issuer,
 		editor:        editor,
@@ -226,7 +229,7 @@ func (s *BacklinkService) placeAll(ctx context.Context, log *slog.Logger, runID,
 
 		log.InfoContext(ctx, "donor selected", "row", c.Row, "url", c.BaseURL, "login_status", c.LoginStatus)
 
-		res := s.placeOne(ctx, log, c, targetURL, placer)
+		res, caps := s.placeOne(ctx, log, c, targetURL, placer)
 
 		if ctx.Err() != nil {
 			log.WarnContext(ctx, "backlink run cancelled mid-step", "url", c.BaseURL, "processed", processed)
@@ -239,6 +242,7 @@ func (s *BacklinkService) placeAll(ctx context.Context, log *slog.Logger, runID,
 			succeeded++
 		}
 		s.savePlacement(ctx, log, runID, sheet, targetURL, res)
+		s.saveProfile(ctx, log, c.BaseURL, caps, res.Outcome)
 		log.InfoContext(ctx, "donor placement", "row", c.Row, "url", c.BaseURL, "ok", res.OK, "status", res.Status)
 
 		if len(pending) >= placeWriteChunk {
@@ -278,7 +282,26 @@ func (s *BacklinkService) savePlacement(ctx context.Context, log *slog.Logger, r
 	}
 }
 
-func (s *BacklinkService) placeOne(ctx context.Context, log *slog.Logger, c domain.SiteCredential, targetURL string, placer domain.BacklinkPlacer) domain.PlacementResult {
+func (s *BacklinkService) saveProfile(ctx context.Context, log *slog.Logger, donorURL string, caps domain.DonorCapabilities, outcome string) {
+	if s.profiles == nil {
+		return
+	}
+	saveCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	if err := s.profiles.Save(saveCtx, domain.DonorProfile{
+		DonorURL:      donorURL,
+		Role:          strings.Join(caps.Roles, ","),
+		CanEditPages:  caps.CanEditPages,
+		CanEditOthers: caps.CanEditOthers,
+		CanPublish:    caps.CanPublish,
+		CanCreate:     caps.CanCreate,
+		LastOutcome:   outcome,
+	}); err != nil {
+		log.WarnContext(ctx, "save donor profile failed", "url", donorURL, "err", err)
+	}
+}
+
+func (s *BacklinkService) placeOne(ctx context.Context, log *slog.Logger, c domain.SiteCredential, targetURL string, placer domain.BacklinkPlacer) (domain.PlacementResult, domain.DonorCapabilities) {
 	res := domain.PlacementResult{Row: c.Row, DonorURL: c.BaseURL}
 
 	donor, ok, err := s.donors.Get(ctx, c.BaseURL)
@@ -287,7 +310,7 @@ func (s *BacklinkService) placeOne(ctx context.Context, log *slog.Logger, c doma
 		log.WarnContext(ctx, "donor stage failed", "stage", "load app password", "url", c.BaseURL, "reason", reason)
 		res.Outcome = domain.OutcomeError
 		res.Status = "failed: load app password: " + reason
-		return res
+		return res, domain.DonorCapabilities{}
 	}
 	if !ok {
 		appPwd, err := s.issuer.IssueAppPassword(ctx, c.BaseURL, c.Login, c.Password)
@@ -296,7 +319,7 @@ func (s *BacklinkService) placeOne(ctx context.Context, log *slog.Logger, c doma
 			res.Outcome = domain.ClassifyLoginOutcome(reason)
 			log.WarnContext(ctx, "donor stage failed", "stage", "issue app password", "url", c.BaseURL, "outcome", res.Outcome, "reason", reason)
 			res.Status = "failed: issue app password: " + reason
-			return res
+			return res, domain.DonorCapabilities{}
 		}
 		donor = domain.DonorCredential{DonorURL: c.BaseURL, Login: c.Login, AppPassword: appPwd}
 		if err := s.donors.Save(ctx, donor); err != nil {
@@ -304,7 +327,7 @@ func (s *BacklinkService) placeOne(ctx context.Context, log *slog.Logger, c doma
 			log.ErrorContext(ctx, "donor stage failed", "stage", "persist credential", "url", c.BaseURL, "reason", reason)
 			res.Outcome = domain.OutcomeError
 			res.Status = "failed: persist credential: " + reason
-			return res
+			return res, domain.DonorCapabilities{}
 		}
 	}
 
@@ -317,7 +340,7 @@ func (s *BacklinkService) placeOne(ctx context.Context, log *slog.Logger, c doma
 // succeeds. A tier that is merely unavailable (no homepage, no editable post,
 // no rights to create) is skipped; only a transient failure (LLM, network) is
 // surfaced as a retriable post_failed, otherwise the donor is marked no_target.
-func (s *BacklinkService) placeOnDonor(ctx context.Context, log *slog.Logger, res domain.PlacementResult, donor domain.DonorCredential, targetURL string, placer domain.BacklinkPlacer) domain.PlacementResult {
+func (s *BacklinkService) placeOnDonor(ctx context.Context, log *slog.Logger, res domain.PlacementResult, donor domain.DonorCredential, targetURL string, placer domain.BacklinkPlacer) (domain.PlacementResult, domain.DonorCapabilities) {
 	url := res.DonorURL
 	var hardErr string
 	fail := func(tier, stage, reason string) {
@@ -327,35 +350,55 @@ func (s *BacklinkService) placeOnDonor(ctx context.Context, log *slog.Logger, re
 		}
 	}
 
-	if page, ok, err := s.editor.FrontPage(ctx, donor); err != nil {
-		fail("homepage", "front page", sanitizeReason(err.Error()))
-	} else if ok {
-		anchor := anchorFromURL(targetURL)
-		if err := s.editor.UpdatePageContent(ctx, donor, page.ID, page.Content+hiddenLink(targetURL, anchor)); err != nil {
-			fail("homepage", "update", sanitizeReason(err.Error()))
-		} else {
-			return placed(res, "homepage", page.PublicURL, page.EditURL, anchor)
-		}
-	}
-
-	if post, ok, err := s.editor.LatestEditablePost(ctx, donor); err != nil {
-		fail("post", "find post", sanitizeReason(err.Error()))
-	} else if ok {
-		if ins, err := placer.Place(ctx, post.Content, targetURL); err != nil {
-			fail("post", "llm", sanitizeReason(err.Error()))
-		} else if err := s.editor.UpdatePostContent(ctx, donor, post.ID, ins.ModifiedHTML); err != nil {
-			fail("post", "update", sanitizeReason(err.Error()))
-		} else {
-			return placed(res, "post", post.PublicURL, post.EditURL, ins.Anchor)
-		}
-	}
-
-	if composed, err := placer.Compose(ctx, targetURL); err != nil {
-		fail("new_post", "llm", sanitizeReason(err.Error()))
-	} else if created, err := s.editor.CreatePost(ctx, donor, composed.Title, composed.HTML); err != nil {
-		fail("new_post", "create", sanitizeReason(err.Error()))
+	caps, err := s.editor.Capabilities(ctx, donor)
+	if err != nil {
+		// Unknown rights: stay permissive and let each tier probe, as before.
+		log.WarnContext(ctx, "donor capabilities unknown", "url", url, "reason", sanitizeReason(err.Error()))
+		caps = domain.DonorCapabilities{CanEditPages: true, CanEditOthers: true, CanPublish: true, CanCreate: true}
 	} else {
-		return placed(res, "new_post", created.PublicURL, created.EditURL, composed.Anchor)
+		log.InfoContext(ctx, "donor capabilities", "url", url, "roles", strings.Join(caps.Roles, ","),
+			"edit_pages", caps.CanEditPages, "edit_others", caps.CanEditOthers, "publish", caps.CanPublish, "create", caps.CanCreate)
+	}
+
+	if caps.CanEditPages {
+		if page, ok, err := s.editor.FrontPage(ctx, donor); err != nil {
+			fail("homepage", "front page", sanitizeReason(err.Error()))
+		} else if ok {
+			anchor := anchorFromURL(targetURL)
+			if err := s.editor.UpdatePageContent(ctx, donor, page.ID, page.Content+hiddenLink(targetURL, anchor)); err != nil {
+				fail("homepage", "update", sanitizeReason(err.Error()))
+			} else {
+				return placed(res, "homepage", page.PublicURL, page.EditURL, anchor), caps
+			}
+		}
+	}
+
+	if caps.CanCreate || caps.CanEditOthers {
+		if post, ok, err := s.editor.LatestEditablePost(ctx, donor, caps); err != nil {
+			fail("post", "find post", sanitizeReason(err.Error()))
+		} else if ok {
+			if ins, err := placer.Place(ctx, post.Content, targetURL); err != nil {
+				fail("post", "llm", sanitizeReason(err.Error()))
+			} else if err := s.editor.UpdatePostContent(ctx, donor, post.ID, ins.ModifiedHTML); err != nil {
+				fail("post", "update", sanitizeReason(err.Error()))
+			} else {
+				return placed(res, "post", post.PublicURL, post.EditURL, ins.Anchor), caps
+			}
+		}
+	}
+
+	if caps.CanCreate {
+		titles, terr := s.editor.LatestTitles(ctx, donor, 3)
+		if terr != nil {
+			log.WarnContext(ctx, "latest titles failed", "url", url, "reason", sanitizeReason(terr.Error()))
+		}
+		if composed, err := placer.Compose(ctx, targetURL, titles); err != nil {
+			fail("new_post", "llm", sanitizeReason(err.Error()))
+		} else if created, err := s.editor.CreatePost(ctx, donor, composed.Title, composed.HTML); err != nil {
+			fail("new_post", "create", sanitizeReason(err.Error()))
+		} else {
+			return placed(res, "new_post", created.PublicURL, created.EditURL, composed.Anchor), caps
+		}
 	}
 
 	if hardErr != "" {
@@ -365,7 +408,7 @@ func (s *BacklinkService) placeOnDonor(ctx context.Context, log *slog.Logger, re
 		res.Outcome = domain.OutcomeNoTarget
 		res.Status = "failed: no editable target (homepage/post/new-post all unavailable)"
 	}
-	return res
+	return res, caps
 }
 
 func placed(res domain.PlacementResult, method, publicURL, editURL, anchor string) domain.PlacementResult {

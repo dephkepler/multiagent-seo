@@ -15,8 +15,9 @@ type LLM interface {
 }
 
 const (
-	maxInputHTML = 20000
-	maxTokens    = 2000
+	maxInputHTML     = 20000
+	maxTokens        = 2000
+	composeMaxTokens = 1000
 )
 
 type Placer struct {
@@ -57,8 +58,8 @@ func (p *Placer) Place(ctx context.Context, html, targetURL string) (linkbuildin
 	return linkbuilding.BacklinkInsertion{Anchor: anchor, ModifiedHTML: full}, nil
 }
 
-func (p *Placer) Compose(ctx context.Context, targetURL string) (linkbuilding.ComposedPost, error) {
-	reply, err := p.llm.Complete(ctx, prompt.Compose(targetURL), maxTokens)
+func (p *Placer) Compose(ctx context.Context, targetURL string, titles []string) (linkbuilding.ComposedPost, error) {
+	reply, err := p.llm.Complete(ctx, prompt.Compose(targetURL, titles), composeMaxTokens)
 	if err != nil {
 		return linkbuilding.ComposedPost{}, fmt.Errorf("compose llm: %w", err)
 	}

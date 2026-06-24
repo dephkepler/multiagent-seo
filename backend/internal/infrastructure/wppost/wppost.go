@@ -106,18 +106,14 @@ func (c *Client) UpdatePageContent(ctx context.Context, cred linkbuilding.DonorC
 // LatestEditablePost returns the newest published post the account may edit:
 // its own latest post when it is a low-privilege author, or the site's latest
 // post when the account can edit any. ok=false means nothing is editable.
-func (c *Client) LatestEditablePost(ctx context.Context, cred linkbuilding.DonorCredential) (linkbuilding.DonorPost, bool, error) {
+func (c *Client) LatestEditablePost(ctx context.Context, cred linkbuilding.DonorCredential, caps linkbuilding.DonorCapabilities) (linkbuilding.DonorPost, bool, error) {
 	origin, err := siteOrigin(cred.DonorURL)
 	if err != nil {
 		return linkbuilding.DonorPost{}, false, err
 	}
 
-	meID, err := c.currentUserID(ctx, cred, origin)
-	if err != nil {
-		return linkbuilding.DonorPost{}, false, err
-	}
-	if meID > 0 {
-		own := fmt.Sprintf("%s/wp-json/wp/v2/posts?author=%d&per_page=1&orderby=date&order=desc&status=publish&context=edit&_fields=id,content,link", origin, meID)
+	if caps.UserID > 0 && caps.CanCreate {
+		own := fmt.Sprintf("%s/wp-json/wp/v2/posts?author=%d&per_page=1&orderby=date&order=desc&status=publish&context=edit&_fields=id,content,link", origin, caps.UserID)
 		if p, ok, err := c.postFromList(ctx, cred, origin, own); err != nil {
 			return linkbuilding.DonorPost{}, false, err
 		} else if ok {
@@ -125,6 +121,9 @@ func (c *Client) LatestEditablePost(ctx context.Context, cred linkbuilding.Donor
 		}
 	}
 
+	if !caps.CanEditOthers {
+		return linkbuilding.DonorPost{}, false, nil
+	}
 	id, ok, err := c.latestPostID(ctx, cred, origin)
 	if err != nil || !ok {
 		return linkbuilding.DonorPost{}, false, err
@@ -186,21 +185,54 @@ func (c *Client) createPostWithStatus(ctx context.Context, cred linkbuilding.Don
 	}, nil
 }
 
-func (c *Client) currentUserID(ctx context.Context, cred linkbuilding.DonorCredential, origin string) (int64, error) {
-	st, body, err := c.get(ctx, cred, origin+"/wp-json/wp/v2/users/me?_fields=id")
+// Capabilities reports what the authenticated donor account may do, read once
+// from /users/me so the caller can pick the right placement tier and skip the
+// ones it has no rights for. When WordPress omits the capabilities map it is
+// derived from the role names instead.
+func (c *Client) Capabilities(ctx context.Context, cred linkbuilding.DonorCredential) (linkbuilding.DonorCapabilities, error) {
+	origin, err := siteOrigin(cred.DonorURL)
 	if err != nil {
-		return 0, fmt.Errorf("wppost users/me: %w", err)
+		return linkbuilding.DonorCapabilities{}, err
+	}
+	st, body, err := c.get(ctx, cred, origin+"/wp-json/wp/v2/users/me?context=edit&_fields=id,roles,capabilities")
+	if err != nil {
+		return linkbuilding.DonorCapabilities{}, fmt.Errorf("wppost users/me: %w", err)
 	}
 	if st != http.StatusOK {
-		return 0, fmt.Errorf("wppost users/me status %d: %s", st, snippet(body))
+		return linkbuilding.DonorCapabilities{}, fmt.Errorf("wppost users/me status %d: %s", st, snippet(body))
 	}
 	var me struct {
-		ID int64 `json:"id"`
+		ID           int64           `json:"id"`
+		Roles        []string        `json:"roles"`
+		Capabilities map[string]bool `json:"capabilities"`
 	}
 	if err := json.Unmarshal(body, &me); err != nil {
-		return 0, fmt.Errorf("wppost users/me decode: %w", err)
+		return linkbuilding.DonorCapabilities{}, fmt.Errorf("wppost users/me decode: %w", err)
 	}
-	return me.ID, nil
+
+	caps := linkbuilding.DonorCapabilities{UserID: me.ID, Roles: me.Roles}
+	if len(me.Capabilities) > 0 {
+		caps.CanEditPages = me.Capabilities["edit_pages"]
+		caps.CanEditOthers = me.Capabilities["edit_others_posts"]
+		caps.CanPublish = me.Capabilities["publish_posts"]
+		caps.CanCreate = me.Capabilities["edit_posts"]
+	} else {
+		applyRoleCaps(&caps)
+	}
+	return caps, nil
+}
+
+func applyRoleCaps(caps *linkbuilding.DonorCapabilities) {
+	for _, r := range caps.Roles {
+		switch strings.ToLower(r) {
+		case "administrator", "editor":
+			caps.CanEditPages, caps.CanEditOthers, caps.CanPublish, caps.CanCreate = true, true, true, true
+		case "author":
+			caps.CanPublish, caps.CanCreate = true, true
+		case "contributor":
+			caps.CanCreate = true
+		}
+	}
 }
 
 func (c *Client) latestPostID(ctx context.Context, cred linkbuilding.DonorCredential, origin string) (int64, bool, error) {
@@ -277,6 +309,41 @@ func decodePost(raw []byte, origin string) (linkbuilding.DonorPost, bool, error)
 		PublicURL: p.Link,
 		EditURL:   fmt.Sprintf("%s/wp-admin/post.php?post=%d&action=edit", origin, p.ID),
 	}, true, nil
+}
+
+// LatestTitles returns up to n recent post titles, used to theme a generated
+// post to the donor's niche and language. Read-only, so it works for any role.
+func (c *Client) LatestTitles(ctx context.Context, cred linkbuilding.DonorCredential, n int) ([]string, error) {
+	origin, err := siteOrigin(cred.DonorURL)
+	if err != nil {
+		return nil, err
+	}
+	if n <= 0 {
+		n = 3
+	}
+	u := fmt.Sprintf("%s/wp-json/wp/v2/posts?per_page=%d&orderby=date&order=desc&status=publish&_fields=title", origin, n)
+	st, body, err := c.get(ctx, cred, u)
+	if err != nil {
+		return nil, fmt.Errorf("wppost titles: %w", err)
+	}
+	if st != http.StatusOK {
+		return nil, fmt.Errorf("wppost titles status %d: %s", st, snippet(body))
+	}
+	var posts []struct {
+		Title struct {
+			Rendered string `json:"rendered"`
+		} `json:"title"`
+	}
+	if err := json.Unmarshal(body, &posts); err != nil {
+		return nil, fmt.Errorf("wppost titles decode: %w", err)
+	}
+	out := make([]string, 0, len(posts))
+	for _, p := range posts {
+		if t := strings.TrimSpace(p.Title.Rendered); t != "" {
+			out = append(out, t)
+		}
+	}
+	return out, nil
 }
 
 func (c *Client) get(ctx context.Context, cred linkbuilding.DonorCredential, u string) (int, []byte, error) {
