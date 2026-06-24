@@ -236,6 +236,10 @@ func (s *BacklinkService) placeAll(ctx context.Context, log *slog.Logger, runID,
 			break
 		}
 
+		if res.OK && res.PostURL != "" {
+			res.LinkCheck = s.verifyLink(ctx, log, res.PostURL, targetURL)
+		}
+
 		processed++
 		pending = append(pending, res)
 		if res.OK {
@@ -243,7 +247,7 @@ func (s *BacklinkService) placeAll(ctx context.Context, log *slog.Logger, runID,
 		}
 		s.savePlacement(ctx, log, runID, sheet, targetURL, res)
 		s.saveProfile(ctx, log, c.BaseURL, caps, res.Outcome)
-		log.InfoContext(ctx, "donor placement", "row", c.Row, "url", c.BaseURL, "ok", res.OK, "status", res.Status)
+		log.InfoContext(ctx, "donor placement", "row", c.Row, "url", c.BaseURL, "ok", res.OK, "link_check", res.LinkCheck, "status", res.Status)
 
 		if len(pending) >= placeWriteChunk {
 			if !flush() {
@@ -277,9 +281,21 @@ func (s *BacklinkService) savePlacement(ctx context.Context, log *slog.Logger, r
 		PostURL:   res.PostURL,
 		EditURL:   res.EditURL,
 		Anchor:    res.Anchor,
+		LinkCheck: res.LinkCheck,
 	}); err != nil {
 		log.WarnContext(ctx, "save placement record failed", "url", res.DonorURL, "err", err)
 	}
+}
+
+func (s *BacklinkService) verifyLink(ctx context.Context, log *slog.Logger, pageURL, targetURL string) string {
+	checkCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+	defer cancel()
+	check, err := s.editor.VerifyLink(checkCtx, pageURL, targetURL)
+	if err != nil {
+		log.WarnContext(ctx, "link check failed", "url", pageURL, "reason", sanitizeReason(err.Error()))
+		return ""
+	}
+	return check
 }
 
 func (s *BacklinkService) saveProfile(ctx context.Context, log *slog.Logger, donorURL string, caps domain.DonorCapabilities, outcome string) {

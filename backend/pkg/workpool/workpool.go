@@ -12,16 +12,6 @@ type Options struct {
 	FlushTimeout time.Duration // per-flush timeout; <= 0 means none
 }
 
-// Run fans items across Concurrency workers. work returns (result, ok); ok=false
-// drops the item without emitting a result. Results are buffered and handed to
-// sink in batches of FlushEvery plus a final flush.
-//
-// sink runs on a context detached from ctx (with FlushTimeout) so a batch still
-// persists if ctx was canceled mid-run. A sink error aborts the run: remaining
-// workers are canceled and drained (no goroutine leak) and the error is returned.
-//
-// Returns the number of results sunk and the first sink error, or ctx.Err() if
-// the run was canceled with no sink error.
 func Run[T any, R any](
 	ctx context.Context,
 	items []T,

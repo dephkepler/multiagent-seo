@@ -43,7 +43,14 @@ type DonorPostEditor interface {
 	UpdatePostContent(ctx context.Context, cred DonorCredential, postID int64, newHTML string) error
 	CreatePost(ctx context.Context, cred DonorCredential, title, html string) (DonorPost, error)
 	LatestTitles(ctx context.Context, cred DonorCredential, n int) ([]string, error)
+	VerifyLink(ctx context.Context, pageURL, targetURL string) (string, error)
 }
+
+const (
+	LinkDofollow = "dofollow"
+	LinkNofollow = "nofollow"
+	LinkMissing  = "missing"
+)
 
 type BacklinkPlacer interface {
 	Place(ctx context.Context, html, targetURL string) (BacklinkInsertion, error)

@@ -63,14 +63,15 @@ type DonorProfile struct {
 }
 
 type PlacementResult struct {
-	Row      int
-	DonorURL string
-	OK       bool
-	Outcome  string
-	Status   string
-	PostURL  string
-	EditURL  string
-	Anchor   string
+	Row       int
+	DonorURL  string
+	OK        bool
+	Outcome   string
+	Status    string
+	PostURL   string
+	EditURL   string
+	Anchor    string
+	LinkCheck string
 }
 
 type Placement struct {
@@ -85,5 +86,6 @@ type Placement struct {
 	PostURL   string
 	EditURL   string
 	Anchor    string
+	LinkCheck string
 	CreatedAt time.Time
 }

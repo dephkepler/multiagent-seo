@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/net/html"
+
 	"multiagent-seo/internal/domain/linkbuilding"
 	"multiagent-seo/pkg/httpx"
 )
@@ -344,6 +346,64 @@ func (c *Client) LatestTitles(ctx context.Context, cred linkbuilding.DonorCreden
 		}
 	}
 	return out, nil
+}
+
+// VerifyLink re-reads the public page and reports whether our link to targetURL
+// is present and dofollow — the donor may strip it or add rel="nofollow" via a
+// plugin, which kills its SEO value. Returns "" when the page can't be fetched.
+func (c *Client) VerifyLink(ctx context.Context, pageURL, targetURL string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, pageURL, nil)
+	if err != nil {
+		return "", err
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("wppost verify get: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("wppost verify status %d", resp.StatusCode)
+	}
+	root, err := html.Parse(io.LimitReader(resp.Body, httpx.MaxPageBytes))
+	if err != nil {
+		return "", fmt.Errorf("wppost verify parse: %w", err)
+	}
+	return linkRel(root, strings.TrimRight(strings.TrimSpace(targetURL), "/")), nil
+}
+
+func linkRel(root *html.Node, target string) string {
+	found := linkbuilding.LinkMissing
+	var walk func(*html.Node)
+	walk = func(n *html.Node) {
+		if found == linkbuilding.LinkDofollow {
+			return
+		}
+		if n.Type == html.ElementNode && n.Data == "a" {
+			var href, rel string
+			for _, a := range n.Attr {
+				switch a.Key {
+				case "href":
+					href = a.Val
+				case "rel":
+					rel = strings.ToLower(a.Val)
+				}
+			}
+			if href != "" && strings.Contains(strings.TrimRight(href, "/"), target) {
+				if strings.Contains(rel, "nofollow") || strings.Contains(rel, "sponsored") || strings.Contains(rel, "ugc") {
+					if found == linkbuilding.LinkMissing {
+						found = linkbuilding.LinkNofollow
+					}
+				} else {
+					found = linkbuilding.LinkDofollow
+				}
+			}
+		}
+		for ch := n.FirstChild; ch != nil; ch = ch.NextSibling {
+			walk(ch)
+		}
+	}
+	walk(root)
+	return found
 }
 
 func (c *Client) get(ctx context.Context, cred linkbuilding.DonorCredential, u string) (int, []byte, error) {

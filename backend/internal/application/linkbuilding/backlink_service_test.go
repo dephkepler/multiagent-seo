@@ -132,6 +132,9 @@ func (s *scriptedEditor) CreatePost(_ context.Context, c domain.DonorCredential,
 func (s *scriptedEditor) LatestTitles(_ context.Context, _ domain.DonorCredential, _ int) ([]string, error) {
 	return nil, nil
 }
+func (s *scriptedEditor) VerifyLink(_ context.Context, _, _ string) (string, error) {
+	return domain.LinkDofollow, nil
+}
 
 type scriptedPlacer struct {
 	place   func(html, target string) (domain.BacklinkInsertion, error)

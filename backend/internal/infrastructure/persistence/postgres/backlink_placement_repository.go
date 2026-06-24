@@ -20,8 +20,8 @@ func NewBacklinkPlacementRepository(db *pgxpool.Pool) *BacklinkPlacementReposito
 
 func (r *BacklinkPlacementRepository) Save(ctx context.Context, p linkbuilding.Placement) error {
 	const q = `
-		INSERT INTO backlink_placements (run_id, sheet, donor_url, target_url, ok, outcome, status, post_url, edit_url, anchor)
-		VALUES (@run_id, @sheet, @donor_url, @target_url, @ok, @outcome, @status, @post_url, @edit_url, @anchor)`
+		INSERT INTO backlink_placements (run_id, sheet, donor_url, target_url, ok, outcome, status, post_url, edit_url, anchor, link_check)
+		VALUES (@run_id, @sheet, @donor_url, @target_url, @ok, @outcome, @status, @post_url, @edit_url, @anchor, @link_check)`
 
 	if _, err := r.db.Exec(ctx, q, pgx.NamedArgs{
 		"run_id":     p.RunID,
@@ -34,6 +34,7 @@ func (r *BacklinkPlacementRepository) Save(ctx context.Context, p linkbuilding.P
 		"post_url":   p.PostURL,
 		"edit_url":   p.EditURL,
 		"anchor":     p.Anchor,
+		"link_check": p.LinkCheck,
 	}); err != nil {
 		return fmt.Errorf("save backlink placement: %w", err)
 	}
@@ -42,7 +43,7 @@ func (r *BacklinkPlacementRepository) Save(ctx context.Context, p linkbuilding.P
 
 func (r *BacklinkPlacementRepository) ListByRun(ctx context.Context, runID string) ([]linkbuilding.Placement, error) {
 	const q = `
-		SELECT id, run_id, sheet, donor_url, target_url, ok, outcome, status, post_url, edit_url, anchor, created_at
+		SELECT id, run_id, sheet, donor_url, target_url, ok, outcome, status, post_url, edit_url, anchor, link_check, created_at
 		FROM backlink_placements
 		WHERE run_id = @run_id
 		ORDER BY created_at`
@@ -56,7 +57,7 @@ func (r *BacklinkPlacementRepository) ListByRun(ctx context.Context, runID strin
 	out := make([]linkbuilding.Placement, 0)
 	for rows.Next() {
 		var p linkbuilding.Placement
-		if err := rows.Scan(&p.ID, &p.RunID, &p.Sheet, &p.DonorURL, &p.TargetURL, &p.OK, &p.Outcome, &p.Status, &p.PostURL, &p.EditURL, &p.Anchor, &p.CreatedAt); err != nil {
+		if err := rows.Scan(&p.ID, &p.RunID, &p.Sheet, &p.DonorURL, &p.TargetURL, &p.OK, &p.Outcome, &p.Status, &p.PostURL, &p.EditURL, &p.Anchor, &p.LinkCheck, &p.CreatedAt); err != nil {
 			return nil, fmt.Errorf("scan backlink placement: %w", err)
 		}
 		out = append(out, p)
@@ -66,7 +67,7 @@ func (r *BacklinkPlacementRepository) ListByRun(ctx context.Context, runID strin
 
 func (r *BacklinkPlacementRepository) ListPlaced(ctx context.Context, limit, offset int) ([]linkbuilding.Placement, int, error) {
 	const q = `
-		SELECT id, run_id, sheet, donor_url, target_url, ok, outcome, status, post_url, edit_url, anchor, created_at,
+		SELECT id, run_id, sheet, donor_url, target_url, ok, outcome, status, post_url, edit_url, anchor, link_check, created_at,
 		       count(*) OVER () AS total
 		FROM backlink_placements
 		WHERE ok = true
@@ -83,7 +84,7 @@ func (r *BacklinkPlacementRepository) ListPlaced(ctx context.Context, limit, off
 	out := make([]linkbuilding.Placement, 0, limit)
 	for rows.Next() {
 		var p linkbuilding.Placement
-		if err := rows.Scan(&p.ID, &p.RunID, &p.Sheet, &p.DonorURL, &p.TargetURL, &p.OK, &p.Outcome, &p.Status, &p.PostURL, &p.EditURL, &p.Anchor, &p.CreatedAt, &total); err != nil {
+		if err := rows.Scan(&p.ID, &p.RunID, &p.Sheet, &p.DonorURL, &p.TargetURL, &p.OK, &p.Outcome, &p.Status, &p.PostURL, &p.EditURL, &p.Anchor, &p.LinkCheck, &p.CreatedAt, &total); err != nil {
 			return nil, 0, fmt.Errorf("scan placed: %w", err)
 		}
 		out = append(out, p)
