@@ -366,18 +366,15 @@ func (s *BacklinkService) placeOne(ctx context.Context, log *slog.Logger, c doma
 	return s.placeOnDonor(ctx, log, res, donor, targetURL, placer)
 }
 
-// placeOnDonor walks the placement priority chain for a single logged-in donor:
-// 1) a hidden link on the static homepage, 2) a contextual link in an existing
-// editable post, 3) a freshly published post. It stops at the first tier that
-// succeeds. A tier that is merely unavailable (no homepage, no editable post,
-// no rights to create) is skipped; only a transient failure (LLM, network) is
-// surfaced as a retriable post_failed, otherwise the donor is marked no_target.
 func (s *BacklinkService) placeOnDonor(ctx context.Context, log *slog.Logger, res domain.PlacementResult, donor domain.DonorCredential, targetURL string, placer domain.BacklinkPlacer) (domain.PlacementResult, domain.DonorCapabilities) {
 	url := res.DonorURL
 	var hardErr string
 	var sawMissing bool
+	var notes []string
+	note := func(s string) { notes = append(notes, s) }
 	fail := func(tier, stage, reason string) {
 		log.WarnContext(ctx, "tier failed", "tier", tier, "stage", stage, "url", url, "reason", reason)
+		note(tier + ": " + reason)
 		if !isPermissionReason(reason) {
 			hardErr = reason
 		}
@@ -385,7 +382,6 @@ func (s *BacklinkService) placeOnDonor(ctx context.Context, log *slog.Logger, re
 
 	caps, err := s.editor.Capabilities(ctx, donor)
 	if err != nil {
-		// Unknown rights: stay permissive and let each tier probe, as before.
 		log.WarnContext(ctx, "donor capabilities unknown", "url", url, "reason", sanitizeReason(err.Error()))
 		caps = domain.DonorCapabilities{CanEditPages: true, CanEditOthers: true, CanPublish: true, CanCreate: true}
 		res.Rights = "unknown"
@@ -394,38 +390,50 @@ func (s *BacklinkService) placeOnDonor(ctx context.Context, log *slog.Logger, re
 		log.InfoContext(ctx, "donor capabilities", "url", url, "rights", res.Rights)
 	}
 
-	if caps.CanEditPages {
+	anchor := anchorFromURL(targetURL)
+
+	switch {
+	case !caps.CanEditPages:
+		note("homepage: no edit-pages rights")
+	default:
 		if page, ok, err := s.editor.FrontPage(ctx, donor); err != nil {
 			fail("homepage", "front page", sanitizeReason(err.Error()))
-		} else if ok {
-			anchor := anchorFromURL(targetURL)
-			if err := s.editor.UpdatePageContent(ctx, donor, page.ID, page.Content+hiddenLink(targetURL, anchor)); err != nil {
-				fail("homepage", "update", sanitizeReason(err.Error()))
-			} else if r, ok := s.acceptIfLive(ctx, log, res, "homepage", page.PublicURL, page.EditURL, anchor, targetURL); ok {
-				return r, caps
-			} else {
-				sawMissing = true
-			}
+		} else if !ok {
+			note("homepage: no static homepage")
+		} else if err := s.editor.UpdatePageContent(ctx, donor, page.ID, page.Content+hiddenLink(targetURL, anchor)); err != nil {
+			fail("homepage", "update", sanitizeReason(err.Error()))
+		} else if r, ok := s.acceptIfLive(ctx, log, res, "homepage", page.PublicURL, page.EditURL, anchor, targetURL); ok {
+			return r, caps
+		} else {
+			sawMissing = true
+			note("homepage: link not visible")
 		}
 	}
 
-	if caps.CanCreate || caps.CanEditOthers {
+	switch {
+	case !caps.CanCreate && !caps.CanEditOthers:
+		note("post: no edit rights")
+	default:
 		if post, ok, err := s.editor.LatestEditablePost(ctx, donor, caps); err != nil {
 			fail("post", "find post", sanitizeReason(err.Error()))
-		} else if ok {
-			if ins, err := placer.Place(ctx, post.Content, targetURL); err != nil {
-				fail("post", "llm", sanitizeReason(err.Error()))
-			} else if err := s.editor.UpdatePostContent(ctx, donor, post.ID, ins.ModifiedHTML); err != nil {
-				fail("post", "update", sanitizeReason(err.Error()))
-			} else if r, ok := s.acceptIfLive(ctx, log, res, "post", post.PublicURL, post.EditURL, ins.Anchor, targetURL); ok {
-				return r, caps
-			} else {
-				sawMissing = true
-			}
+		} else if !ok {
+			note("post: no editable post")
+		} else if ins, err := placer.Place(ctx, post.Content, targetURL); err != nil {
+			fail("post", "llm", sanitizeReason(err.Error()))
+		} else if err := s.editor.UpdatePostContent(ctx, donor, post.ID, ins.ModifiedHTML); err != nil {
+			fail("post", "update", sanitizeReason(err.Error()))
+		} else if r, ok := s.acceptIfLive(ctx, log, res, "post", post.PublicURL, post.EditURL, ins.Anchor, targetURL); ok {
+			return r, caps
+		} else {
+			sawMissing = true
+			note("post: link not visible")
 		}
 	}
 
-	if caps.CanCreate {
+	switch {
+	case !caps.CanCreate:
+		note("new_post: cannot create (no rights)")
+	default:
 		titles, terr := s.editor.LatestTitles(ctx, donor, 3)
 		if terr != nil {
 			log.WarnContext(ctx, "latest titles failed", "url", url, "reason", sanitizeReason(terr.Error()))
@@ -434,31 +442,30 @@ func (s *BacklinkService) placeOnDonor(ctx context.Context, log *slog.Logger, re
 			fail("new_post", "llm", sanitizeReason(err.Error()))
 		} else if created, err := s.editor.CreatePost(ctx, donor, composed.Title, composed.HTML); err != nil {
 			fail("new_post", "create", sanitizeReason(err.Error()))
-		} else if created.Status == "publish" {
-			if r, ok := s.acceptIfLive(ctx, log, res, "new_post", created.PublicURL, created.EditURL, composed.Anchor, targetURL); ok {
-				return r, caps
-			}
-			sawMissing = true
-		} else {
+		} else if created.Status != "publish" {
 			res.Outcome = domain.OutcomePending
 			res.PostURL = created.PublicURL
 			res.EditURL = created.EditURL
 			res.Anchor = composed.Anchor
 			res.Status = fmt.Sprintf("pending review (not live, %s) — edit: %s | preview: %s | view: %s", created.Status, created.EditURL, created.PreviewURL, created.PublicURL)
 			return res, caps
+		} else if r, ok := s.acceptIfLive(ctx, log, res, "new_post", created.PublicURL, created.EditURL, composed.Anchor, targetURL); ok {
+			return r, caps
+		} else {
+			sawMissing = true
+			note("new_post: link not visible")
 		}
 	}
 
-	if hardErr != "" {
+	switch {
+	case hardErr != "":
 		res.Outcome = domain.OutcomePostFailed
-		res.Status = "failed: " + hardErr
-	} else if sawMissing {
+	case sawMissing:
 		res.Outcome = domain.OutcomeLinkMissing
-		res.Status = "placed but link not visible on rendered page (theme/cache?)"
-	} else {
+	default:
 		res.Outcome = domain.OutcomeNoTarget
-		res.Status = "failed: no editable target (homepage/post/new-post all unavailable)"
 	}
+	res.Status = "no live placement: " + strings.Join(notes, " | ")
 	return res, caps
 }
 
