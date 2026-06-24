@@ -175,7 +175,7 @@ func newBacklinkSvc(
 	tg fakeTargets,
 ) *applb.BacklinkService {
 	placerBuilder := func(string, string) (domain.BacklinkPlacer, error) { return pr, nil }
-	return applb.NewBacklinkService(creds, pl, &fakePlacementStore{}, fakeProfileStore{}, ds, is, ed, placerBuilder, applb.LLMDefaults{}, tg, jobrunner.NewSyncRunner(), nil, applb.WithBacklinkDelay(0, 0))
+	return applb.NewBacklinkService(creds, pl, &fakePlacementStore{}, fakeProfileStore{}, ds, is, ed, placerBuilder, applb.LLMDefaults{}, tg, jobrunner.NewSyncRunner(), nil, applb.WithBacklinkDelay(0, 0), applb.WithTierDelay(0))
 }
 
 func TestPlaceBacklinks_HappyPathIssuesAndCachesCreds(t *testing.T) {

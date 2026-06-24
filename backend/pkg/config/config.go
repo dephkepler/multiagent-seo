@@ -151,6 +151,7 @@ type LinkBuildingConfig struct {
 	PlaceDelayMax  time.Duration `env:"LINKBUILDING_PLACE_DELAY_MAX" envDefault:"5s"`
 	LockedCooldown time.Duration `env:"LINKBUILDING_LOCKED_COOLDOWN" envDefault:"24h"`
 	FailCooldown   time.Duration `env:"LINKBUILDING_FAIL_COOLDOWN" envDefault:"6h"`
+	TierDelay      time.Duration `env:"LINKBUILDING_TIER_DELAY" envDefault:"2s"`
 }
 
 type EmailScrapeConfig struct {

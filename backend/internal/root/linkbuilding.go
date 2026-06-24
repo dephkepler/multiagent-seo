@@ -69,6 +69,7 @@ func buildLinkbuilding(
 		log,
 		applinkbuilding.WithBacklinkDelay(cfg.LinkBuilding.PlaceDelayMin, cfg.LinkBuilding.PlaceDelayMax),
 		applinkbuilding.WithCooldown(cfg.LinkBuilding.LockedCooldown, cfg.LinkBuilding.FailCooldown),
+		applinkbuilding.WithTierDelay(cfg.LinkBuilding.TierDelay),
 	)
 	return loginSvc, backlinkSvc, runner
 }

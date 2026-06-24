@@ -45,6 +45,7 @@ type BacklinkService struct {
 	maxDelay       time.Duration
 	lockedCooldown time.Duration
 	failCooldown   time.Duration
+	tierDelay      time.Duration
 	cancels        sync.Map
 }
 
@@ -56,6 +57,10 @@ func WithBacklinkDelay(min, max time.Duration) BacklinkOption {
 
 func WithCooldown(locked, fail time.Duration) BacklinkOption {
 	return func(s *BacklinkService) { s.lockedCooldown, s.failCooldown = locked, fail }
+}
+
+func WithTierDelay(d time.Duration) BacklinkOption {
+	return func(s *BacklinkService) { s.tierDelay = d }
 }
 
 func NewBacklinkService(
@@ -93,6 +98,7 @@ func NewBacklinkService(
 		maxDelay:       5 * time.Second,
 		lockedCooldown: 24 * time.Hour,
 		failCooldown:   6 * time.Hour,
+		tierDelay:      2 * time.Second,
 	}
 	for _, o := range opts {
 		o(s)
@@ -391,11 +397,13 @@ func (s *BacklinkService) placeOnDonor(ctx context.Context, log *slog.Logger, re
 	}
 
 	anchor := anchorFromURL(targetURL)
+	touched := false
 
 	switch {
 	case !caps.CanEditPages:
 		note("homepage: no edit-pages rights")
 	default:
+		touched = true
 		if page, ok, err := s.editor.FrontPage(ctx, donor); err != nil {
 			fail("homepage", "front page", sanitizeReason(err.Error()))
 		} else if !ok {
@@ -410,10 +418,16 @@ func (s *BacklinkService) placeOnDonor(ctx context.Context, log *slog.Logger, re
 		}
 	}
 
+	if touched {
+		s.pauseTier(ctx)
+		touched = false
+	}
+
 	switch {
 	case !caps.CanCreate && !caps.CanEditOthers:
 		note("post: no edit rights")
 	default:
+		touched = true
 		if post, ok, err := s.editor.LatestEditablePost(ctx, donor, caps); err != nil {
 			fail("post", "find post", sanitizeReason(err.Error()))
 		} else if !ok {
@@ -428,6 +442,11 @@ func (s *BacklinkService) placeOnDonor(ctx context.Context, log *slog.Logger, re
 			sawMissing = true
 			note("post: link not visible")
 		}
+	}
+
+	if touched {
+		s.pauseTier(ctx)
+		touched = false
 	}
 
 	switch {
@@ -515,6 +534,18 @@ func isPermissionReason(reason string) bool {
 		strings.Contains(low, "cannot_") ||
 		strings.Contains(low, "not allowed") ||
 		strings.Contains(low, "no editable")
+}
+
+func (s *BacklinkService) pauseTier(ctx context.Context) {
+	if s.tierDelay <= 0 {
+		return
+	}
+	t := time.NewTimer(s.tierDelay)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+	case <-t.C:
+	}
 }
 
 func (s *BacklinkService) sleep(ctx context.Context) {
