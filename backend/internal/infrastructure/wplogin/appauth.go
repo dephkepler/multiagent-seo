@@ -12,10 +12,19 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/google/uuid"
+
 	"multiagent-seo/pkg/httpx"
 )
 
-var nonceRe = regexp.MustCompile(`wpApiSettings\s*=\s*\{[^}]*"nonce":"([a-zA-Z0-9]+)"`)
+var nonceRes = []*regexp.Regexp{
+	regexp.MustCompile(`wpApiSettings[\s\S]{0,300}?"nonce":"([a-zA-Z0-9]+)"`),
+	regexp.MustCompile(`wpApiSettings[\s\S]{0,300}?nonce"?\s*:\s*"([a-zA-Z0-9]+)"`),
+	regexp.MustCompile(`"rest_nonce":"([a-zA-Z0-9]+)"`),
+	regexp.MustCompile(`name="_wpnonce"\s+value="([a-zA-Z0-9]+)"`),
+}
+
+var adminNoncePages = []string{"/wp-admin/profile.php", "/wp-admin/", "/wp-admin/index.php"}
 
 func (a *Authenticator) IssueAppPassword(ctx context.Context, donorURL, login, password string) (string, error) {
 	base := strings.TrimRight(strings.TrimSpace(donorURL), "/")
@@ -81,40 +90,47 @@ func (a *Authenticator) IssueAppPassword(ctx context.Context, donorURL, login, p
 		return "", fmt.Errorf("login failed (status %d): %s", resp.StatusCode, loginDiag(body))
 	}
 
-	nonce, err := fetchNonce(ctx, client, origin.String()+"/wp-admin/profile.php")
+	nonce, err := fetchNonce(ctx, client, origin.String())
 	if err != nil {
 		return "", fmt.Errorf("fetch nonce: %w", err)
 	}
 
-	appPwd, err := createAppPassword(ctx, client, origin.String(), nonce, "multiagent-seo-backlinks")
+	appPwd, err := createAppPassword(ctx, client, origin.String(), nonce, "multiagent-seo-"+uuid.NewString()[:8])
 	if err != nil {
 		return "", fmt.Errorf("create app password: %w", err)
 	}
 	return appPwd, nil
 }
 
-func fetchNonce(ctx context.Context, client *http.Client, profileURL string) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, profileURL, nil)
-	if err != nil {
-		return "", fmt.Errorf("fetch nonce request: %w", err)
+func fetchNonce(ctx context.Context, client *http.Client, origin string) (string, error) {
+	var lastErr error
+	for _, page := range adminNoncePages {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, origin+page, nil)
+		if err != nil {
+			return "", err
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, httpx.MaxPageBytes))
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			lastErr = fmt.Errorf("%s status %d", page, resp.StatusCode)
+			continue
+		}
+		for _, re := range nonceRes {
+			if m := re.FindSubmatch(body); len(m) >= 2 {
+				return string(m[1]), nil
+			}
+		}
+		lastErr = fmt.Errorf("wpApiSettings nonce not found on %s", page)
 	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("fetch nonce: %w", err)
+	if lastErr == nil {
+		lastErr = fmt.Errorf("wpApiSettings nonce not found")
 	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, httpx.MaxPageBytes))
-	if err != nil {
-		return "", fmt.Errorf("read profile response: %w", err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("profile status %d", resp.StatusCode)
-	}
-	m := nonceRe.FindSubmatch(body)
-	if len(m) < 2 {
-		return "", fmt.Errorf("wpApiSettings nonce not found in profile page")
-	}
-	return string(m[1]), nil
+	return "", lastErr
 }
 
 func createAppPassword(ctx context.Context, client *http.Client, origin, nonce, name string) (string, error) {
