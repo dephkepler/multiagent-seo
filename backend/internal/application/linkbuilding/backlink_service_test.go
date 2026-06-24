@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	applb "multiagent-seo/internal/application/linkbuilding"
 	domain "multiagent-seo/internal/domain/linkbuilding"
@@ -23,6 +24,9 @@ func (f *fakePlacements) WritePlacementStatus(_ context.Context, _ string, r []d
 type fakeProfileStore struct{}
 
 func (fakeProfileStore) Save(context.Context, domain.DonorProfile) error { return nil }
+func (fakeProfileStore) RecentlyFailed(context.Context, time.Time, time.Time) (map[string]bool, error) {
+	return nil, nil
+}
 
 type fakePlacementStore struct {
 	saved []domain.Placement

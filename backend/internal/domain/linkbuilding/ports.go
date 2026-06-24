@@ -1,6 +1,9 @@
 package linkbuilding
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 type CredentialSource interface {
 	ListCredentials(ctx context.Context, sheet string) ([]SiteCredential, error)
@@ -29,6 +32,7 @@ type DonorCredentialStore interface {
 
 type DonorProfileStore interface {
 	Save(ctx context.Context, p DonorProfile) error
+	RecentlyFailed(ctx context.Context, lockedCutoff, failCutoff time.Time) (map[string]bool, error)
 }
 
 type DonorAppPasswordIssuer interface {

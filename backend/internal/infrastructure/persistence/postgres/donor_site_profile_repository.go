@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -45,4 +46,27 @@ func (r *DonorSiteProfileRepository) Save(ctx context.Context, p linkbuilding.Do
 		return fmt.Errorf("save donor profile: %w", err)
 	}
 	return nil
+}
+
+func (r *DonorSiteProfileRepository) RecentlyFailed(ctx context.Context, lockedCutoff, failCutoff time.Time) (map[string]bool, error) {
+	const q = `
+		SELECT donor_url FROM donor_site_profiles
+		WHERE (last_outcome = 'locked' AND updated_at > @locked_cutoff)
+		   OR (last_outcome IN ('cloudflare', 'login_failed', 'no_marker', 'post_failed') AND updated_at > @fail_cutoff)`
+
+	rows, err := r.db.Query(ctx, q, pgx.NamedArgs{"locked_cutoff": lockedCutoff, "fail_cutoff": failCutoff})
+	if err != nil {
+		return nil, fmt.Errorf("list recently failed donors: %w", err)
+	}
+	defer rows.Close()
+
+	out := make(map[string]bool)
+	for rows.Next() {
+		var donorURL string
+		if err := rows.Scan(&donorURL); err != nil {
+			return nil, fmt.Errorf("scan recently failed donor: %w", err)
+		}
+		out[linkbuilding.NormalizeDonorURL(donorURL)] = true
+	}
+	return out, rows.Err()
 }

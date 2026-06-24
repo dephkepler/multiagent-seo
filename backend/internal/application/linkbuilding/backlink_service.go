@@ -41,15 +41,21 @@ type BacklinkService struct {
 	targets       TargetSiteResolver
 	runner        jobrunner.JobRunner
 	log           *slog.Logger
-	minDelay      time.Duration
-	maxDelay      time.Duration
-	cancels       sync.Map
+	minDelay       time.Duration
+	maxDelay       time.Duration
+	lockedCooldown time.Duration
+	failCooldown   time.Duration
+	cancels        sync.Map
 }
 
 type BacklinkOption func(*BacklinkService)
 
 func WithBacklinkDelay(min, max time.Duration) BacklinkOption {
 	return func(s *BacklinkService) { s.minDelay, s.maxDelay = min, max }
+}
+
+func WithCooldown(locked, fail time.Duration) BacklinkOption {
+	return func(s *BacklinkService) { s.lockedCooldown, s.failCooldown = locked, fail }
 }
 
 func NewBacklinkService(
@@ -83,8 +89,10 @@ func NewBacklinkService(
 		targets:       targets,
 		runner:        runner,
 		log:           log,
-		minDelay:      2 * time.Second,
-		maxDelay:      5 * time.Second,
+		minDelay:       2 * time.Second,
+		maxDelay:       5 * time.Second,
+		lockedCooldown: 24 * time.Hour,
+		failCooldown:   6 * time.Hour,
 	}
 	for _, o := range opts {
 		o(s)
@@ -129,15 +137,26 @@ func (s *BacklinkService) PlaceBacklinks(ctx context.Context, req PlaceBacklinks
 		return PlaceBacklinksQueued{}, fmt.Errorf("list placed donors: %w", err)
 	}
 
+	now := time.Now()
+	cooling, err := s.profiles.RecentlyFailed(ctx, now.Add(-s.lockedCooldown), now.Add(-s.failCooldown))
+	if err != nil {
+		return PlaceBacklinksQueued{}, fmt.Errorf("list recently failed donors: %w", err)
+	}
+
 	queued := make([]domain.SiteCredential, 0, len(creds))
-	var skippedPlaced, skippedBlocked int
+	var skippedPlaced, skippedBlocked, skippedCooldown int
 	for _, c := range creds {
-		if placed[domain.NormalizeDonorURL(c.BaseURL)] || hasLatestPlaced(c.PlacementStatus) {
+		key := domain.NormalizeDonorURL(c.BaseURL)
+		if placed[key] || hasLatestPlaced(c.PlacementStatus) {
 			skippedPlaced++
 			continue
 		}
 		if domain.IsPermanentStatus(c.LoginStatus) {
 			skippedBlocked++
+			continue
+		}
+		if cooling[key] {
+			skippedCooldown++
 			continue
 		}
 		queued = append(queued, c)
@@ -166,6 +185,7 @@ func (s *BacklinkService) PlaceBacklinks(ctx context.Context, req PlaceBacklinks
 		"run_id", runID,
 		"skipped_placed", skippedPlaced,
 		"skipped_blocked", skippedBlocked,
+		"skipped_cooldown", skippedCooldown,
 		"target_url", targetURL,
 		"provider", provider,
 		"model", model,
