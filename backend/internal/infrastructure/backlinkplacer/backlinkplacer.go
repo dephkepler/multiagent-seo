@@ -50,12 +50,16 @@ func (p *Placer) Place(ctx context.Context, html, targetURL string) (linkbuildin
 	if !strings.Contains(modified, targetURL) {
 		return linkbuilding.BacklinkInsertion{}, fmt.Errorf("backlink llm: target URL missing from modified paragraph (reply head: %s)", head(reply, 300))
 	}
-	if !strings.Contains(html, original) {
-		return linkbuilding.BacklinkInsertion{}, fmt.Errorf("backlink llm: original paragraph not found verbatim in source html, model paraphrased (original head: %s)", head(original, 200))
-	}
 
-	full := strings.Replace(html, original, modified, 1)
-	return linkbuilding.BacklinkInsertion{Anchor: anchor, ModifiedHTML: full}, nil
+	if strings.Contains(html, original) {
+		full := strings.Replace(html, original, modified, 1)
+		return linkbuilding.BacklinkInsertion{Anchor: anchor, ModifiedHTML: full}, nil
+	}
+	if anchor != "" && strings.Contains(html, anchor) {
+		link := fmt.Sprintf(`<a href="%s" rel="noopener">%s</a>`, targetURL, anchor)
+		return linkbuilding.BacklinkInsertion{Anchor: anchor, ModifiedHTML: strings.Replace(html, anchor, link, 1)}, nil
+	}
+	return linkbuilding.BacklinkInsertion{}, fmt.Errorf("backlink llm: paragraph paraphrased and anchor %q not found verbatim in source (reply head: %s)", anchor, head(reply, 200))
 }
 
 func (p *Placer) Compose(ctx context.Context, targetURL string, titles []string) (linkbuilding.ComposedPost, error) {
