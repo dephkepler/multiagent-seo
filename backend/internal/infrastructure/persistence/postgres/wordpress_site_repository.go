@@ -46,8 +46,6 @@ func (r *WordpressSiteRepository) Create(ctx context.Context, in wordpress.Creat
 	return site, nil
 }
 
-// mapSiteAliasError returns wordpress.ErrAliasExists for a unique-violation
-// (pg 23505) on the alias, or nil if err is not a unique violation.
 func mapSiteAliasError(err error) error {
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
@@ -101,8 +99,6 @@ func (r *WordpressSiteRepository) Get(ctx context.Context, id uuid.UUID) (wordpr
 }
 
 func (r *WordpressSiteRepository) Update(ctx context.Context, id uuid.UUID, in wordpress.UpdateSite) (wordpress.Site, error) {
-	// COALESCE keeps the stored value when a field is absent; app_password is only
-	// re-encrypted when a new one is supplied, so the ciphertext is never decrypted.
 	const q = `
 		UPDATE wordpress_sites SET
 			alias        = COALESCE(@alias, alias),

@@ -1,40 +1,22 @@
-// Package checker is an infrastructure adapter implementing the domain
-// articles.ContentChecker port. adapter.go provides the New factory and maps
-// the local Result type onto articles.CheckResult.
 package checker
 
 import (
 	"context"
 	"math/rand"
 	"strings"
+
+	"multiagent-seo/internal/domain/articles"
 )
-
-type Result struct {
-	AIScore          float64  `json:"ai_score"`
-	PlagiarismScore  float64  `json:"plagiarism_score"`
-	Original         bool     `json:"original"`
-	Provider         string   `json:"provider"`
-	Issues           []string `json:"issues,omitempty"`
-	SentencesFlagged []string `json:"sentences_flagged,omitempty"`
-	ReportURL        string   `json:"report_url,omitempty"`
-}
-
-type Client interface {
-	Check(ctx context.Context, content string) (*Result, error)
-}
 
 type MockClient struct {
 	AIThreshold float64
 }
 
 func NewMock(aiThreshold float64) *MockClient {
-	if aiThreshold == 0 {
-		aiThreshold = 0.8
-	}
 	return &MockClient{AIThreshold: aiThreshold}
 }
 
-func (m *MockClient) Check(_ context.Context, content string) (*Result, error) {
+func (m *MockClient) Check(_ context.Context, content string) (*articles.CheckResult, error) {
 	words := len(strings.Fields(content))
 	sentences := strings.Count(content, ".") + strings.Count(content, "!") + strings.Count(content, "?")
 
@@ -77,13 +59,12 @@ func (m *MockClient) Check(_ context.Context, content string) (*Result, error) {
 		}
 	}
 
-	// Fields can be empty for blank/whitespace-only content; avoid indexing [0].
 	slug := "empty"
 	if fields := strings.Fields(content); len(fields) > 0 {
 		slug = strings.ReplaceAll(strings.ToLower(fields[0]), " ", "-")
 	}
 
-	return &Result{
+	return &articles.CheckResult{
 		AIScore:          round2(aiScore),
 		PlagiarismScore:  round2(plagiarismScore),
 		Original:         aiScore < m.AIThreshold,

@@ -31,13 +31,11 @@ func NewLoginHandler(auth AuthService) *LoginHandler {
 }
 
 func (h *LoginHandler) Login(w http.ResponseWriter, r *http.Request) {
-	if h.auth == nil {
-		problem.Write(w, http.StatusServiceUnavailable, "database unavailable")
-		return
-	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 	var body oapigen.LoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		log := logger.New(r.Context(), "handlers.auth")
+		log.Debug().Err(err).Msg("decode login body")
 		problem.Write(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
@@ -50,12 +48,11 @@ func (h *LoginHandler) Login(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		log := logger.New(r.Context(), "handlers.auth")
 		if errors.Is(err, appauth.ErrInvalidCredentials) {
-			// Audit trail for failed logins; never log password or token.
-			log.Warn().Str("email", body.Email).Msg("login failed")
+			log.Warn().Msg("login failed")
 			problem.Write(w, http.StatusUnauthorized, "invalid credentials")
 			return
 		}
-		log.Error().Err(err).Msg("internal error")
+		log.Error().Err(err).Str("op", "login").Msg("internal error")
 		problem.Write(w, http.StatusInternalServerError, "internal error")
 		return
 	}
@@ -63,14 +60,10 @@ func (h *LoginHandler) Login(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *LoginHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
-	if h.auth == nil {
-		problem.Write(w, http.StatusServiceUnavailable, "database unavailable")
-		return
-	}
 	users, err := h.auth.ListUsers(r.Context())
 	if err != nil {
 		log := logger.New(r.Context(), "handlers.auth")
-		log.Error().Err(err).Msg("list users")
+		log.Error().Err(err).Str("op", "list_users").Msg("internal error")
 		problem.Write(w, http.StatusInternalServerError, "internal error")
 		return
 	}

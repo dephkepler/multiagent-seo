@@ -1,5 +1,3 @@
-// Package dataforseo adapts the DataForSEO SERP API to the articles.SERPProvider
-// port, mapping the response onto domain value types.
 package dataforseo
 
 import (
@@ -8,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -42,25 +41,17 @@ type serpResponse struct {
 	Tasks []struct {
 		Result []struct {
 			Items []struct {
-				Type         string `json:"type"`
-				RankAbsolute int    `json:"rank_absolute"`
-				URL          string `json:"url"`
-				Title        string `json:"title"`
-				Description  string `json:"description"`
-				// Aggregate blocks (people_also_ask, featured_snippet) nest their
-				// text here. DataForSEO is inconsistent about the shape — objects in
-				// some blocks, bare strings in others (e.g. related_searches) — so
-				// keep it raw and decode tolerantly rather than failing the whole
-				// response when one block's shape is unexpected.
-				Items json.RawMessage `json:"items"`
+				Type         string          `json:"type"`
+				RankAbsolute int             `json:"rank_absolute"`
+				URL          string          `json:"url"`
+				Title        string          `json:"title"`
+				Description  string          `json:"description"`
+				Items        json.RawMessage `json:"items"`
 			} `json:"items"`
 		} `json:"result"`
 	} `json:"tasks"`
 }
 
-// serpSubItem is one entry inside an aggregate block's nested items. Some blocks
-// list objects, others list bare strings — UnmarshalJSON accepts both, treating
-// a string as the title.
 type serpSubItem struct {
 	Title       string `json:"title"`
 	Description string `json:"description"`
@@ -74,14 +65,17 @@ func (s *serpSubItem) UnmarshalJSON(b []byte) error {
 	return json.Unmarshal(b, (*alias)(s))
 }
 
-// subItems decodes a block's nested items, tolerating shapes we don't expect by
-// returning nil rather than failing the whole SERP parse.
-func subItems(raw json.RawMessage) []serpSubItem {
+// parseSubItems distinguishes "no nested data" (empty raw) from "parse failed":
+// the latter is logged so a malformed PAA/featured-snippet section is not
+// silently returned as empty. parseSERPResponse tolerates the dropped items,
+// so DEBUG is the right level.
+func parseSubItems(raw json.RawMessage) []serpSubItem {
 	if len(raw) == 0 {
 		return nil
 	}
 	var out []serpSubItem
 	if err := json.Unmarshal(raw, &out); err != nil {
+		slog.Default().Debug("dataforseo: failed to parse serp subitems", "err", err)
 		return nil
 	}
 	return out
@@ -95,7 +89,7 @@ func (c *RealClient) GetSERP(ctx context.Context, keyword, languageCode string, 
 	payload, err := json.Marshal([]serpRequest{{
 		Keyword:      keyword,
 		LanguageCode: languageCode,
-		LocationCode: 2840, // United States
+		LocationCode: 2840,
 		Device:       "desktop",
 		Depth:        limit,
 	}})
@@ -114,15 +108,14 @@ func (c *RealClient) GetSERP(ctx context.Context, keyword, languageCode string, 
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("dataforseo request: %w", err)
+		return nil, fmt.Errorf("dataforseo request for keyword %q: %w", keyword, err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("dataforseo status %d", resp.StatusCode)
+		return nil, fmt.Errorf("dataforseo api returned status %d for keyword %q", resp.StatusCode, keyword)
 	}
 
-	// Cap the body so a hostile/huge response can't be read fully into memory.
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
 		return nil, fmt.Errorf("read dataforseo response: %w", err)
@@ -130,55 +123,50 @@ func (c *RealClient) GetSERP(ctx context.Context, keyword, languageCode string, 
 	return parseSERPResponse(body, keyword, limit)
 }
 
-// parseSERPResponse decodes a SERP payload and maps it onto CompetitorData.
-// Split out from GetSERP so the (DataForSEO-shape-sensitive) parsing is unit
-// testable without an HTTP round-trip.
 func parseSERPResponse(body []byte, keyword string, limit int) (*articles.CompetitorData, error) {
 	var result serpResponse
 	if err := json.Unmarshal(body, &result); err != nil {
 		return nil, fmt.Errorf("decode dataforseo response: %w", err)
 	}
 
-	data := &articles.CompetitorData{
+	out := &articles.CompetitorData{
 		Keyword:  keyword,
 		SerpDate: time.Now().Format("2006-01-02"),
 		Results:  []articles.SERPItem{},
 	}
 
 	if len(result.Tasks) == 0 || len(result.Tasks[0].Result) == 0 {
-		return data, nil
+		return out, nil
 	}
 
 	for _, item := range result.Tasks[0].Result[0].Items {
 		switch item.Type {
 		case "organic":
-			if len(data.Results) >= limit {
+			if len(out.Results) >= limit {
 				continue
 			}
-			data.Results = append(data.Results, articles.SERPItem{
+			out.Results = append(out.Results, articles.SERPItem{
 				Rank:        item.RankAbsolute,
 				URL:         item.URL,
 				Title:       item.Title,
 				Description: item.Description,
 			})
 		case "people_also_ask":
-			for _, sub := range subItems(item.Items) {
+			for _, sub := range parseSubItems(item.Items) {
 				if sub.Title == "" {
 					continue
 				}
-				data.PAA = append(data.PAA, sub.Title)
+				out.PAA = append(out.PAA, sub.Title)
 			}
 		case "featured_snippet", "answer_box":
-			// DataForSEO nests the snippet text in a child item, not on the
-			// parent block; take the first child that carries a title.
-			if data.FeaturedSnippet != nil {
+			if out.FeaturedSnippet != nil {
 				continue
 			}
-			for _, sub := range subItems(item.Items) {
+			for _, sub := range parseSubItems(item.Items) {
 				if sub.Title == "" {
 					continue
 				}
-				data.FeaturedSnippet = &articles.FeaturedSnippet{
+				out.FeaturedSnippet = &articles.FeaturedSnippet{
 					Title:       sub.Title,
 					Description: sub.Description,
 				}
@@ -187,7 +175,7 @@ func parseSERPResponse(body []byte, keyword string, limit int) (*articles.Compet
 		}
 	}
 
-	return data, nil
+	return out, nil
 }
 
 type MockClient struct{}

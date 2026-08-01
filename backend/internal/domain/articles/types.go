@@ -1,9 +1,12 @@
 package articles
 
-// Usage reports token consumption from a single LLM completion.
 type Usage struct {
 	InputTokens  int `json:"input_tokens"`
 	OutputTokens int `json:"output_tokens"`
+}
+
+func (u Usage) Total() int {
+	return u.InputTokens + u.OutputTokens
 }
 
 type SERPItem struct {
@@ -18,7 +21,6 @@ type FeaturedSnippet struct {
 	Description string `json:"description"`
 }
 
-// CompetitorData is the SERP snapshot a SERPProvider returns for a keyword.
 type CompetitorData struct {
 	Keyword         string           `json:"keyword"`
 	SerpDate        string           `json:"serp_date"`
@@ -27,11 +29,9 @@ type CompetitorData struct {
 	FeaturedSnippet *FeaturedSnippet `json:"featured_snippet,omitempty"`
 }
 
-// Cluster holds the target keywords and H1 a TopicSource resolves for a topic.
-// Empty Keywords with no error means the topic has no row.
 type Cluster struct {
 	Keywords []string
-	Title    string // article H1; when set the LLM must use exact wording
+	Title    string
 }
 
 type CheckResult struct {
@@ -44,11 +44,6 @@ type CheckResult struct {
 	ReportURL        string   `json:"report_url,omitempty"`
 }
 
-// Post is the rendered article handed to a Publisher. Content is opaque
-// payload already in the destination's native body format (HTML for
-// WordPress). SEOTitle/SEODesc are plain-text meta fields the implementation
-// maps to its SEO plugin; they never appear in Content. Status is the
-// CMS-native status string; empty lets the implementation choose.
 type Post struct {
 	Title    string
 	Content  string
@@ -57,8 +52,6 @@ type Post struct {
 	Status   string
 }
 
-// ResolvedImage is what an ImageResolver returns. URL is required; the rest
-// drive the attribution figcaption.
 type ResolvedImage struct {
 	URL             string
 	Photographer    string
@@ -66,10 +59,9 @@ type ResolvedImage struct {
 	SourceURL       string
 }
 
-// RenderStats reports per-render image accounting so callers can persist it.
 type RenderStats struct {
-	ImagesRequested int // [IMG | ...] placeholders the LLM emitted
-	ImagesResolved  int // placeholders that got a real image URL
-	ImagesSkipped   int // benign skip: no resolver, empty URL, or topical skip
-	ImagesFailed    int // Resolve returned a non-nil error
+	ImagesRequested int
+	ImagesResolved  int
+	ImagesSkipped   int
+	ImagesFailed    int
 }

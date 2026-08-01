@@ -1,0 +1,1 @@
+ALTER TABLE backlink_placements ADD COLUMN IF NOT EXISTS link_check TEXT NOT NULL DEFAULT '';

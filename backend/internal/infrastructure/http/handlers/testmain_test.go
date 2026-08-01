@@ -10,9 +10,6 @@ import (
 	"multiagent-seo/internal/testsupport"
 )
 
-// baseConnStr points at the shared container's default database; each HTTP
-// integration test clones an isolated database from the migrated template via
-// testsupport.NewTestDB.
 var baseConnStr string
 
 func TestMain(m *testing.M) {

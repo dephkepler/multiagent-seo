@@ -1,6 +1,3 @@
-// Package jwt is a thin, domain-agnostic wrapper over HS256 JWTs: it signs a
-// subject into a token and parses a token back to its subject. It knows nothing
-// about users or auth — callers map their own identity onto the subject.
 package jwt
 
 import (

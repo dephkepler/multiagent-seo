@@ -60,7 +60,10 @@ func (r *ApiTokenRepository) ListByUser(ctx context.Context, userID uuid.UUID) (
 		}
 		out = append(out, t)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list api tokens: %w", err)
+	}
+	return out, nil
 }
 
 func (r *ApiTokenRepository) UserByHash(ctx context.Context, hash string) (uuid.UUID, error) {

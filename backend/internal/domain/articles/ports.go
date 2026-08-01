@@ -2,40 +2,35 @@ package articles
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 )
 
-// LLMClient is the text-completion provider. maxTokens == 0 means provider default.
 type LLMClient interface {
 	Complete(ctx context.Context, prompt string, maxTokens int) (string, Usage, error)
 }
 
-// LLMFactory resolves an LLMClient for a provider/model chosen per request,
-// supplying the matching API key. Keeps key/provider wiring out of the use-case.
 type LLMFactory interface {
 	ForModel(provider, model string) (LLMClient, error)
 }
 
-// SERPProvider fetches competitor SERP data for a keyword.
 type SERPProvider interface {
 	GetSERP(ctx context.Context, keyword, languageCode string, limit int) (*CompetitorData, error)
 }
 
-// TopicSource resolves the keyword cluster and H1 for a topic.
 type TopicSource interface {
 	Lookup(ctx context.Context, topic string) (Cluster, error)
+	Topics(ctx context.Context) ([]string, error)
+	// Clusters returns every topic's cluster in a single fetch, keyed by
+	// normalized topic, so batch generation avoids one Lookup per topic.
+	Clusters(ctx context.Context) (map[string]Cluster, error)
 }
 
-// ContentChecker scores generated content for AI/plagiarism originality.
 type ContentChecker interface {
 	Check(ctx context.Context, content string) (*CheckResult, error)
 }
 
-// ImageResolver turns an [IMG | ...] placeholder into a real image plus
-// attribution metadata. Implementations must be safe for concurrent use.
-// A Resolve error is non-fatal: callers strip the placeholder and continue.
-// keyword is the article's target keyword so resolvers can build a topical query.
 type ImageResolver interface {
 	Resolve(ctx context.Context, keyword, description, alt string) (ResolvedImage, error)
 }
@@ -45,9 +40,16 @@ type Publisher interface {
 	Publish(ctx context.Context, postID int64) (postURL string, err error)
 }
 
-// PublisherProvider builds a Publisher bound to a specific WordPress site,
-// resolving (and decrypting) that site's credentials. Keeps the application
-// layer from importing the concrete WordPress/credentials infrastructure.
 type PublisherProvider interface {
 	ForSite(ctx context.Context, siteID uuid.UUID) (Publisher, error)
+}
+
+type PromptStore interface {
+	ActiveVariants(ctx context.Context, stage string) ([]PromptVariant, error)
+	InsertVariant(ctx context.Context, v PromptVariant) (int64, error)
+	SetVariantStatus(ctx context.Context, id int64, status VariantStatus) error
+	SaveOutcome(ctx context.Context, o PromptOutcome) error
+	SelectionStats(ctx context.Context, stage string, since time.Time) ([]PromptVariantStat, error)
+	WorstOutcomes(ctx context.Context, variantID int64, since time.Time, limit int) ([]PromptFailure, error)
+	UpdateOutcomeReward(ctx context.Context, articleID int64, stage string, human *float64, weight float64) error
 }

@@ -1,6 +1,3 @@
-// Package apitoken is the use-case for minting, listing, revoking and
-// authenticating per-user API keys. The secret is generated here, returned to
-// the caller once, and only its sha256 hash is handed to the repository.
 package apitoken
 
 import (
@@ -18,7 +15,6 @@ import (
 	domain "multiagent-seo/internal/domain/apitoken"
 )
 
-// keyPrefix tags our keys so the auth middleware can tell an API key from a JWT.
 const keyPrefix = "mas_"
 
 var (
@@ -34,9 +30,6 @@ func NewService(repo domain.Repository) *Service {
 	return &Service{repo: repo}
 }
 
-// Create mints a key for the user and returns the full secret ONCE plus the
-// stored metadata. The secret cannot be retrieved afterwards (only its hash is
-// persisted) — the caller must save it now.
 func (s *Service) Create(ctx context.Context, userID uuid.UUID, name string) (domain.Token, string, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
@@ -66,7 +59,6 @@ func (s *Service) Revoke(ctx context.Context, userID, id uuid.UUID) error {
 	return s.repo.Revoke(ctx, userID, id)
 }
 
-// Authenticate resolves a presented API key to its owning user, or ErrInvalidKey.
 func (s *Service) Authenticate(ctx context.Context, key string) (uuid.UUID, error) {
 	if !HasKeyPrefix(key) {
 		return uuid.Nil, ErrInvalidKey
@@ -81,8 +73,6 @@ func (s *Service) Authenticate(ctx context.Context, key string) (uuid.UUID, erro
 	return uid, nil
 }
 
-// HasKeyPrefix reports whether a bearer value is one of our API keys (vs a JWT),
-// so the verifier can route it to Authenticate instead of JWT parsing.
 func HasKeyPrefix(token string) bool {
 	return strings.HasPrefix(token, keyPrefix)
 }

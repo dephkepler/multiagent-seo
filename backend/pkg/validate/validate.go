@@ -20,9 +20,9 @@ func init() {
 		return name
 	})
 
-	// nonzero_uuid validates that a [16]byte UUID field is not the zero value.
-	// Format correctness is handled upstream by JSON unmarshalling.
-	_ = v.RegisterValidation("nonzero_uuid", func(fl validator.FieldLevel) bool {
+	// A registration failure means the nonzero_uuid tag is silently inert and
+	// every UUID passes — fail loudly at startup rather than bypass validation.
+	if err := v.RegisterValidation("nonzero_uuid", func(fl validator.FieldLevel) bool {
 		field := fl.Field()
 		if field.Kind() != reflect.Array || field.Len() != 16 {
 			return false
@@ -33,7 +33,9 @@ func init() {
 			}
 		}
 		return false
-	})
+	}); err != nil {
+		panic(fmt.Sprintf("register nonzero_uuid validator: %v", err))
+	}
 }
 
 type FieldError struct {
@@ -68,7 +70,6 @@ func Validate(data any) error {
 	}
 	var validationErrs validator.ValidationErrors
 	if !errors.As(errs, &validationErrs) {
-		// *validator.InvalidValidationError — non-struct passed, surface as-is
 		return errs
 	}
 	var fieldErrors []FieldError

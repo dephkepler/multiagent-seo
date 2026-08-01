@@ -12,3 +12,13 @@
 # Root-level env (per-service .env stays under backend/, frontend/, etc.)
 /.env
 /.env.local
+
+# Service docs that embed real secrets — never commit
+/doc/credentials.md
+/doc/
+
+# Prod-local compose override (external volume etc.) — lives only on the server
+devops/compose.override.yaml
+# Editor backups + leftover from the old contentflow deploy layout
+*.save
+/contentflow/

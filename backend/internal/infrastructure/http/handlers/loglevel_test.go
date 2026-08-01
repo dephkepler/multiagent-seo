@@ -18,7 +18,7 @@ import (
 
 func newLogLevelRouter(jwtSvc *jwtauth.Service) http.Handler {
 	healthHandler := handlers.NewHealthHandler(apphealth.NewService(domainhealth.NewService(stubRepo{})))
-	server := handlers.NewServer(healthHandler, handlers.NewWordpressSitesHandler(nil), handlers.NewLoginHandler(nil), handlers.NewArticlesHandler(nil), handlers.NewLinkbuildingHandler(nil, nil), handlers.NewApiTokensHandler(nil))
+	server := handlers.NewServer(healthHandler, handlers.NewWordpressSitesHandler(nil), handlers.NewLoginHandler(nil), handlers.NewArticlesHandler(nil), handlers.NewLinkbuildingHandler(nil), handlers.NewApiTokensHandler(nil), handlers.NewEmailScrapeHandler(nil))
 	return apihttp.NewRouter(
 		config.ServerConfig{BasePath: "/", CORSAllowedOrigins: []string{"http://localhost:3000"}},
 		server,
@@ -31,8 +31,6 @@ func TestDebugLogLevel_RequiresAuth(t *testing.T) {
 	srv := httptest.NewServer(newLogLevelRouter(jwtSvc))
 	defer srv.Close()
 
-	// Without a token the runtime log-level route must reject (it can amplify
-	// sensitive output), not silently pass through.
 	for _, m := range []string{http.MethodGet, http.MethodPut} {
 		req, _ := http.NewRequest(m, srv.URL+"/debug/log-level", nil)
 		resp, err := http.DefaultClient.Do(req)
@@ -45,8 +43,6 @@ func TestDebugLogLevel_RequiresAuth(t *testing.T) {
 		}
 	}
 
-	// With a valid token the route resolves (200, not 404) — proves it's gated,
-	// not absent.
 	token, _, err := jwtSvc.Issue(context.Background(), "user-1")
 	if err != nil {
 		t.Fatalf("issue token: %v", err)

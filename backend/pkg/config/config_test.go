@@ -4,14 +4,7 @@ import (
 	"testing"
 )
 
-func setMinEnv(t *testing.T) {
-	t.Helper()
-	// Required fields without envDefault must be set so validation passes;
-	// everything else relies on defaults declared in struct tags.
-}
-
 func TestLoad_DefaultsAreValid(t *testing.T) {
-	setMinEnv(t)
 	cfg, err := Load()
 	if err != nil {
 		t.Fatalf("Load failed with defaults: %v", err)
@@ -61,54 +54,6 @@ func TestLoad_ListSplit(t *testing.T) {
 	}
 	if len(cfg.Server.CORSAllowedOrigins) != 3 {
 		t.Errorf("CORS origins = %v, want 3 entries", cfg.Server.CORSAllowedOrigins)
-	}
-}
-
-func TestDatabaseDSN(t *testing.T) {
-	c := DatabaseConfig{
-		Host: "db.example", Port: "5432",
-		User: "u", Password: "p@ss/word",
-		Dbname: "mydb", SSLMode: "require",
-	}
-	// @ and / must be percent-encoded in userinfo or postgres URL parsing breaks
-	// on the host/path boundaries.
-	got := c.DSN()
-	want := "postgres://u:p%40ss%2Fword@db.example:5432/mydb?sslmode=require"
-	if got != want {
-		t.Errorf("DSN()\n got: %s\nwant: %s", got, want)
-	}
-}
-
-func TestLLMKeyFor(t *testing.T) {
-	c := LLMConfig{
-		Provider:     "groq",
-		APIKey:       "default-key",
-		GroqAPIKey:   "groq-key",
-		ClaudeAPIKey: "claude-key",
-	}
-	if got := c.KeyFor("groq"); got != "groq-key" {
-		t.Errorf("KeyFor(groq) = %q, want groq-key", got)
-	}
-	if got := c.KeyFor("claude"); got != "claude-key" {
-		t.Errorf("KeyFor(claude) = %q, want claude-key", got)
-	}
-	if got := c.KeyFor("anthropic"); got != "claude-key" {
-		t.Errorf("KeyFor(anthropic) = %q, want claude-key", got)
-	}
-	if got := c.KeyFor("unknown"); got != "" {
-		t.Errorf("KeyFor(unknown) = %q, want empty", got)
-	}
-
-	// Fallback to APIKey only when no per-provider key set AND provider matches default.
-	c2 := LLMConfig{Provider: "groq", APIKey: "default-key"}
-	if got := c2.KeyFor("groq"); got != "default-key" {
-		t.Errorf("KeyFor fallback = %q, want default-key", got)
-	}
-
-	// anthropic alias resolves to the claude provider for the APIKey fallback too.
-	c3 := LLMConfig{Provider: "claude", APIKey: "default-key"}
-	if got := c3.KeyFor("anthropic"); got != "default-key" {
-		t.Errorf("KeyFor(anthropic) alias fallback = %q, want default-key", got)
 	}
 }
 

@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
 import { Button } from '@/components/ui/button'
@@ -13,7 +13,6 @@ interface GenerateRequest {
   keyword: string
   site_id: string
   provider?: string
-  model?: string
   language?: string
   min_words?: number
   max_words?: number
@@ -22,13 +21,6 @@ interface GenerateRequest {
   ai_threshold?: number
   auto_publish?: boolean
   include_images?: boolean
-}
-
-// Each provider has its own model namespace, so we pick a sensible default per
-// provider transparently — the user only chooses the provider.
-const modelByProvider: Record<string, string> = {
-  groq: 'llama-3.3-70b-versatile',
-  claude: 'claude-haiku-4-5-20251001',
 }
 
 interface WordpressSite {
@@ -47,10 +39,33 @@ interface Article {
   updated_at?: string
   wp_edit_url?: string
   wp_post_id?: number
+  human_rating?: boolean | null
 }
+
+interface ArticleDetail extends Article {
+  published_at?: string
+  ai_score?: number
+  reward?: number
+  quality_ok?: boolean
+  humanize_cycles?: number
+  tokens?: number
+  images_requested?: number
+  images_resolved?: number
+  images_skipped?: number
+  request_params?: Record<string, any>
+  check_result?: Record<string, any>
+}
+
+// Статусы, после которых статья больше не меняется — на них опрос /articles можно остановить.
+const TERMINAL_STATUSES = ['draft', 'published', 'failed']
 
 export default function GeneratePage() {
   const qc = useQueryClient()
+  const [page, setPage] = useState(0)
+  const [pageSize, setPageSize] = useState(25)
+  const [massMode, setMassMode] = useState(false)
+  const [count, setCount] = useState(30)
+  const [infoId, setInfoId] = useState<number | null>(null)
   const [form, setForm] = useState<GenerateRequest>({
     keyword: '',
     site_id: '',
@@ -71,7 +86,6 @@ export default function GeneratePage() {
   })
   const siteOptions = (sites.data || []).filter((s) => s.enabled)
 
-  // Default the site to the first enabled one once loaded, so the form is valid.
   useEffect(() => {
     if (!form.site_id && siteOptions.length > 0) {
       setForm((f) => ({ ...f, site_id: siteOptions[0].id }))
@@ -79,18 +93,27 @@ export default function GeneratePage() {
   }, [siteOptions, form.site_id])
 
   const articles = useQuery({
-    queryKey: ['articles'],
-    queryFn: () => api<Article[] | { items: Article[] }>('/articles'),
-    refetchInterval: 5_000,
+    queryKey: ['articles', page, pageSize],
+    queryFn: () => api<{ items: Article[]; total: number }>(`/articles?limit=${pageSize}&offset=${page * pageSize}`),
+    refetchInterval: (query) => {
+      const list = query.state.data?.items || []
+      const busy = list.some((a) => !TERMINAL_STATUSES.includes(a.status))
+      return busy ? 5_000 : false
+    },
+    // Idle articles never change on their own; mutations invalidate explicitly
+    // and the busy-poll above covers generations. Without this the 1s elapsed
+    // timer's re-renders trip the global 30s staleTime into background refetches.
+    staleTime: Infinity,
+    placeholderData: keepPreviousData,
   })
-  const items: Article[] = Array.isArray(articles.data) ? articles.data : (articles.data as any)?.items || []
+  const items: Article[] = articles.data?.items || []
+  const total = articles.data?.total || 0
+  const totalPages = Math.max(1, Math.ceil(total / pageSize))
+  const busy = items.some((a) => !TERMINAL_STATUSES.includes(a.status))
 
   const create = useMutation({
-    mutationFn: (body: GenerateRequest) => {
-      const provider = body.provider || 'groq'
-      const withModel = { ...body, model: modelByProvider[provider] || body.model }
-      return api<{ article_id: string }>('/generate', { method: 'POST', body: JSON.stringify(withModel) })
-    },
+    mutationFn: (body: GenerateRequest) =>
+      api<{ article_id: string }>('/generate', { method: 'POST', body: JSON.stringify(body) }),
     onSuccess: () => {
       toast.success('Queued')
       qc.invalidateQueries({ queryKey: ['articles'] })
@@ -107,12 +130,46 @@ export default function GeneratePage() {
     onError: (e: Error) => toast.error(e.message),
   })
 
-  // 1s tick so the "refreshed Ns ago" label and live elapsed values move.
+  const rate = useMutation({
+    mutationFn: ({ id, rating }: { id: number; rating: 'like' | 'dislike' | 'none' }) =>
+      api(`/articles/${id}/rating`, { method: 'POST', body: JSON.stringify({ rating }) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['articles'] }),
+    onError: (e: Error) => toast.error(e.message),
+  })
+
+  const batch = useMutation({
+    mutationFn: (body: { count: number } & Partial<GenerateRequest>) =>
+      api<{ count: number; article_ids: number[] }>('/generate/batch', { method: 'POST', body: JSON.stringify(body) }),
+    onSuccess: (res) => {
+      toast.success(`Queued ${res.count} articles`)
+      qc.invalidateQueries({ queryKey: ['articles'] })
+    },
+    onError: (e: Error) => toast.error(e.message),
+  })
+
+  const detail = useQuery({
+    queryKey: ['article', infoId],
+    queryFn: () => api<ArticleDetail>(`/articles/${infoId}`),
+    enabled: infoId != null,
+    staleTime: 0,
+    refetchOnMount: 'always',
+  })
+
+  useEffect(() => {
+    if (infoId == null) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setInfoId(null)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [infoId])
+
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
+    if (!busy) return
     const t = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(t)
-  }, [])
+  }, [busy])
 
   const sitesById = new Map((sites.data || []).map((s) => [s.id, s]))
 
@@ -123,16 +180,44 @@ export default function GeneratePage() {
   return (
     <div className='space-y-6'>
       <Card>
+        <div className='mb-4 flex items-center gap-2 text-sm'>
+          <button
+            type='button'
+            onClick={() => setMassMode(false)}
+            className={`rounded px-3 py-1 ${!massMode ? 'bg-sky-100 text-sky-800 font-medium' : 'text-gray-500 hover:bg-gray-100'}`}
+          >
+            Single
+          </button>
+          <button
+            type='button'
+            onClick={() => setMassMode(true)}
+            className={`rounded px-3 py-1 ${massMode ? 'bg-sky-100 text-sky-800 font-medium' : 'text-gray-500 hover:bg-gray-100'}`}
+          >
+            Mass
+          </button>
+        </div>
         <form
           onSubmit={(e) => {
             e.preventDefault()
-            create.mutate(form)
+            if (massMode) {
+              const { keyword, ...shared } = form
+              const n = Math.max(1, Math.min(100, Math.floor(count) || 1))
+              batch.mutate({ count: n, ...shared })
+            } else {
+              create.mutate(form)
+            }
           }}
           className='grid grid-cols-1 gap-4 md:grid-cols-3 lg:grid-cols-5'
         >
-          <Field label='Keyword' className='md:col-span-2'>
-            <Input value={form.keyword} onChange={(e) => on('keyword', e.target.value)} required />
-          </Field>
+          {massMode ? (
+            <Field label='Number of articles' className='md:col-span-2'>
+              <Input type='number' min={1} max={100} value={count} onChange={(e) => setCount(+e.target.value)} required />
+            </Field>
+          ) : (
+            <Field label='Keyword' className='md:col-span-2'>
+              <Input value={form.keyword} onChange={(e) => on('keyword', e.target.value)} required />
+            </Field>
+          )}
           <Field label='Site' className='md:col-span-2'>
             <Select value={form.site_id} onChange={(e) => on('site_id', e.target.value)} required disabled={sites.isLoading}>
               {siteOptions.length === 0 && <option value=''>{sites.isLoading ? 'Loading…' : 'No sites configured'}</option>}
@@ -183,8 +268,8 @@ export default function GeneratePage() {
             </Select>
           </Field>
           <div className='md:col-span-3 lg:col-span-5 flex justify-center pt-2'>
-            <Button type='submit' disabled={create.isPending} className='px-10'>
-              {create.isPending ? 'Queuing…' : 'Create'}
+            <Button type='submit' disabled={create.isPending || batch.isPending} className='px-10'>
+              {massMode ? (batch.isPending ? 'Queuing…' : `Generate ${count}`) : create.isPending ? 'Queuing…' : 'Create'}
             </Button>
           </div>
         </form>
@@ -193,10 +278,19 @@ export default function GeneratePage() {
       <Card>
         <div className='mb-4 flex items-center justify-between'>
           <h2 className='text-base font-semibold'>Articles</h2>
-          <div className='flex items-center gap-3'>
-            <span className='text-xs text-gray-500'>
-              {articles.dataUpdatedAt ? `refreshed ${fmtAgo(now, articles.dataUpdatedAt)}` : '—'}
-            </span>
+          <div className='flex items-center gap-2'>
+            <select
+              value={pageSize}
+              onChange={(e) => {
+                setPageSize(+e.target.value)
+                setPage(0)
+              }}
+              className='rounded border border-gray-200 px-2 py-1 text-sm'
+            >
+              <option value={25}>25 / page</option>
+              <option value={50}>50 / page</option>
+              <option value={100}>100 / page</option>
+            </select>
             <Button variant='secondary' size='sm' onClick={() => articles.refetch()}>
               Refresh
             </Button>
@@ -212,24 +306,29 @@ export default function GeneratePage() {
                 <th className='py-2 pr-4'>Status</th>
                 <th className='py-2 pr-4'>Created</th>
                 <th className='py-2 pr-4'>Elapsed</th>
+                <th className='py-2 pr-4'>Rating</th>
                 <th className='py-2'>WordPress</th>
               </tr>
             </thead>
             <tbody>
               {items.length === 0 && (
                 <tr>
-                  <td colSpan={7} className='py-6 text-center text-gray-400'>
+                  <td colSpan={8} className='py-6 text-center text-gray-400'>
                     {articles.isLoading ? 'Loading…' : 'No articles yet'}
                   </td>
                 </tr>
               )}
               {items.map((a) => {
                 const site = a.site_id ? sitesById.get(a.site_id) : undefined
-                const terminal = ['draft', 'published', 'failed'].includes(a.status)
+                const terminal = TERMINAL_STATUSES.includes(a.status)
                 const elapsed = fmtElapsed(a.created_at, a.updated_at, now, terminal)
                 return (
                   <tr key={String(a.id)} className='border-t border-gray-100'>
-                    <td className='py-2 pr-4 text-gray-500'>{a.id}</td>
+                    <td className='py-2 pr-4'>
+                      <button onClick={() => setInfoId(a.id)} className='text-sky-700 hover:underline' title='Info'>
+                        {a.id}
+                      </button>
+                    </td>
                     <td className='py-2 pr-4'>{a.keyword}</td>
                     <td className='py-2 pr-4 text-gray-500'>{site?.alias || '—'}</td>
                     <td className='py-2 pr-4'>
@@ -237,6 +336,9 @@ export default function GeneratePage() {
                     </td>
                     <td className='py-2 pr-4 text-gray-500'>{new Date(a.created_at).toLocaleString()}</td>
                     <td className='py-2 pr-4 text-gray-500'>{elapsed}</td>
+                    <td className='py-2 pr-4'>
+                      <RatingButtons rating={a.human_rating} onRate={(r) => rate.mutate({ id: a.id, rating: r })} disabled={rate.isPending} />
+                    </td>
                     <td className='py-2'>
                       <WpActions article={a} siteUrl={site?.url} onPublish={(id) => publish.mutate(id)} publishing={publish.isPending} />
                     </td>
@@ -246,7 +348,106 @@ export default function GeneratePage() {
             </tbody>
           </table>
         </div>
+        <div className='mt-4 flex items-center justify-between text-sm text-gray-500'>
+          <span>{total} total</span>
+          <div className='flex items-center gap-3'>
+            <button
+              onClick={() => setPage((p) => Math.max(0, p - 1))}
+              disabled={page === 0}
+              className='hover:underline disabled:opacity-40'
+            >
+              ← Prev
+            </button>
+            <span>
+              Page {page + 1} / {totalPages}
+            </span>
+            <button
+              onClick={() => setPage((p) => p + 1)}
+              disabled={page + 1 >= totalPages}
+              className='hover:underline disabled:opacity-40'
+            >
+              Next →
+            </button>
+          </div>
+        </div>
       </Card>
+
+      {infoId != null && (
+        <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4' onClick={() => setInfoId(null)}>
+          <div
+            className='max-h-[85vh] w-full max-w-2xl overflow-auto rounded-lg bg-white p-6 shadow-xl'
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className='mb-4 flex items-center justify-between'>
+              <h3 className='text-base font-semibold'>Article #{infoId}</h3>
+              <button onClick={() => setInfoId(null)} className='text-gray-400 hover:text-gray-700'>
+                ✕
+              </button>
+            </div>
+            {detail.isLoading ? (
+              <p className='text-gray-400'>Loading…</p>
+            ) : detail.data ? (
+              <InfoBody a={detail.data} />
+            ) : (
+              <p className='text-rose-600'>Failed to load</p>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function InfoBody({ a }: { a: ArticleDetail }) {
+  const rp = a.request_params || {}
+  const flagged: string[] = (a.check_result?.sentences_flagged as string[]) || []
+  const Row = ({ k, v }: { k: string; v: React.ReactNode }) =>
+    v == null || v === '' ? null : (
+      <div className='flex justify-between gap-4 border-b border-gray-50 py-1'>
+        <span className='text-gray-500'>{k}</span>
+        <span className='text-right'>{v}</span>
+      </div>
+    )
+  return (
+    <div className='space-y-4 text-sm'>
+      <section>
+        <h4 className='mb-1 font-medium text-gray-700'>Overview</h4>
+        <Row k='Keyword' v={a.keyword} />
+        <Row k='Status' v={a.status} />
+        <Row k='Created' v={new Date(a.created_at).toLocaleString()} />
+        <Row k='Published' v={a.published_at ? new Date(a.published_at).toLocaleString() : '—'} />
+        <Row k='Rating' v={a.human_rating == null ? '—' : a.human_rating ? '👍' : '👎'} />
+      </section>
+      <section>
+        <h4 className='mb-1 font-medium text-gray-700'>Metrics</h4>
+        <Row k='AI score' v={a.ai_score == null ? undefined : a.ai_score.toFixed(2)} />
+        <Row k='Reward' v={a.reward == null ? undefined : a.reward.toFixed(2)} />
+        <Row k='Quality floor' v={a.quality_ok == null ? '—' : a.quality_ok ? 'pass' : 'fail'} />
+        <Row k='Humanize cycles' v={a.humanize_cycles} />
+        <Row k='Tokens' v={a.tokens} />
+        <Row k='Images' v={`${a.images_resolved ?? 0}/${a.images_requested ?? 0} (skipped ${a.images_skipped ?? 0})`} />
+      </section>
+      <section>
+        <h4 className='mb-1 font-medium text-gray-700'>Settings</h4>
+        <Row k='Provider' v={rp.provider} />
+        <Row k='Model' v={rp.model} />
+        <Row k='Words' v={rp.min_words && rp.max_words ? `${rp.min_words}–${rp.max_words}` : null} />
+        <Row k='Max tokens' v={rp.max_tokens} />
+        <Row k='Cycles' v={rp.max_cycles} />
+        <Row k='AI threshold' v={rp.ai_threshold} />
+        <Row k='Language' v={rp.language} />
+        <Row k='Auto-publish' v={rp.auto_publish == null ? null : rp.auto_publish ? 'yes' : 'no'} />
+      </section>
+      {flagged.length > 0 && (
+        <section>
+          <h4 className='mb-1 font-medium text-gray-700'>Flagged sentences</h4>
+          <ul className='list-disc space-y-1 pl-5 text-gray-600'>
+            {flagged.map((s, i) => (
+              <li key={i}>{s}</li>
+            ))}
+          </ul>
+        </section>
+      )}
     </div>
   )
 }
@@ -265,12 +466,6 @@ function fmtElapsed(start: string, end: string | undefined, now: number, termina
   const s = Math.max(0, Math.floor((endMs - new Date(start).getTime()) / 1000))
   if (s < 60) return `${s}s`
   return `${Math.floor(s / 60)}m ${s % 60}s`
-}
-
-function fmtAgo(now: number, t: number): string {
-  const s = Math.max(0, Math.floor((now - t) / 1000))
-  if (s < 60) return `${s}s ago`
-  return `${Math.floor(s / 60)}m ${s % 60}s ago`
 }
 
 function WpActions({
@@ -308,6 +503,37 @@ function WpActions({
           publish
         </button>
       )}
+    </span>
+  )
+}
+
+function RatingButtons({
+  rating,
+  onRate,
+  disabled,
+}: {
+  rating?: boolean | null
+  onRate: (rating: 'like' | 'dislike' | 'none') => void
+  disabled: boolean
+}) {
+  return (
+    <span className='space-x-1 text-base'>
+      <button
+        onClick={() => onRate(rating === true ? 'none' : 'like')}
+        disabled={disabled}
+        title={rating === true ? 'Remove like' : 'Like'}
+        className={`transition ${rating === true ? 'opacity-100' : 'opacity-30 hover:opacity-100'} disabled:opacity-20`}
+      >
+        👍
+      </button>
+      <button
+        onClick={() => onRate(rating === false ? 'none' : 'dislike')}
+        disabled={disabled}
+        title={rating === false ? 'Remove dislike' : 'Dislike'}
+        className={`transition ${rating === false ? 'opacity-100' : 'opacity-30 hover:opacity-100'} disabled:opacity-20`}
+      >
+        👎
+      </button>
     </span>
   )
 }
