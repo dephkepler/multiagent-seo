@@ -1,0 +1,2 @@
+ALTER TABLE leads DROP COLUMN IF EXISTS client_id;
+DROP TABLE IF EXISTS clients;

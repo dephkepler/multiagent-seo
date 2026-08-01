@@ -73,6 +73,26 @@ type WorkerConfig struct {
 	PollInterval time.Duration `env:"WORKER_POLL_INTERVAL" envDefault:"60s"`
 }
 
+type LeadsSheetsConfig struct {
+	SpreadsheetID string `env:"LEADS_SHEETS_SPREADSHEET_ID"`
+	Sheet         string `env:"LEADS_SHEETS_SHEET" envDefault:"customers"`
+}
+
+type TelegramConfig struct {
+	BotToken     string  `env:"TELEGRAM_BOT_TOKEN"`
+	ChatID       int64   `env:"TELEGRAM_CHAT_ID"`
+	PaymentCard  string  `env:"TELEGRAM_PAYMENT_CARD"`
+	AllowedUsers []int64 `env:"TELEGRAM_ALLOWED_USERS" envSeparator:","`
+}
+
+type MailConfig struct {
+	IMAPHost string `env:"MAIL_IMAP_HOST"`
+	IMAPPort int    `env:"MAIL_IMAP_PORT" envDefault:"993"`
+	Username string `env:"MAIL_USERNAME"`
+	Password string `env:"MAIL_PASSWORD"`
+	Folder   string `env:"MAIL_FOLDER" envDefault:"INBOX"`
+}
+
 type ArticleConfig struct {
 	Language   string `env:"ARTICLE_LANGUAGE" envDefault:"ru"`
 	MinWords   int    `env:"ARTICLE_MIN_WORDS" envDefault:"1500"`
@@ -135,6 +155,9 @@ type Config struct {
 	Prompt       PromptConfig
 	LinkBuilding LinkBuildingConfig
 	EmailScrape  EmailScrapeConfig
+	Mail         MailConfig
+	Telegram     TelegramConfig
+	LeadsSheets  LeadsSheetsConfig
 }
 
 type PromptConfig struct {

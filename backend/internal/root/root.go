@@ -56,6 +56,8 @@ func Run(ctx context.Context, cfg config.Config) error {
 	articlesSvc, evolveSvc, articlesRunner := buildArticles(ctx, cfg, slogLog, pool, wordpressRepo)
 	linkbuildingBacklinkSvc, lbRunner := buildLinkbuilding(ctx, cfg, slogLog, pool, wordpressRepo)
 	emailScrapeSvc, emailRunner := buildEmailScrape(ctx, cfg, slogLog, pool)
+	leadsSvc := buildLeads(ctx, cfg, slogLog, pool)
+	adminBot := buildAdminBot(cfg, slogLog)
 
 	healthSvc := apphealth.NewService(domainhealth.NewService(healthRepo))
 	server := handlers.NewServer(
@@ -71,6 +73,12 @@ func Run(ctx context.Context, cfg config.Config) error {
 	schedule(ctx, cfg.Prompt.PromoteInterval, evolveSvc.PromotePrompts)
 	if cfg.Prompt.EvolveEnabled {
 		schedule(ctx, cfg.Prompt.EvolveInterval, evolveSvc.GenerateCandidate)
+	}
+	if leadsSvc != nil {
+		schedule(ctx, cfg.Worker.PollInterval, leadsSvc.ProcessNewLeads)
+	}
+	if adminBot != nil {
+		go adminBot.Run(ctx)
 	}
 
 	var verifier domainauth.TokenVerifier = compositeVerifier{jwt: jwtSvc, keys: apiTokenSvc}
