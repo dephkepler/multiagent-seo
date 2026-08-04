@@ -8,7 +8,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
     ports:
-      - "${POSTGRES_HOST_PORT}:5432"
+      - "127.0.0.1:${POSTGRES_HOST_PORT}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -17,46 +17,23 @@ services:
       timeout: 3s
       retries: 20
 
-  # Migrations are applied separately (host: `make migrate-up`), not as a compose
-  # service — matches the reference, whose compose holds only infra services.
   app:
     build:
       context: ../backend
       dockerfile: ../devops/docker/backend.Dockerfile
     ports:
       - "${APP_HOST_PORT}:8080"
+    env_file:
+      - ../backend/.env
     environment:
-      # 0.0.0.0 so the server is reachable from the host through the port map;
-      # the localhost default would only bind inside the container.
+      # Container overrides — the host values in .env don't apply inside the compose network.
       CF_APP_HOST: "0.0.0.0"
       CF_DB_HOST: postgres
       CF_DB_PORT: "5432"
       CF_DB_USER: ${POSTGRES_USER}
       CF_DB_PASSWORD: ${POSTGRES_PASSWORD}
       CF_DB_NAME: ${POSTGRES_DB}
-      # Generation secrets — sourced from devops/.env (gitignored). Unset vars
-      # fall back to the app's config defaults / mock adapters.
-      CF_LLM_PROVIDER: ${CF_LLM_PROVIDER:-groq}
-      CF_LLM_MODEL: ${CF_LLM_MODEL:-llama-3.3-70b-versatile}
-      CF_LLM_API_KEY: ${CF_LLM_API_KEY:-}
-      CF_LLM_GROQ_API_KEY: ${CF_LLM_GROQ_API_KEY:-}
-      CF_LLM_CLAUDE_API_KEY: ${CF_LLM_CLAUDE_API_KEY:-}
-      CF_DATAFORSEO_LOGIN: ${CF_DATAFORSEO_LOGIN:-}
-      CF_DATAFORSEO_PASSWORD: ${CF_DATAFORSEO_PASSWORD:-}
-      CF_SHEETS_SPREADSHEET_ID: ${CF_SHEETS_SPREADSHEET_ID:-}
       CF_SHEETS_CREDENTIALS_FILE: /app/credentials.json
-      # Keyword-cluster tab layout — defaults match the prod sheet ("casino2"
-      # tab, topic in A, keywords in B, title in C, with a header row).
-      CF_SHEETS_SHEET: ${CF_SHEETS_SHEET:-casino2}
-      CF_SHEETS_TOPIC_COLUMN: ${CF_SHEETS_TOPIC_COLUMN:-A}
-      CF_SHEETS_KEYWORD_COLUMN: ${CF_SHEETS_KEYWORD_COLUMN:-B}
-      CF_SHEETS_TITLE_COLUMN: ${CF_SHEETS_TITLE_COLUMN:-C}
-      CF_SHEETS_HEADER_ROW: ${CF_SHEETS_HEADER_ROW:-true}
-      CF_CHECKER_PROVIDER: ${CF_CHECKER_PROVIDER:-mock}
-      CF_CHECKER_API_KEY: ${CF_CHECKER_API_KEY:-}
-      CF_CHECKER_MODEL: ${CF_CHECKER_MODEL:-}
-      CF_PEXELS_API_KEY: ${CF_PEXELS_API_KEY:-}
-      CF_JWT_TTL: ${CF_JWT_TTL:-24h}
     volumes:
       # Google service-account creds for the Sheets adapters (read-only mount).
       - ../backend/credentials.json:/app/credentials.json:ro
@@ -69,8 +46,6 @@ services:
       context: ../frontend
       dockerfile: ../devops/docker/frontend.Dockerfile
       args:
-        # Browser-bound: the URL the user's browser uses to hit the backend, not
-        # the in-cluster Docker hostname. Override per environment.
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:${APP_HOST_PORT}}
     ports:
       - "${FRONTEND_HOST_PORT:-3000}:3000"
@@ -79,3 +54,4 @@ services:
 
 volumes:
   postgres_data:
+    name: contentflow_postgres_data

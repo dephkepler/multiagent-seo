@@ -1,14 +1,7 @@
-// Package config loads application configuration from environment variables.
-//
-// All variables share the CF_ prefix (e.g. CF_DB_HOST). Defaults declared in
-// envDefault tags target a local docker-compose dev setup; real deployments
-// override via the runtime environment.
 package config
 
 import (
 	"fmt"
-	"net/url"
-	"strings"
 	"time"
 
 	"github.com/caarlos0/env/v10"
@@ -19,44 +12,30 @@ import (
 const envPrefix = "CF_"
 
 type ServerConfig struct {
-	Port                 string        `env:"APP_PORT" envDefault:"8080" validate:"required"`
-	Host                 string        `env:"APP_HOST" envDefault:"localhost" validate:"required"`
-	BasePath             string        `env:"APP_BASE_PATH" envDefault:"/"`
-	CORSAllowedOrigins   []string      `env:"APP_CORS_ALLOWED_ORIGINS" envDefault:"http://localhost:3000" envSeparator:","`
-	ReadTimeout          time.Duration `env:"APP_READ_TIMEOUT" envDefault:"10s"`
-	WriteTimeout         time.Duration `env:"APP_WRITE_TIMEOUT" envDefault:"5m"`
-	ShutdownWaitTimeout  time.Duration `env:"APP_SHUTDOWN_WAIT_TIMEOUT" envDefault:"30s"`
-	BackgroundJobTimeout time.Duration `env:"APP_BACKGROUND_JOB_TIMEOUT" envDefault:"15m"`
+	Port                     string        `env:"APP_PORT" envDefault:"8080" validate:"required"`
+	Host                     string        `env:"APP_HOST" envDefault:"localhost" validate:"required"`
+	BasePath                 string        `env:"APP_BASE_PATH" envDefault:"/"`
+	CORSAllowedOrigins       []string      `env:"APP_CORS_ALLOWED_ORIGINS" envDefault:"http://localhost:3000" envSeparator:","`
+	ReadTimeout              time.Duration `env:"APP_READ_TIMEOUT" envDefault:"10s"`
+	WriteTimeout             time.Duration `env:"APP_WRITE_TIMEOUT" envDefault:"5m"`
+	ShutdownWaitTimeout      time.Duration `env:"APP_SHUTDOWN_WAIT_TIMEOUT" envDefault:"30s"`
+	BackgroundJobTimeout     time.Duration `env:"APP_BACKGROUND_JOB_TIMEOUT" envDefault:"60m"`
+	BackgroundJobConcurrency int           `env:"APP_BACKGROUND_JOB_CONCURRENCY" envDefault:"3"`
 }
 
-// LoggerConfig controls log verbosity. Level is the initial value; it can be
-// changed at runtime via the admin log-level endpoint. Output is always JSON.
 type LoggerConfig struct {
 	Level string `env:"LOG_LEVEL" envDefault:"info" validate:"required"`
 }
 
 type DatabaseConfig struct {
-	Host          string `env:"DB_HOST" envDefault:"localhost" validate:"required"`
-	Port          string `env:"DB_PORT" envDefault:"5432" validate:"required"`
-	User          string `env:"DB_USER" envDefault:"postgres" validate:"required"`
-	Password      string `env:"DB_PASSWORD" envDefault:"postgres" validate:"required"`
-	Dbname        string `env:"DB_NAME" envDefault:"contentflow" validate:"required"`
-	SSLMode       string `env:"DB_SSLMODE" envDefault:"disable" validate:"required"`
-	MigrationsDir string `env:"MIGRATIONS_DIR" envDefault:"migrations"`
-}
+	Host     string `env:"DB_HOST" envDefault:"localhost" validate:"required"`
+	Port     string `env:"DB_PORT" envDefault:"5432" validate:"required"`
+	User     string `env:"DB_USER" envDefault:"postgres" validate:"required"`
+	Password string `env:"DB_PASSWORD" envDefault:"postgres" validate:"required"`
+	Dbname   string `env:"DB_NAME" envDefault:"contentflow" validate:"required"`
+	SSLMode  string `env:"DB_SSLMODE" envDefault:"disable" validate:"required"`
 
-// DSN builds a libpq/pgx-compatible connection string.
-func (c DatabaseConfig) DSN() string {
-	u := url.URL{
-		Scheme: "postgres",
-		User:   url.UserPassword(c.User, c.Password),
-		Host:   c.Host + ":" + c.Port,
-		Path:   c.Dbname,
-	}
-	q := u.Query()
-	q.Set("sslmode", c.SSLMode)
-	u.RawQuery = q.Encode()
-	return u.String()
+	MigrationsDir string `env:"MIGRATIONS_DIR" envDefault:"migrations"`
 }
 
 type SentryConfig struct {
@@ -67,39 +46,17 @@ type SentryConfig struct {
 }
 
 type LLMConfig struct {
-	Provider     string `env:"LLM_PROVIDER" envDefault:"groq"`
-	APIKey       string `env:"LLM_API_KEY"`
-	Model        string `env:"LLM_MODEL" envDefault:"llama-3.3-70b-versatile"`
-	GroqAPIKey   string `env:"LLM_GROQ_API_KEY"`
-	ClaudeAPIKey string `env:"LLM_CLAUDE_API_KEY"`
-}
-
-// normalizeProvider collapses the "anthropic" alias onto "claude" so both
-// names resolve to the same key, including the generic-APIKey fallback.
-func normalizeProvider(s string) string {
-	s = strings.ToLower(strings.TrimSpace(s))
-	if s == "anthropic" {
-		return "claude"
-	}
-	return s
-}
-
-func (c LLMConfig) KeyFor(provider string) string {
-	p := normalizeProvider(provider)
-	switch p {
-	case "groq":
-		if c.GroqAPIKey != "" {
-			return c.GroqAPIKey
-		}
-	case "claude":
-		if c.ClaudeAPIKey != "" {
-			return c.ClaudeAPIKey
-		}
-	}
-	if p == normalizeProvider(c.Provider) {
-		return c.APIKey
-	}
-	return ""
+	Provider           string `env:"LLM_PROVIDER" envDefault:"groq"`
+	APIKey             string `env:"LLM_API_KEY"`
+	Model              string `env:"LLM_MODEL" envDefault:"llama-3.3-70b-versatile"`
+	GroqAPIKey         string `env:"LLM_GROQ_API_KEY"`
+	ClaudeAPIKey       string `env:"LLM_CLAUDE_API_KEY"`
+	QualifyProvider    string `env:"LLM_QUALIFY_PROVIDER"`
+	QualifyModel       string `env:"LLM_QUALIFY_MODEL"`
+	BacklinkProvider   string `env:"LLM_BACKLINK_PROVIDER"`
+	BacklinkModel      string `env:"LLM_BACKLINK_MODEL"`
+	GroqDefaultModel   string `env:"LLM_GROQ_DEFAULT_MODEL"   envDefault:"llama-3.3-70b-versatile"`
+	ClaudeDefaultModel string `env:"LLM_CLAUDE_DEFAULT_MODEL" envDefault:"claude-haiku-4-5"`
 }
 
 type SheetsConfig struct {
@@ -108,12 +65,38 @@ type SheetsConfig struct {
 	Sheet           string `env:"SHEETS_SHEET" envDefault:"Keywords"`
 	TopicColumn     string `env:"SHEETS_TOPIC_COLUMN" envDefault:"A"`
 	KeywordColumn   string `env:"SHEETS_KEYWORD_COLUMN" envDefault:"B"`
-	TitleColumn     string `env:"SHEETS_TITLE_COLUMN" envDefault:"C"` // empty disables suggested-title lookup
+	TitleColumn     string `env:"SHEETS_TITLE_COLUMN" envDefault:"C"`
 	HeaderRow       bool   `env:"SHEETS_HEADER_ROW" envDefault:"true"`
 }
 
 type WorkerConfig struct {
 	PollInterval time.Duration `env:"WORKER_POLL_INTERVAL" envDefault:"60s"`
+}
+
+type LeadsSheetsConfig struct {
+	SpreadsheetID      string `env:"LEADS_SHEETS_SPREADSHEET_ID"`
+	Sheet              string `env:"LEADS_SHEETS_SHEET" envDefault:"customers"`
+	ConsultationsSheet string `env:"LEADS_SHEETS_CONSULTATIONS_SHEET" envDefault:"consultations"`
+}
+
+type TelegramConfig struct {
+	BotToken     string  `env:"TELEGRAM_BOT_TOKEN"`
+	ChatID       int64   `env:"TELEGRAM_CHAT_ID"`
+	PaymentCard  string  `env:"TELEGRAM_PAYMENT_CARD"`
+	AllowedUsers []int64 `env:"TELEGRAM_ALLOWED_USERS" envSeparator:","`
+}
+
+type ReminderConfig struct {
+	CheckInterval time.Duration `env:"REMINDER_CHECK_INTERVAL" envDefault:"5m"`
+	Before        time.Duration `env:"REMINDER_BEFORE" envDefault:"30m"`
+}
+
+type MailConfig struct {
+	IMAPHost string `env:"MAIL_IMAP_HOST"`
+	IMAPPort int    `env:"MAIL_IMAP_PORT" envDefault:"993"`
+	Username string `env:"MAIL_USERNAME"`
+	Password string `env:"MAIL_PASSWORD"`
+	Folder   string `env:"MAIL_FOLDER" envDefault:"INBOX"`
 }
 
 type ArticleConfig struct {
@@ -131,13 +114,17 @@ type DataForSEOConfig struct {
 }
 
 type CheckerConfig struct {
-	// Provider selects the checker implementation: "mock", "originality", or "huggingface".
-	Provider    string  `env:"CHECKER_PROVIDER" envDefault:"mock"`
-	APIKey      string  `env:"CHECKER_API_KEY"`
-	AIThreshold float64 `env:"CHECKER_AI_THRESHOLD" envDefault:"0.8"`
-	Model       string  `env:"CHECKER_MODEL"`
-	// MaxCycles caps humanize rewrites; on overflow the article is published as-is.
-	MaxCycles int `env:"CHECKER_MAX_CYCLES" envDefault:"3"`
+	Provider    string          `env:"CHECKER_PROVIDER" envDefault:"mock"`
+	APIKey      string          `env:"CHECKER_API_KEY"`
+	AIThreshold float64         `env:"CHECKER_AI_THRESHOLD" envDefault:"0.8"`
+	Model       string          `env:"CHECKER_MODEL"`
+	MaxCycles   int             `env:"CHECKER_MAX_CYCLES" envDefault:"3"`
+	Copyleaks   CopyleaksConfig `envPrefix:"CHECKER_COPYLEAKS_"`
+}
+
+type CopyleaksConfig struct {
+	Email   string `env:"EMAIL"`
+	Sandbox bool   `env:"SANDBOX"`
 }
 
 type PexelsConfig struct {
@@ -145,36 +132,62 @@ type PexelsConfig struct {
 	APIKey  string `env:"PEXELS_API_KEY"`
 }
 
-// devEncryptionKey is the shared dev default for WP_ENCRYPTION_KEY and JWT_SECRET;
-// Load rejects it outside the local environment so prod can't boot on it silently.
 const devEncryptionKey = "dev-insecure-change-me"
 
 type WordPressConfig struct {
-	// EncryptionKey is the pgcrypto symmetric key used to encrypt stored WordPress
-	// app passwords. The default is dev-only; production MUST override it.
-	EncryptionKey string `env:"WP_ENCRYPTION_KEY" envDefault:"dev-insecure-change-me" validate:"required"`
+	EncryptionKey string        `env:"WP_ENCRYPTION_KEY" envDefault:"dev-insecure-change-me" validate:"required"`
+	HTTPTimeout   time.Duration `env:"WP_HTTP_TIMEOUT" envDefault:"30s"`
 }
 
 type JWTConfig struct {
-	// Secret signs and verifies auth tokens (HS256). Dev-only default; prod MUST override.
 	Secret string        `env:"JWT_SECRET" envDefault:"dev-insecure-change-me" validate:"required"`
 	TTL    time.Duration `env:"JWT_TTL" envDefault:"24h"`
 }
 
 type Config struct {
-	Server     ServerConfig     `validate:"required"`
-	Logger     LoggerConfig     `validate:"required"`
-	Database   DatabaseConfig   `validate:"required"`
-	Sentry     SentryConfig     `validate:"required"`
-	LLM        LLMConfig        `validate:"required"`
-	Sheets     SheetsConfig     `validate:"required"`
-	Worker     WorkerConfig     `validate:"required"`
-	Article    ArticleConfig    `validate:"required"`
-	DataForSEO DataForSEOConfig `validate:"required"`
-	Checker    CheckerConfig    `validate:"required"`
-	Pexels     PexelsConfig     `validate:"required"`
-	WordPress  WordPressConfig  `validate:"required"`
-	JWT        JWTConfig        `validate:"required"`
+	Server       ServerConfig     `validate:"required"`
+	Logger       LoggerConfig     `validate:"required"`
+	Database     DatabaseConfig   `validate:"required"`
+	Sentry       SentryConfig     `validate:"required"`
+	LLM          LLMConfig        `validate:"required"`
+	Sheets       SheetsConfig     `validate:"required"`
+	Worker       WorkerConfig     `validate:"required"`
+	Article      ArticleConfig    `validate:"required"`
+	DataForSEO   DataForSEOConfig `validate:"required"`
+	Checker      CheckerConfig    `validate:"required"`
+	Pexels       PexelsConfig     `validate:"required"`
+	WordPress    WordPressConfig  `validate:"required"`
+	JWT          JWTConfig        `validate:"required"`
+	Prompt       PromptConfig
+	LinkBuilding LinkBuildingConfig
+	EmailScrape  EmailScrapeConfig
+	Mail         MailConfig
+	Telegram     TelegramConfig
+	LeadsSheets  LeadsSheetsConfig
+	Reminder     ReminderConfig
+}
+
+type PromptConfig struct {
+	EvolveEnabled   bool          `env:"PROMPT_EVOLVE_ENABLED" envDefault:"true"`
+	HumanWeight     float64       `env:"PROMPT_HUMAN_WEIGHT" envDefault:"0.65" validate:"gt=0,lte=1"`
+	PromoteInterval time.Duration `env:"PROMPT_PROMOTE_INTERVAL" envDefault:"6h"`
+	EvolveInterval  time.Duration `env:"PROMPT_EVOLVE_INTERVAL" envDefault:"168h"`
+}
+
+type LinkBuildingConfig struct {
+	PlaceDelayMin  time.Duration `env:"LINKBUILDING_PLACE_DELAY_MIN" envDefault:"2s"`
+	PlaceDelayMax  time.Duration `env:"LINKBUILDING_PLACE_DELAY_MAX" envDefault:"5s"`
+	LockedCooldown time.Duration `env:"LINKBUILDING_LOCKED_COOLDOWN" envDefault:"24h"`
+	FailCooldown   time.Duration `env:"LINKBUILDING_FAIL_COOLDOWN" envDefault:"6h"`
+}
+
+type EmailScrapeConfig struct {
+	Concurrency     int           `env:"EMAILSCRAPE_CONCURRENCY" envDefault:"50"`
+	FlushBatch      int           `env:"EMAILSCRAPE_FLUSH_BATCH" envDefault:"50"`
+	WriteTimeout    time.Duration `env:"EMAILSCRAPE_WRITE_TIMEOUT" envDefault:"30s"`
+	MaxContactPages int           `env:"EMAILSCRAPE_MAX_CONTACT_PAGES" envDefault:"8"`
+	PerHostRPS      float64       `env:"EMAILSCRAPE_PER_HOST_RPS" envDefault:"1"`
+	PerHostBurst    int           `env:"EMAILSCRAPE_PER_HOST_BURST" envDefault:"1"`
 }
 
 func Load() (Config, error) {

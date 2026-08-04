@@ -74,8 +74,6 @@ func TestContextHandler_InjectsIDsAndSurvivesWith(t *testing.T) {
 	ctx := ContextWith(context.Background(), ContextKeyTraceID, "trace-1")
 	ctx = ContextWith(ctx, ContextKeyUserID, "user-9")
 
-	// .With must keep the decoration so infra loggers (built once, then .With'd
-	// per job) still correlate.
 	l.With("article_id", 7).InfoContext(ctx, "hello")
 
 	got := decodeFirst(t, &buf)
@@ -94,7 +92,6 @@ func TestContextHandler_NoIDsOnNonContextCall(t *testing.T) {
 	var buf bytes.Buffer
 	l := slog.New(&contextHandler{Handler: slog.NewJSONHandler(&buf, nil)})
 
-	// Non-context Info passes a background context — no IDs to inject.
 	l.Info("plain")
 
 	got := decodeFirst(t, &buf)

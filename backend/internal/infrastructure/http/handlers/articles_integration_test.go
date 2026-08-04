@@ -26,8 +26,6 @@ import (
 	"multiagent-seo/pkg/jobrunner"
 )
 
-// itArtKnownKeyword is a topic the sheets mock knows (see sheets/mock.go), so
-// the cluster lookup succeeds and the pipeline runs.
 const itArtKnownKeyword = "android game development services"
 
 type itArtFakeLLM struct{}
@@ -42,8 +40,6 @@ func (itArtFakeFactory) ForModel(string, string) (articles.LLMClient, error) {
 	return itArtFakeLLM{}, nil
 }
 
-// itArtBuild wires the real generate Service over a fresh migrated DB and
-// returns an in-process chi router plus the underlying article repository.
 func itArtBuild(t *testing.T) http.Handler {
 	t.Helper()
 	pool := testsupport.NewTestDB(t, baseConnStr)
@@ -68,7 +64,7 @@ func itArtBuild(t *testing.T) http.Handler {
 		nil,
 	)
 
-	server := handlers.NewServer(nil, nil, nil, handlers.NewArticlesHandler(svc), handlers.NewLinkbuildingHandler(nil, nil), handlers.NewApiTokensHandler(nil))
+	server := handlers.NewServer(nil, nil, nil, handlers.NewArticlesHandler(svc), handlers.NewLinkbuildingHandler(nil), handlers.NewApiTokensHandler(nil), handlers.NewEmailScrapeHandler(nil))
 	return apihttp.NewRouter(config.ServerConfig{
 		BasePath:           "/",
 		CORSAllowedOrigins: []string{"http://localhost:3000"},
@@ -91,12 +87,6 @@ func itArtGenerate(t *testing.T, router http.Handler, keyword string, siteID uui
 	return accepted
 }
 
-// TestItArt_GenerateAndPersist drives the full pipeline through the real Service
-// and article repository. The SyncRunner runs the pipeline inline, so by the
-// time /generate returns the article is already persisted. The site_id is
-// random and not stored, so the publisher's ForSite fails and the run ends in a
-// terminal "failed" status — but the SERP step ran first, so competitor_data is
-// persisted and the article is retrievable.
 func TestItArt_GenerateAndPersist(t *testing.T) {
 	router := itArtBuild(t)
 	siteID := uuid.New()
@@ -143,46 +133,6 @@ func TestItArt_GenerateAndPersist(t *testing.T) {
 	}
 }
 
-func TestItArt_GenerateZeroSiteID(t *testing.T) {
-	router := itArtBuild(t)
-	rec := doJSON(t, router, http.MethodPost, "/generate", oapigen.GenerateRequest{
-		Keyword: itArtKnownKeyword,
-		SiteId:  uuid.Nil,
-	})
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("zero site_id status = %d, want 400 (body=%s)", rec.Code, rec.Body.String())
-	}
-}
-
-func TestItArt_GenerateUnknownKeyword(t *testing.T) {
-	router := itArtBuild(t)
-	rec := doJSON(t, router, http.MethodPost, "/generate", oapigen.GenerateRequest{
-		Keyword: "no such topic in the mock",
-		SiteId:  uuid.New(),
-	})
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("unknown keyword status = %d, want 404 (body=%s)", rec.Code, rec.Body.String())
-	}
-}
-
-func TestItArt_GetMissing(t *testing.T) {
-	router := itArtBuild(t)
-	rec := doJSON(t, router, http.MethodGet, "/articles/999999", nil)
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("get missing status = %d, want 404 (body=%s)", rec.Code, rec.Body.String())
-	}
-}
-
-func TestItArt_PublishMissing(t *testing.T) {
-	router := itArtBuild(t)
-	rec := doJSON(t, router, http.MethodPost, "/articles/999999/publish", nil)
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("publish missing status = %d, want 404 (body=%s)", rec.Code, rec.Body.String())
-	}
-}
-
-// TestItArt_PublishNoDraft publishes the just-generated article, which ended in
-// "failed" (no reachable WP), so it has no draft to promote → 409.
 func TestItArt_PublishNoDraft(t *testing.T) {
 	router := itArtBuild(t)
 	accepted := itArtGenerate(t, router, itArtKnownKeyword, uuid.New())

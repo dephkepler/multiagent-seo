@@ -1,5 +1,3 @@
-// Package rules defines composable writing rules for LLM prompts.
-// Presets are immutable; Without/With return new copies.
 package rules
 
 import (
@@ -22,7 +20,6 @@ type Preset struct {
 	Groups []Group
 }
 
-// Without returns a copy with the given rule IDs excluded; empty groups are dropped.
 func (p Preset) Without(ids ...string) Preset {
 	if len(ids) == 0 {
 		return p
@@ -48,7 +45,6 @@ func (p Preset) Without(ids ...string) Preset {
 	return out
 }
 
-// With appends rules to a named group (creating it if missing) and returns a new preset.
 func (p Preset) With(groupName string, extra ...Rule) Preset {
 	if len(extra) == 0 {
 		return p
@@ -65,7 +61,6 @@ func (p Preset) With(groupName string, extra ...Rule) Preset {
 	return out
 }
 
-// Render formats the preset as markdown sections; numbering resets per group.
 func (p Preset) Render() string {
 	var b strings.Builder
 	for i, g := range p.Groups {

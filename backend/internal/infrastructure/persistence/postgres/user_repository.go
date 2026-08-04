@@ -52,7 +52,10 @@ func (r *UserRepository) List(ctx context.Context) ([]user.User, error) {
 		}
 		out = append(out, u)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list users: %w", err)
+	}
+	return out, nil
 }
 
 func scanUser(row pgx.Row) (user.User, error) {

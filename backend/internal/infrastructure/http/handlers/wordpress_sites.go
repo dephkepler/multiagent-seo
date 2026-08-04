@@ -3,7 +3,6 @@ package handlers
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"strings"
 
@@ -37,28 +36,24 @@ func NewWordpressSitesHandler(sites WordpressService) *WordpressSitesHandler {
 }
 
 func (h *WordpressSitesHandler) ListWordpressSites(w http.ResponseWriter, r *http.Request) {
-	if h.unavailable(w) {
-		return
-	}
 	sites, err := h.sites.List(r.Context())
 	if err != nil {
-		h.writeError(r.Context(), w, err)
+		h.writeError(r.Context(), w, "list_sites", err)
 		return
 	}
 	out := make([]oapigen.WordpressSite, len(sites))
 	for i, s := range sites {
-		out[i] = toAPI(s)
+		out[i] = toAPISite(s)
 	}
 	response.WriteJSON(r.Context(), w, http.StatusOK, out)
 }
 
 func (h *WordpressSitesHandler) CreateWordpressSite(w http.ResponseWriter, r *http.Request) {
-	if h.unavailable(w) {
-		return
-	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 	var body oapigen.CreateWordpressSiteRequest
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		log := logger.New(r.Context(), "handlers.wordpress_sites")
+		log.Debug().Err(err).Msg("decode create site body")
 		problem.Write(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
@@ -74,31 +69,27 @@ func (h *WordpressSitesHandler) CreateWordpressSite(w http.ResponseWriter, r *ht
 		AppPassword: body.AppPassword,
 	})
 	if err != nil {
-		h.writeError(r.Context(), w, err)
+		h.writeError(r.Context(), w, "create_site", err)
 		return
 	}
-	response.WriteJSON(r.Context(), w, http.StatusCreated, toAPI(site))
+	response.WriteJSON(r.Context(), w, http.StatusCreated, toAPISite(site))
 }
 
 func (h *WordpressSitesHandler) GetWordpressSite(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
-	if h.unavailable(w) {
-		return
-	}
 	site, err := h.sites.Get(r.Context(), id)
 	if err != nil {
-		h.writeError(r.Context(), w, err)
+		h.writeError(r.Context(), w, "get_site", err)
 		return
 	}
-	response.WriteJSON(r.Context(), w, http.StatusOK, toAPI(site))
+	response.WriteJSON(r.Context(), w, http.StatusOK, toAPISite(site))
 }
 
 func (h *WordpressSitesHandler) UpdateWordpressSite(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
-	if h.unavailable(w) {
-		return
-	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 	var body oapigen.UpdateWordpressSiteRequest
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		log := logger.New(r.Context(), "handlers.wordpress_sites")
+		log.Debug().Err(err).Msg("decode update site body")
 		problem.Write(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
@@ -115,48 +106,30 @@ func (h *WordpressSitesHandler) UpdateWordpressSite(w http.ResponseWriter, r *ht
 		Enabled:     body.Enabled,
 	})
 	if err != nil {
-		h.writeError(r.Context(), w, err)
+		h.writeError(r.Context(), w, "update_site", err)
 		return
 	}
-	response.WriteJSON(r.Context(), w, http.StatusOK, toAPI(site))
+	response.WriteJSON(r.Context(), w, http.StatusOK, toAPISite(site))
 }
 
 func (h *WordpressSitesHandler) DeleteWordpressSite(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
-	if h.unavailable(w) {
-		return
-	}
 	if err := h.sites.Delete(r.Context(), id); err != nil {
-		h.writeError(r.Context(), w, err)
+		h.writeError(r.Context(), w, "delete_site", err)
 		return
 	}
 	response.NoContent(w)
 }
 
-// A nil service means the DB pool was missing at boot (see cmd/server wiring),
-// so we report the database as unavailable rather than panicking.
-func (h *WordpressSitesHandler) unavailable(w http.ResponseWriter) bool {
-	if h.sites == nil {
-		problem.Write(w, http.StatusServiceUnavailable, "database unavailable")
-		return true
-	}
-	return false
+var wordpressErrMap = newErrMap("handlers.wordpress_sites",
+	E(domainwp.ErrNotFound, http.StatusNotFound, "wordpress site not found"),
+	E(domainwp.ErrAliasExists, http.StatusConflict, "alias already in use"),
+)
+
+func (h *WordpressSitesHandler) writeError(ctx context.Context, w http.ResponseWriter, op string, err error) {
+	wordpressErrMap.Handle(ctx, w, op, err)
 }
 
-func (h *WordpressSitesHandler) writeError(ctx context.Context, w http.ResponseWriter, err error) {
-	switch {
-	case errors.Is(err, domainwp.ErrNotFound):
-		problem.Write(w, http.StatusNotFound, "wordpress site not found")
-	case errors.Is(err, domainwp.ErrAliasExists):
-		problem.Write(w, http.StatusConflict, "alias already in use")
-	default:
-		// Log the wrapped cause so 5xx origins are visible; client sees only "internal error".
-		log := logger.New(ctx, "handlers.wordpress_sites")
-		log.Error().Err(err).Msg("internal error")
-		problem.Write(w, http.StatusInternalServerError, "internal error")
-	}
-}
-
-func toAPI(s domainwp.Site) oapigen.WordpressSite {
+func toAPISite(s domainwp.Site) oapigen.WordpressSite {
 	return oapigen.WordpressSite{
 		Id:        s.ID,
 		Alias:     s.Alias,

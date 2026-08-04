@@ -1,0 +1,3 @@
+ALTER TABLE articles
+    ADD COLUMN IF NOT EXISTS request_params JSONB,
+    ADD COLUMN IF NOT EXISTS published_at   TIMESTAMPTZ;

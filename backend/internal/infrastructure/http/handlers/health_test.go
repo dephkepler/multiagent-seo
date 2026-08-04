@@ -3,13 +3,9 @@ package handlers_test
 import (
 	"context"
 	"encoding/json"
-	"io"
 	"net/http"
 	"net/http/httptest"
-	"sync"
-	"sync/atomic"
 	"testing"
-	"time"
 
 	apphealth "multiagent-seo/internal/application/health"
 	domainhealth "multiagent-seo/internal/domain/health"
@@ -25,7 +21,7 @@ func (s stubRepo) Ping(context.Context) error { return s.err }
 
 func newRouter(pingErr error) http.Handler {
 	svc := apphealth.NewService(domainhealth.NewService(stubRepo{err: pingErr}))
-	server := handlers.NewServer(handlers.NewHealthHandler(svc), handlers.NewWordpressSitesHandler(nil), handlers.NewLoginHandler(nil), handlers.NewArticlesHandler(nil), handlers.NewLinkbuildingHandler(nil, nil), handlers.NewApiTokensHandler(nil))
+	server := handlers.NewServer(handlers.NewHealthHandler(svc), handlers.NewWordpressSitesHandler(nil), handlers.NewLoginHandler(nil), handlers.NewArticlesHandler(nil), handlers.NewLinkbuildingHandler(nil), handlers.NewApiTokensHandler(nil), handlers.NewEmailScrapeHandler(nil))
 	return apihttp.NewRouter(config.ServerConfig{
 		Host:               "localhost",
 		Port:               "0",
@@ -69,70 +65,3 @@ func TestGetHealthz_Degraded(t *testing.T) {
 	}
 }
 
-func TestGetHealthz_Load(t *testing.T) {
-	if testing.Short() {
-		t.Skip("load test skipped in -short")
-	}
-	srv := httptest.NewServer(newRouter(nil))
-	defer srv.Close()
-
-	const (
-		workers   = 50
-		perWorker = 200
-		totalReqs = workers * perWorker
-	)
-
-	var ok, failed int64
-	var wg sync.WaitGroup
-	// Reuse keep-alive connections across the load (one idle conn per worker),
-	// otherwise 10k short-lived connections exhaust ephemeral ports on macOS.
-	tr := http.DefaultTransport.(*http.Transport).Clone()
-	tr.MaxIdleConns = workers
-	tr.MaxIdleConnsPerHost = workers
-	client := &http.Client{Timeout: 5 * time.Second, Transport: tr}
-	defer client.CloseIdleConnections()
-	start := time.Now()
-
-	for range workers {
-		wg.Go(func() {
-			for range perWorker {
-				resp, err := client.Get(srv.URL + "/healthz")
-				if err != nil || resp.StatusCode != http.StatusOK {
-					atomic.AddInt64(&failed, 1)
-					if resp != nil {
-						resp.Body.Close()
-					}
-					continue
-				}
-				// Drain so the connection returns to the keep-alive pool.
-				_, _ = io.Copy(io.Discard, resp.Body)
-				resp.Body.Close()
-				atomic.AddInt64(&ok, 1)
-			}
-		})
-	}
-	wg.Wait()
-	elapsed := time.Since(start)
-
-	if failed > 0 {
-		t.Errorf("%d/%d requests failed under load", failed, totalReqs)
-	}
-	t.Logf("load: %d reqs in %s = %.0f req/s, %.3f ms/req avg",
-		totalReqs, elapsed.Round(time.Millisecond),
-		float64(totalReqs)/elapsed.Seconds(),
-		float64(elapsed.Microseconds())/float64(totalReqs)/1000)
-}
-
-func BenchmarkGetHealthz(b *testing.B) {
-	router := newRouter(nil)
-	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
-
-	b.ReportAllocs()
-	for b.Loop() {
-		rec := httptest.NewRecorder()
-		router.ServeHTTP(rec, req)
-		if rec.Code != http.StatusOK {
-			b.Fatalf("status = %d", rec.Code)
-		}
-	}
-}

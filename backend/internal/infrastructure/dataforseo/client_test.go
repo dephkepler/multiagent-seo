@@ -2,10 +2,6 @@ package dataforseo
 
 import "testing"
 
-// TestParseSERPResponse_ToleratesMixedNestedItems reproduces the bug where a
-// block's nested `items` is an array of bare strings (e.g. related_searches) or
-// mixes strings and objects (people_also_ask). The old []struct decode failed
-// the whole response with "cannot unmarshal string into ...items".
 func TestParseSERPResponse_ToleratesMixedNestedItems(t *testing.T) {
 	body := []byte(`{"tasks":[{"result":[{"items":[
 		{"type":"organic","rank_absolute":1,"url":"https://a.com","title":"A","description":"da"},
@@ -22,7 +18,7 @@ func TestParseSERPResponse_ToleratesMixedNestedItems(t *testing.T) {
 	if len(data.Results) != 2 {
 		t.Errorf("organic results = %d, want 2", len(data.Results))
 	}
-	if len(data.PAA) != 3 { // two objects + one bare string
+	if len(data.PAA) != 3 {
 		t.Errorf("PAA = %v, want 3 entries", data.PAA)
 	}
 	if data.FeaturedSnippet == nil || data.FeaturedSnippet.Title != "Snip" {

@@ -42,8 +42,8 @@ func (s *fakeGenerateService) Publish(context.Context, int64) (articles.Article,
 	return articles.Article{ID: 1, Status: articles.StatusPublished}, nil
 }
 
-func (s *fakeGenerateService) List(context.Context) ([]articles.Article, error) {
-	return s.arts, nil
+func (s *fakeGenerateService) List(context.Context, int, int) ([]articles.Article, int, error) {
+	return s.arts, len(s.arts), nil
 }
 
 func (s *fakeGenerateService) Get(context.Context, int64) (articles.Article, error) {
@@ -52,10 +52,14 @@ func (s *fakeGenerateService) Get(context.Context, int64) (articles.Article, err
 	}
 	return articles.Article{ID: 1, Keyword: "x", Status: articles.StatusDraft}, nil
 }
+func (s *fakeGenerateService) RateArticle(context.Context, int64, *bool) error { return nil }
+func (s *fakeGenerateService) GenerateBatch(context.Context, int, apparticles.GenerateRequest) ([]int64, error) {
+	return nil, nil
+}
 
 func newArticlesRouter(svc *fakeGenerateService) http.Handler {
 	healthHandler := handlers.NewHealthHandler(apphealth.NewService(domainhealth.NewService(stubRepo{})))
-	server := handlers.NewServer(healthHandler, handlers.NewWordpressSitesHandler(nil), handlers.NewLoginHandler(nil), handlers.NewArticlesHandler(svc), handlers.NewLinkbuildingHandler(nil, nil), handlers.NewApiTokensHandler(nil))
+	server := handlers.NewServer(healthHandler, handlers.NewWordpressSitesHandler(nil), handlers.NewLoginHandler(nil), handlers.NewArticlesHandler(svc), handlers.NewLinkbuildingHandler(nil), handlers.NewApiTokensHandler(nil), handlers.NewEmailScrapeHandler(nil))
 	return apihttp.NewRouter(config.ServerConfig{
 		Host:               "localhost",
 		Port:               "0",

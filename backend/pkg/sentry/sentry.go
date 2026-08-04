@@ -11,12 +11,11 @@ import (
 	"multiagent-seo/pkg/logger"
 )
 
-// BuildDate is injected at build time via -ldflags "-X multiagent-seo/pkg/sentry.BuildDate=<value>".
 var BuildDate string
 
 var once sync.Once
 
-type Sentry interface {
+type Client interface {
 	Initialize() error
 	Flush()
 }
@@ -25,7 +24,7 @@ type sentryClient struct {
 	cfg config.SentryConfig
 }
 
-func New(cfg config.SentryConfig) Sentry {
+func New(cfg config.SentryConfig) Client {
 	return &sentryClient{cfg: cfg}
 }
 
@@ -35,7 +34,7 @@ func (s *sentryClient) Initialize() error {
 	var err error
 	once.Do(func() {
 		if !s.cfg.Enabled {
-			log.Warn().Msg("Sentry DSN not set, initialization skipped")
+			log.Info().Bool("sentry_enabled", s.cfg.Enabled).Msg("sentry disabled, initialization skipped")
 			return
 		}
 
@@ -52,7 +51,10 @@ func (s *sentryClient) Initialize() error {
 		})
 
 		if err != nil {
-			log.Error().Err(err).Msg("Sentry initialization failed")
+			log.Error().Err(err).
+				Str("environment", s.cfg.Environment).
+				Str("release", release).
+				Msg("sentry initialization failed")
 		} else {
 			log.Debug().Msg("Sentry initialized")
 		}
@@ -61,7 +63,6 @@ func (s *sentryClient) Initialize() error {
 	return err
 }
 
-// Flush waits for buffered events to be sent before shutdown.
 func (s *sentryClient) Flush() {
 	sentry.Flush(2 * time.Second)
 }

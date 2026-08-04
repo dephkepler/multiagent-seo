@@ -1,50 +1,87 @@
-// Package linkbuilding is the donor-site qualification domain: given a list of
-// candidate websites (from a sheet), classify each one's topic, count its
-// outbound domains, and decide whether it's a suitable backlink target. It owns
-// no infrastructure — every dependency is a port implemented in infrastructure.
 package linkbuilding
 
-// Website is one donor candidate read from the source sheet. Row is the sheet
-// row index so the qualification result can be written back to the same line.
-type Website struct {
-	Row int
-	URL string
-}
+import "time"
 
-// Page is a fetched homepage reduced to the signals qualification needs.
-// Links holds the raw href values found on the page (resolved/filtered later).
-type Page struct {
-	Title           string
-	MetaDescription string
-	Headings        []string
-	TextSample      string
-	Links           []string
-}
-
-// Result is the qualification outcome written back to the sheet row.
-type Result struct {
-	Row             int
-	URL             string
-	Topic           string
-	OutboundDomains int
-	Suitable        bool
-}
-
-// SiteCredential is one site we have login access to, read from the credential
-// columns. Row lets the login status be written back to the same line; the
-// login endpoint is derived from BaseURL by the adapter.
 type SiteCredential struct {
-	Row      int
-	BaseURL  string
-	Login    string
-	Password string
+	Row             int
+	BaseURL         string
+	Login           string
+	Password        string
+	LoginStatus     string
+	PlacementStatus string
 }
 
-// LoginResult is the outcome written back to the sheet. OK is true only on a
-// confirmed authenticated session.
-type LoginResult struct {
-	Row     int
-	BaseURL string
-	OK      bool
-	Status  string
+type DonorCredential struct {
+	DonorURL    string
+	Login       string
+	AppPassword string
+}
+
+type DonorPost struct {
+	ID         int64
+	Title      string
+	Content    string
+	PublicURL  string
+	EditURL    string
+	PreviewURL string
+	Status     string
+}
+
+type BacklinkInsertion struct {
+	Anchor       string
+	ModifiedHTML string
+}
+
+type ComposedPost struct {
+	Title  string
+	HTML   string
+	Anchor string
+}
+
+type DonorCapabilities struct {
+	UserID        int64
+	Roles         []string
+	CanEditPages  bool
+	CanEditOthers bool
+	CanPublish    bool
+	CanCreate     bool
+}
+
+type DonorProfile struct {
+	DonorURL      string
+	Role          string
+	CanEditPages  bool
+	CanEditOthers bool
+	CanPublish    bool
+	CanCreate     bool
+	LastOutcome   string
+}
+
+type PlacementResult struct {
+	Row       int
+	DonorURL  string
+	OK        bool
+	Outcome   string
+	Status    string
+	PostURL   string
+	EditURL   string
+	Anchor    string
+	LinkCheck string
+	Rights    string
+}
+
+type Placement struct {
+	ID        int64
+	RunID     string
+	Sheet     string
+	DonorURL  string
+	TargetURL string
+	OK        bool
+	Outcome   string
+	Status    string
+	PostURL   string
+	EditURL   string
+	Anchor    string
+	LinkCheck string
+	CreatedAt time.Time
 }

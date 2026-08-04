@@ -20,7 +20,7 @@ tags:
   - name: Articles
     description: SEO article generation and publishing
   - name: Link Building
-    description: Donor-website qualification
+    description: Donor-website login and backlink placement
   - name: API Tokens
     description: Long-lived per-user API keys
 
@@ -265,22 +265,54 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+  /generate/batch:
+    post:
+      operationId: generateBatch
+      security:
+        - bearerAuth: [ ]
+      tags: [ Articles ]
+      summary: Queue a batch from the next N unused sheet topics
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GenerateBatchRequest"
+      responses:
+        "202":
+          description: Batch queued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenerateBatchAccepted"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
   /articles:
     get:
       operationId: listArticles
       security:
         - bearerAuth: [ ]
       tags: [ Articles ]
-      summary: List articles
+      summary: List articles (paginated, newest first)
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 25
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
       responses:
         "200":
-          description: All articles, newest first
+          description: A page of articles, newest first
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/Article"
+                $ref: "#/components/schemas/ArticleList"
 
   /articles/{id}:
     parameters:
@@ -332,51 +364,185 @@ paths:
         "409":
           $ref: "#/components/responses/Conflict"
 
-  /linkbuilding/qualify:
+  /articles/{id}/rating:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
     post:
-      operationId: qualifyWebsites
+      operationId: rateArticle
       security:
         - bearerAuth: [ ]
-      tags: [ Link Building ]
-      summary: Qualify donor websites listed in a sheet
+      tags: [ Articles ]
+      summary: Rate an article (copywriter 👍/👎)
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/QualifyRequest"
+              $ref: "#/components/schemas/RateArticleRequest"
+      responses:
+        "204":
+          description: Rated
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /linkbuilding/place-backlinks:
+    post:
+      operationId: placeBacklinks
+      security:
+        - bearerAuth: [ ]
+      tags: [ Link Building ]
+      summary: Place a backlink to one of our WordPress sites in each suitable donor's latest post
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PlaceBacklinksRequest"
       responses:
         "202":
-          description: Qualification accepted; results are written back to the sheet
+          description: Placement accepted; per-donor status is written to the sheet's I column
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/QualifyAccepted"
+                $ref: "#/components/schemas/PlaceBacklinksAccepted"
         "400":
           $ref: "#/components/responses/BadRequest"
 
-  /linkbuilding/login:
-    post:
-      operationId: loginToSites
+  /linkbuilding/placements:
+    get:
+      operationId: listPlacements
       security:
         - bearerAuth: [ ]
       tags: [ Link Building ]
-      summary: Log into the WordPress sites listed in a sheet's credential columns
+      summary: Per-donor results of a placement run
+      parameters:
+        - name: run_id
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Placements for the run, oldest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Placement"
+
+  /linkbuilding/placements/history:
+    get:
+      operationId: listPlacementHistory
+      security:
+        - bearerAuth: [ ]
+      tags: [ Link Building ]
+      summary: Successful placements across all runs (paginated, newest first)
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        "200":
+          description: A page of successful placements, newest first
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlacementList"
+
+  /linkbuilding/placements/{run_id}/cancel:
+    parameters:
+      - name: run_id
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      operationId: cancelPlacement
+      security:
+        - bearerAuth: [ ]
+      tags: [ Link Building ]
+      summary: Request cancellation of a running placement
+      responses:
+        "202":
+          description: Cancellation requested
+
+  /emailscrape:
+    post:
+      operationId: scrapeEmails
+      security:
+        - bearerAuth: [ ]
+      tags: [ Email Scrape ]
+      summary: Crawl the sites listed in a sheet and scrape their email addresses
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/SiteLoginRequest"
+              $ref: "#/components/schemas/ScrapeEmailsRequest"
       responses:
         "202":
-          description: Login accepted; per-site status is written back to the sheet
+          description: Scrape accepted; found emails and per-site status are written back to the sheet
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SiteLoginAccepted"
+                $ref: "#/components/schemas/ScrapeEmailsAccepted"
         "400":
           $ref: "#/components/responses/BadRequest"
+
+  /emailscrape/jobs/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      operationId: getScrapeJob
+      security:
+        - bearerAuth: [ ]
+      tags: [ Email Scrape ]
+      summary: Get the progress and state of a scrape job
+      responses:
+        "200":
+          description: Job status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScrapeJob"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /emailscrape/jobs/{id}/cancel:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      operationId: cancelScrapeJob
+      security:
+        - bearerAuth: [ ]
+      tags: [ Email Scrape ]
+      summary: Request cancellation of a running scrape job
+      responses:
+        "202":
+          description: Cancellation requested
+        "404":
+          $ref: "#/components/responses/NotFound"
 
 components:
   securitySchemes:
@@ -412,50 +578,180 @@ components:
             $ref: "#/components/schemas/ErrorResponse"
 
   schemas:
-    QualifyRequest:
+    GenerateBatchRequest:
       type: object
-      required: [ sheet, accepted_topics ]
+      required: [ count, site_id ]
       properties:
-        sheet:
-          type: string
-          x-oapi-codegen-extra-tags:
-            validate: "required,min=1"
-        accepted_topics:
-          type: array
-          items:
-            type: string
-          x-oapi-codegen-extra-tags:
-            validate: "required,min=1"
-        candidate_topics:
-          type: array
-          items:
-            type: string
-
-    QualifyAccepted:
-      type: object
-      required: [ sheet, websites_queued ]
-      properties:
-        sheet:
-          type: string
-        websites_queued:
+        count:
           type: integer
-
-    SiteLoginRequest:
+          x-oapi-codegen-extra-tags:
+            validate: "required,min=1,max=100"
+        site_id:
+          type: string
+          format: uuid
+          x-oapi-codegen-extra-tags:
+            validate: "required"
+        min_words:
+          type: integer
+        max_words:
+          type: integer
+        max_tokens:
+          type: integer
+        language:
+          type: string
+        provider:
+          type: string
+        model:
+          type: string
+        auto_publish:
+          type: boolean
+        max_cycles:
+          type: integer
+        ai_threshold:
+          type: number
+        include_images:
+          type: boolean
+          nullable: true
+    GenerateBatchAccepted:
+      type: object
+      required: [ count, article_ids ]
+      properties:
+        count:
+          type: integer
+        article_ids:
+          type: array
+          items:
+            type: integer
+            format: int64
+    ArticleList:
+      type: object
+      required: [ items, total ]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Article"
+        total:
+          type: integer
+          format: int64
+    RateArticleRequest:
+      type: object
+      required: [ rating ]
+      properties:
+        rating:
+          type: string
+          enum: [ like, dislike, none ]
+    ScrapeEmailsRequest:
       type: object
       required: [ sheet ]
       properties:
         sheet:
           type: string
+          example: DONORS
           x-oapi-codegen-extra-tags:
             validate: "required,min=1"
 
-    SiteLoginAccepted:
+    ScrapeEmailsAccepted:
       type: object
-      required: [ sheet, sites_queued ]
+      required: [ sheet, sites_queued, job_id ]
       properties:
         sheet:
           type: string
         sites_queued:
+          type: integer
+        job_id:
+          type: string
+
+    ScrapeJob:
+      type: object
+      required: [ id, sheet, state, total, processed ]
+      properties:
+        id:
+          type: string
+        sheet:
+          type: string
+        state:
+          type: string
+        total:
+          type: integer
+        processed:
+          type: integer
+
+    PlaceBacklinksRequest:
+      type: object
+      required: [ sheet, target_site_url ]
+      properties:
+        sheet:
+          type: string
+          example: WEBSITES
+          x-oapi-codegen-extra-tags:
+            validate: "required,min=1"
+        target_site_url:
+          type: string
+          format: uri
+          example: https://playpulse.tech
+          description: Public URL of one of the user's wordpress_sites; the backend rejects URLs not present in that table.
+          x-oapi-codegen-extra-tags:
+            validate: "required,url"
+        count:
+          type: integer
+          example: 3
+          description: Stop after this many SUCCESSFUL placements (failures don't count). Defaults to 3 when omitted.
+        provider:
+          type: string
+          example: claude
+          description: Override the default LLM provider for this run only. Falls back to LLM_BACKLINK_PROVIDER (or LLM_PROVIDER) when empty.
+        model:
+          type: string
+          description: Override the default LLM model for this run only. Falls back to LLM_BACKLINK_MODEL (or LLM_MODEL) when empty.
+
+    PlaceBacklinksAccepted:
+      type: object
+      required: [ sheet, sites_queued, run_id ]
+      properties:
+        sheet:
+          type: string
+        sites_queued:
+          type: integer
+        run_id:
+          type: string
+
+    Placement:
+      type: object
+      required: [ id, donor_url, target_url, ok, status, created_at ]
+      properties:
+        id:
+          type: integer
+          format: int64
+        donor_url:
+          type: string
+        target_url:
+          type: string
+        ok:
+          type: boolean
+        outcome:
+          type: string
+        status:
+          type: string
+        post_url:
+          type: string
+        edit_url:
+          type: string
+        anchor:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    PlacementList:
+      type: object
+      required: [ items, total ]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Placement"
+        total:
           type: integer
 
     GenerateRequest:
@@ -577,6 +873,32 @@ components:
         updated_at:
           type: string
           format: date-time
+        published_at:
+          type: string
+          format: date-time
+          nullable: true
+        request_params:
+          type: object
+          nullable: true
+          x-go-type: json.RawMessage
+        human_rating:
+          type: boolean
+          nullable: true
+        ai_score:
+          type: number
+          nullable: true
+        reward:
+          type: number
+          nullable: true
+        quality_ok:
+          type: boolean
+          nullable: true
+        humanize_cycles:
+          type: integer
+          nullable: true
+        tokens:
+          type: integer
+          nullable: true
 
     LoginRequest:
       type: object

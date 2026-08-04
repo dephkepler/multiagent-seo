@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"html"
+	"log/slog"
 	"regexp"
 	"strings"
 
@@ -14,21 +15,18 @@ import (
 	gmhtml "github.com/yuin/goldmark/renderer/html"
 )
 
-// Non-greedy match so consecutive placeholders on one line don't merge.
 var (
 	imgPlaceholderRE          = regexp.MustCompile(`\[IMG\s*\|[^\]]*?\]`)
 	internalLinkPlaceholderRE = regexp.MustCompile(`\[INTERNAL_LINK\s*\|[^\]]*?\]`)
 )
 
-// RenderOptions carries the optional knobs RenderHTML accepts.
 type RenderOptions struct {
 	Keyword     string
 	Resolver    ImageResolver
 	Attribution bool
+	Log         *slog.Logger
 }
 
-// WithUnsafe lets the writer's literal <a rel="nofollow"> EEAT anchors and our
-// resolver-substituted <img> tags survive Markdown conversion.
 var md = goldmark.New(
 	goldmark.WithExtensions(
 		extension.Table,
@@ -43,11 +41,7 @@ var md = goldmark.New(
 	),
 )
 
-// RenderHTML converts the LLM's Markdown to HTML and reports image-resolve
-// stats. A nil Resolver strips all [IMG | ...] placeholders; per-placeholder
-// Resolve errors strip just that one so a single image miss doesn't kill the
-// article. [INTERNAL_LINK | ...] placeholders are always stripped.
-func RenderHTML(ctx context.Context, content string, opts RenderOptions) (string, RenderStats) {
+func RenderHTML(ctx context.Context, content string, opts RenderOptions) (string, RenderStats, error) {
 	var stats RenderStats
 	var stripped string
 
@@ -67,6 +61,9 @@ func RenderHTML(ctx context.Context, content string, opts RenderOptions) (string
 			}
 			img, err := opts.Resolver.Resolve(ctx, opts.Keyword, desc, alt)
 			if err != nil {
+				if opts.Log != nil {
+					opts.Log.DebugContext(ctx, "image resolution failed, skipping placeholder", "keyword", opts.Keyword, "desc", desc, "err", err)
+				}
 				stats.ImagesFailed++
 				return ""
 			}
@@ -82,14 +79,11 @@ func RenderHTML(ctx context.Context, content string, opts RenderOptions) (string
 
 	var buf bytes.Buffer
 	if err := md.Convert([]byte(stripped), &buf); err != nil {
-		return content, stats
+		return "", stats, fmt.Errorf("render markdown: %w", err)
 	}
-	return buf.String(), stats
+	return buf.String(), stats, nil
 }
 
-// renderFigure wraps the image in <figure>/<figcaption> when attribution is on
-// AND we have a photographer name; otherwise emits a bare <img> so the markup
-// stays clean.
 func renderFigure(img ResolvedImage, alt string, attribution bool) string {
 	imgTag := fmt.Sprintf(`<img src=%q alt=%q loading="lazy" />`,
 		html.EscapeString(img.URL),
@@ -120,9 +114,6 @@ func renderFigure(img ResolvedImage, alt string, attribution bool) string {
 		imgTag, photographerPart, pexelsPart)
 }
 
-// parseImgPlaceholder extracts description and ALT from
-// [IMG | description | ALT: alt text | ...]. Either may be empty when the model
-// emits a malformed placeholder.
 func parseImgPlaceholder(match string) (desc, alt string) {
 	inner := strings.TrimPrefix(match, "[")
 	inner = strings.TrimSuffix(inner, "]")
@@ -140,8 +131,6 @@ func parseImgPlaceholder(match string) (desc, alt string) {
 	return desc, alt
 }
 
-// Photo is an image-search candidate scored by PickRelevant. Alt and SourceURL
-// carry the words the relevance filter matches the article keyword against.
 type Photo struct {
 	URL             string
 	Photographer    string
@@ -150,18 +139,12 @@ type Photo struct {
 	Alt             string
 }
 
-// PickRelevant returns the first candidate whose alt + page slug shares at
-// least one keyword token, or nil if no candidate matches. Both the article
-// keyword and the placeholder ALT (the LLM's short SEO variant) contribute
-// tokens. Without this filter image search drifts into abstract/metaphor shots
-// for niche topics.
 func PickRelevant(photos []Photo, keyword, placeholderALT string) *Photo {
 	if len(photos) == 0 {
 		return nil
 	}
 	wanted := tokenize(keyword + " " + placeholderALT)
 	if len(wanted) == 0 {
-		// No useful keyword tokens to score against — accept the top hit.
 		return &photos[0]
 	}
 
@@ -179,8 +162,6 @@ func PickRelevant(photos []Photo, keyword, placeholderALT string) *Photo {
 	return &photos[bestIdx]
 }
 
-// stopWords is a tiny stop-list — generic words that would over-match against
-// any landscape stock photo and dilute the relevance signal.
 var stopWords = map[string]struct{}{
 	"the": {}, "and": {}, "for": {}, "with": {}, "from": {}, "into": {},
 	"this": {}, "that": {}, "your": {}, "you": {}, "are": {}, "was": {},
@@ -189,8 +170,6 @@ var stopWords = map[string]struct{}{
 	"best": {}, "top": {}, "guide": {}, "review": {},
 }
 
-// tokenize lowercases, splits on non-letters, drops short tokens and stop-words,
-// and returns a set so repeated tokens don't double-count.
 func tokenize(s string) map[string]struct{} {
 	out := map[string]struct{}{}
 	cur := strings.Builder{}
@@ -216,9 +195,6 @@ func tokenize(s string) map[string]struct{} {
 	return out
 }
 
-// slugWords pulls human-readable words out of an image page URL like
-// https://www.pexels.com/photo/woman-using-laptop-12345/ — these often describe
-// the photo better than the alt field on its own.
 func slugWords(sourceURL string) string {
 	r := strings.NewReplacer("/", " ", "-", " ", "_", " ", ".", " ")
 	return r.Replace(sourceURL)

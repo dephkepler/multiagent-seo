@@ -9,8 +9,8 @@ import { cx } from '@/lib/cx'
 const links = [
   { href: '/generate', label: 'Generate' },
   { href: '/sites', label: 'Sites' },
-  { href: '/linkbuilding/qualify', label: 'Qualify donors' },
-  { href: '/linkbuilding/login', label: 'Auto-login' },
+  { href: '/linkbuilding/place-backlinks', label: 'Place backlinks' },
+  { href: '/emailscrape', label: 'Email scrape' },
 ]
 
 export function Nav() {

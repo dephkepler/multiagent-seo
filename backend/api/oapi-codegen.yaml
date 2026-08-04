@@ -3,6 +3,5 @@ generate:
   chi-server: true
   models: true
   embedded-spec: true
-  strict-server: true
 output-options:
   prefer-skip-optional-pointer-on-container-types: true

@@ -3,7 +3,6 @@ package handlers
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"strings"
 
@@ -33,6 +32,11 @@ func NewApiTokensHandler(svc apiTokenService) *ApiTokensHandler {
 	return &ApiTokensHandler{svc: svc}
 }
 
+var apiTokensErrMap = newErrMap("handlers.apitokens",
+	E(appapitoken.ErrNoName, http.StatusBadRequest, "name"),
+	E(domainapitoken.ErrNotFound, http.StatusNotFound, "token not found"),
+)
+
 func (h *ApiTokensHandler) CreateApiToken(w http.ResponseWriter, r *http.Request) {
 	user, ok := h.currentUser(w, r)
 	if !ok {
@@ -41,6 +45,8 @@ func (h *ApiTokensHandler) CreateApiToken(w http.ResponseWriter, r *http.Request
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 	var body oapigen.CreateApiTokenRequest
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		log := logger.New(r.Context(), "handlers.apitokens")
+		log.Debug().Err(err).Msg("decode create token body")
 		problem.Write(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
@@ -51,13 +57,7 @@ func (h *ApiTokensHandler) CreateApiToken(w http.ResponseWriter, r *http.Request
 
 	tok, secret, err := h.svc.Create(r.Context(), user, body.Name)
 	if err != nil {
-		if errors.Is(err, appapitoken.ErrNoName) {
-			problem.Write(w, http.StatusBadRequest, "name")
-			return
-		}
-		log := logger.New(r.Context(), "handlers.apitokens")
-		log.Error().Err(err).Msg("create token")
-		problem.Write(w, http.StatusInternalServerError, "internal error")
+		apiTokensErrMap.Handle(r.Context(), w, "create_token", err)
 		return
 	}
 
@@ -77,9 +77,7 @@ func (h *ApiTokensHandler) ListApiTokens(w http.ResponseWriter, r *http.Request)
 	}
 	tokens, err := h.svc.List(r.Context(), user)
 	if err != nil {
-		log := logger.New(r.Context(), "handlers.apitokens")
-		log.Error().Err(err).Msg("list tokens")
-		problem.Write(w, http.StatusInternalServerError, "internal error")
+		apiTokensErrMap.Handle(r.Context(), w, "list_tokens", err)
 		return
 	}
 	out := make([]oapigen.ApiToken, len(tokens))
@@ -95,25 +93,13 @@ func (h *ApiTokensHandler) DeleteApiToken(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if err := h.svc.Revoke(r.Context(), user, id); err != nil {
-		if errors.Is(err, domainapitoken.ErrNotFound) {
-			problem.Write(w, http.StatusNotFound, "token not found")
-			return
-		}
-		log := logger.New(r.Context(), "handlers.apitokens")
-		log.Error().Err(err).Msg("revoke token")
-		problem.Write(w, http.StatusInternalServerError, "internal error")
+		apiTokensErrMap.Handle(r.Context(), w, "revoke_token", err)
 		return
 	}
 	response.NoContent(w)
 }
 
-// currentUser pulls the authenticated user id from the request context (set by
-// the BearerAuth middleware) and writes 401/503 on failure.
 func (h *ApiTokensHandler) currentUser(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
-	if h.svc == nil {
-		problem.Write(w, http.StatusServiceUnavailable, "database unavailable")
-		return uuid.Nil, false
-	}
 	raw, ok := httpMiddleware.UserIDFromContext(r.Context())
 	if !ok {
 		problem.Write(w, http.StatusUnauthorized, "unauthorized")

@@ -1,7 +1,3 @@
-// Package sheets adapts a Google Sheets keyword table to the articles.TopicSource
-// port. One row per article; on duplicate topic rows the keywords merge and the
-// first non-empty H1 wins. The constructor takes primitives so infrastructure
-// stays independent of internal/config.
 package sheets
 
 import (
@@ -30,19 +26,20 @@ type client struct {
 	log           *slog.Logger
 }
 
-// New returns an error when credentials or spreadsheet ID are missing so
-// callers can fall back to the mock.
 func New(ctx context.Context, credentialsFile, spreadsheetID, sheet, topicCol, keywordCol, titleCol string, headerRow bool, log *slog.Logger) (articles.TopicSource, error) {
 	if credentialsFile == "" || spreadsheetID == "" {
 		return nil, fmt.Errorf("sheets: credentialsFile and spreadsheetId are required")
 	}
+	if log == nil {
+		log = slog.Default()
+	}
 
-	data, err := os.ReadFile(credentialsFile)
+	credsJSON, err := os.ReadFile(credentialsFile)
 	if err != nil {
 		return nil, fmt.Errorf("read credentials: %w", err)
 	}
 
-	creds, err := google.CredentialsFromJSON(ctx, data, sheets.SpreadsheetsReadonlyScope)
+	creds, err := google.CredentialsFromJSON(ctx, credsJSON, sheets.SpreadsheetsReadonlyScope)
 	if err != nil {
 		return nil, fmt.Errorf("parse credentials: %w", err)
 	}
@@ -73,7 +70,6 @@ func (c *client) Lookup(ctx context.Context, topic string) (articles.Cluster, er
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	// Range spans topic..title, or topic..keyword when title is disabled.
 	endCol := c.keywordCol
 	wantTitle := c.titleCol != ""
 	if wantTitle {
@@ -143,12 +139,102 @@ func (c *client) Lookup(ctx context.Context, topic string) (articles.Cluster, er
 	return out, nil
 }
 
+func (c *client) Clusters(ctx context.Context) (map[string]articles.Cluster, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	endCol := c.keywordCol
+	wantTitle := c.titleCol != ""
+	if wantTitle {
+		endCol = c.titleCol
+	}
+	rangeStr := fmt.Sprintf("%s!%s:%s", c.sheet, c.topicCol, endCol)
+
+	resp, err := c.svc.Spreadsheets.Values.Get(c.spreadsheetID, rangeStr).Context(ctx).Do()
+	if err != nil {
+		return nil, fmt.Errorf("fetch clusters %s: %w", rangeStr, err)
+	}
+
+	titleIdx := columnOffset(c.topicCol, c.titleCol)
+
+	out := make(map[string]articles.Cluster)
+	seen := make(map[string]map[string]struct{})
+	for i, row := range resp.Values {
+		if c.headerRow && i == 0 {
+			continue
+		}
+		if len(row) < 2 {
+			continue
+		}
+		topic := normalize(fmt.Sprint(row[0]))
+		if topic == "" {
+			continue
+		}
+		if seen[topic] == nil {
+			seen[topic] = make(map[string]struct{})
+		}
+		cluster := out[topic]
+
+		for kw := range strings.SplitSeq(fmt.Sprint(row[1]), ",") {
+			kw = strings.TrimSpace(kw)
+			if kw == "" {
+				continue
+			}
+			key := normalize(kw)
+			if _, dup := seen[topic][key]; dup {
+				continue
+			}
+			seen[topic][key] = struct{}{}
+			cluster.Keywords = append(cluster.Keywords, kw)
+		}
+
+		if wantTitle && cluster.Title == "" && titleIdx >= 0 && len(row) > titleIdx {
+			if t := strings.TrimSpace(fmt.Sprint(row[titleIdx])); t != "" {
+				cluster.Title = t
+			}
+		}
+		out[topic] = cluster
+	}
+	return out, nil
+}
+
+func (c *client) Topics(ctx context.Context) ([]string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	rangeStr := fmt.Sprintf("%s!%s:%s", c.sheet, c.topicCol, c.topicCol)
+	resp, err := c.svc.Spreadsheets.Values.Get(c.spreadsheetID, rangeStr).Context(ctx).Do()
+	if err != nil {
+		return nil, fmt.Errorf("fetch topics %s: %w", rangeStr, err)
+	}
+
+	seen := make(map[string]struct{})
+	var out []string
+	for i, row := range resp.Values {
+		if c.headerRow && i == 0 {
+			continue
+		}
+		if len(row) == 0 {
+			continue
+		}
+		t := strings.TrimSpace(fmt.Sprint(row[0]))
+		if t == "" {
+			continue
+		}
+		key := normalize(t)
+		if _, dup := seen[key]; dup {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, t)
+	}
+	return out, nil
+}
+
 func normalize(s string) string {
 	return strings.ToLower(strings.TrimSpace(s))
 }
 
-// columnOffset returns the zero-based offset of col relative to base.
-// Returns -1 when either is empty or not a single-letter reference.
 func columnOffset(base, col string) int {
 	if base == "" || col == "" {
 		return -1
