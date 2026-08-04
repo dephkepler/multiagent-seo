@@ -13,8 +13,6 @@ import (
 	"multiagent-seo/internal/domain/webleads"
 )
 
-// Each call opens its own IMAP connection and closes it before returning —
-// no state to track between polls.
 type Client struct {
 	addr     string
 	username string
@@ -62,8 +60,7 @@ func (c *Client) dial() (*imapclient.Client, error) {
 	return imapClient, nil
 }
 
-// Bodies are read with PEEK, so \Seen is left untouched — callers decide
-// when a message counts as processed.
+// PEEK leaves \Seen untouched — callers decide when a message is processed.
 func (c *Client) FetchUnseen(ctx context.Context) ([]webleads.Message, error) {
 	imapClient, err := c.dial()
 	if err != nil {

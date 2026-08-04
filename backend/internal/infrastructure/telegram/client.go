@@ -25,10 +25,6 @@ func New(token string, chatID int64, log *slog.Logger) (*Client, error) {
 	return &Client{bot: bot, chatID: chatID, log: log}, nil
 }
 
-// SendMessage delivers text to the configured chat. Errors are returned to
-// the caller to log and move on — a Telegram outage shouldn't crash the
-// mail-polling loop that calls this. text is expected to be HTML-formatted
-// (webleads.FormatTelegram's output) — this client has no other caller.
 func (c *Client) SendMessage(ctx context.Context, text string) error {
 	msg := tgbotapi.NewMessage(c.chatID, text)
 	msg.ParseMode = tgbotapi.ModeHTML

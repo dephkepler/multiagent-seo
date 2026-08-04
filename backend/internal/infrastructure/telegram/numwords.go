@@ -7,10 +7,6 @@ var teens = [...]string{"десять", "одинадцять", "дванадц�
 var tens = [...]string{"", "", "двадцять", "тридцять", "сорок", "п'ятдесят", "шістдесят", "сімдесят", "вісімдесят", "дев'яносто"}
 var hundreds = [...]string{"", "сто", "двісті", "триста", "чотириста", "п'ятсот", "шістсот", "сімсот", "вісімсот", "дев'ятсот"}
 
-// ukrainianNumberWords spells out a non-negative integer in Ukrainian, e.g.
-// 800 -> "вісімсот". It's built for round consultation/invoice amounts
-// (hundreds/thousands), not as a general-purpose number-to-text library —
-// "one"/"two" use the feminine form (одна/дві) to agree with "гривня".
 func ukrainianNumberWords(n int64) string {
 	if n == 0 {
 		return "нуль"
@@ -43,9 +39,6 @@ func ukrainianNumberWords(n int64) string {
 	return strings.Join(nonEmpty, " ")
 }
 
-// threeDigitsWords spells 0-999. "One"/"two" always come out feminine
-// (одна/дві), matching both "гривня" and "тисяча" — the two nouns this gets
-// used with.
 func threeDigitsWords(n int64) string {
 	h := n / 100
 	rest := n % 100
@@ -74,8 +67,6 @@ func threeDigitsWords(n int64) string {
 	return out
 }
 
-// pluralForm picks the Ukrainian plural ending for n (1 / 2-4 / 5+, with the
-// usual 11-14 exception), e.g. pluralForm(2, "тисяча", "тисячі", "тисяч") -> "тисячі".
 func pluralForm(n int64, one, few, many string) string {
 	n = n % 100
 	if n >= 11 && n <= 14 {

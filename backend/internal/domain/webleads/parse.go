@@ -7,8 +7,6 @@ import (
 	"time"
 )
 
-// The contact form is bilingual (RU/UA), so the same field shows up under
-// different labels depending on which language the visitor had selected.
 var labelField = map[string]func(*Lead, string){
 	"имя":  setName,
 	"ім'я": setName,
@@ -33,7 +31,7 @@ var labelField = map[string]func(*Lead, string){
 }
 
 func setName(l *Lead, v string)    { l.Name = v }
-func setPhone(l *Lead, v string)   { l.Phone = normalizePhone(v) }
+func setPhone(l *Lead, v string)   { l.Phone = NormalizePhone(v) }
 func setMessage(l *Lead, v string) { l.Message = v }
 func setPage(l *Lead, v string)    { l.Page = v }
 
@@ -42,8 +40,6 @@ func setPage(l *Lead, v string)    { l.Page = v }
 var blockTagRe = regexp.MustCompile(`(?i)</?(p|br|div)[^>]*>`)
 var anyTagRe = regexp.MustCompile(`<[^>]*>`)
 
-// If no known label matches, the whole cleaned-up text goes into Message
-// rather than being discarded.
 func Parse(messageID, fromEmail, subject, body string, receivedAt time.Time) Lead {
 	lead := Lead{
 		MessageID:  messageID,

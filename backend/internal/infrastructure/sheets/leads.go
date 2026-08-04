@@ -17,9 +17,8 @@ type leadSink struct {
 	log           *slog.Logger
 }
 
-// NewLeadSink returns a webleads.SheetWriter that appends rows to a single
-// sheet within a (likely shared, multi-tab) spreadsheet. It never touches
-// any other tab.
+// Never touches any tab except sheet — the spreadsheet is often shared
+// with other work (see the "55k" incident in ABL 011).
 func NewLeadSink(ctx context.Context, credentialsFile, spreadsheetID, sheet string, log *slog.Logger) (webleads.SheetWriter, error) {
 	if log == nil {
 		log = slog.Default()
@@ -34,7 +33,6 @@ func NewLeadSink(ctx context.Context, credentialsFile, spreadsheetID, sheet stri
 	return &leadSink{svc: svc, spreadsheetID: spreadsheetID, sheet: sheet, log: log}, nil
 }
 
-// AppendRow adds one row: Дата | Имя | Телефон | Страница | Сообщение | ID заявки | ID клиента.
 func (s *leadSink) AppendRow(ctx context.Context, lead webleads.Lead) error {
 	row := []any{
 		lead.ReceivedAt.Format("02.01.2006 15:04"),

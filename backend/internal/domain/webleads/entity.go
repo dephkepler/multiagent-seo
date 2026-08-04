@@ -16,12 +16,14 @@ type Lead struct {
 	Page       string
 	RawBody    string
 
+	// Bare username (no "@"), set only for leads submitted through the
+	// Telegram bot itself — empty for email-sourced leads.
+	TelegramUsername string
+
 	// Empty right after Parse — Store.ResolveClient fills it in (needs a DB lookup).
 	ClientID string
 }
 
-// ShortID drops the "@domain" suffix — nicer for a human to reference than
-// a full email Message-ID.
 func (l Lead) ShortID() string {
 	id, _, _ := strings.Cut(l.MessageID, "@")
 	return id

@@ -57,7 +57,7 @@ func Run(ctx context.Context, cfg config.Config) error {
 	linkbuildingBacklinkSvc, lbRunner := buildLinkbuilding(ctx, cfg, slogLog, pool, wordpressRepo)
 	emailScrapeSvc, emailRunner := buildEmailScrape(ctx, cfg, slogLog, pool)
 	leadsSvc := buildLeads(ctx, cfg, slogLog, pool)
-	adminBot := buildAdminBot(cfg, slogLog)
+	adminBot := buildAdminBot(ctx, cfg, slogLog, pool, leadsSvc)
 
 	healthSvc := apphealth.NewService(domainhealth.NewService(healthRepo))
 	server := handlers.NewServer(
@@ -79,6 +79,7 @@ func Run(ctx context.Context, cfg config.Config) error {
 	}
 	if adminBot != nil {
 		go adminBot.Run(ctx)
+		schedule(ctx, cfg.Reminder.CheckInterval, adminBot.SendReminders)
 	}
 
 	var verifier domainauth.TokenVerifier = compositeVerifier{jwt: jwtSvc, keys: apiTokenSvc}

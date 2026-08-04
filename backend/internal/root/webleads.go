@@ -51,8 +51,6 @@ func buildLeads(ctx context.Context, cfg config.Config, log *slog.Logger, pool *
 	return appleads.NewService(mailClient, tgClient, leadRepo, sheetSink, log)
 }
 
-// noopSheetSink is used when CF_LEADS_SHEETS_SPREADSHEET_ID isn't set —
-// Telegram and the DB still work, sheet sync is just skipped.
 type noopSheetSink struct{}
 
 func (noopSheetSink) AppendRow(context.Context, domainleads.Lead) error { return nil }

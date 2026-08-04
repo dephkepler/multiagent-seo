@@ -18,10 +18,6 @@ func NewLeadRepository(db *pgxpool.Pool) *LeadRepository {
 	return &LeadRepository{db: db}
 }
 
-// ResolveClient finds-or-creates the client for phone (same phone across
-// leads = same client). Every match, new or returning, bumps last_seen_at
-// and refreshes name to whatever this lead gave, since that's the most
-// recent info on file.
 func (r *LeadRepository) ResolveClient(ctx context.Context, phone, name string) (string, error) {
 	if phone == "" {
 		return "", nil
@@ -42,18 +38,14 @@ func (r *LeadRepository) ResolveClient(ctx context.Context, phone, name string) 
 	return id, nil
 }
 
-// Save inserts a lead. lead.ClientID is expected to already be resolved
-// (via ResolveClient) — Save just persists it, it doesn't re-derive it. A
-// duplicate MessageID (e.g. the same message processed twice after a
-// crash) is silently ignored rather than erroring.
 func (r *LeadRepository) Save(ctx context.Context, lead webleads.Lead) error {
 	const q = `INSERT INTO leads (
 			message_id, received_at, from_email, subject,
-			name, phone, message, page, raw_body, telegram_sent_at, client_id
+			name, phone, message, page, raw_body, telegram_sent_at, client_id, telegram_username
 		)
 		VALUES (
 			@message_id, @received_at, @from_email, @subject,
-			@name, @phone, @message, @page, @raw_body, now(), @client_id
+			@name, @phone, @message, @page, @raw_body, now(), @client_id, @telegram_username
 		)
 		ON CONFLICT (message_id) DO NOTHING`
 
@@ -63,16 +55,17 @@ func (r *LeadRepository) Save(ctx context.Context, lead webleads.Lead) error {
 	}
 
 	if _, err := r.db.Exec(ctx, q, pgx.NamedArgs{
-		"message_id":  lead.MessageID,
-		"received_at": lead.ReceivedAt,
-		"from_email":  lead.FromEmail,
-		"subject":     lead.Subject,
-		"name":        lead.Name,
-		"phone":       lead.Phone,
-		"message":     lead.Message,
-		"page":        lead.Page,
-		"raw_body":    lead.RawBody,
-		"client_id":   clientID,
+		"message_id":        lead.MessageID,
+		"received_at":       lead.ReceivedAt,
+		"from_email":        lead.FromEmail,
+		"subject":           lead.Subject,
+		"name":              lead.Name,
+		"phone":             lead.Phone,
+		"message":           lead.Message,
+		"page":              lead.Page,
+		"raw_body":          lead.RawBody,
+		"client_id":         clientID,
+		"telegram_username": lead.TelegramUsername,
 	}); err != nil {
 		return fmt.Errorf("save lead %q: %w", lead.MessageID, err)
 	}

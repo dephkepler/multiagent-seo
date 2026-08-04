@@ -74,8 +74,9 @@ type WorkerConfig struct {
 }
 
 type LeadsSheetsConfig struct {
-	SpreadsheetID string `env:"LEADS_SHEETS_SPREADSHEET_ID"`
-	Sheet         string `env:"LEADS_SHEETS_SHEET" envDefault:"customers"`
+	SpreadsheetID      string `env:"LEADS_SHEETS_SPREADSHEET_ID"`
+	Sheet              string `env:"LEADS_SHEETS_SHEET" envDefault:"customers"`
+	ConsultationsSheet string `env:"LEADS_SHEETS_CONSULTATIONS_SHEET" envDefault:"consultations"`
 }
 
 type TelegramConfig struct {
@@ -83,6 +84,11 @@ type TelegramConfig struct {
 	ChatID       int64   `env:"TELEGRAM_CHAT_ID"`
 	PaymentCard  string  `env:"TELEGRAM_PAYMENT_CARD"`
 	AllowedUsers []int64 `env:"TELEGRAM_ALLOWED_USERS" envSeparator:","`
+}
+
+type ReminderConfig struct {
+	CheckInterval time.Duration `env:"REMINDER_CHECK_INTERVAL" envDefault:"5m"`
+	Before        time.Duration `env:"REMINDER_BEFORE" envDefault:"30m"`
 }
 
 type MailConfig struct {
@@ -158,6 +164,7 @@ type Config struct {
 	Mail         MailConfig
 	Telegram     TelegramConfig
 	LeadsSheets  LeadsSheetsConfig
+	Reminder     ReminderConfig
 }
 
 type PromptConfig struct {

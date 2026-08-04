@@ -5,11 +5,6 @@ import (
 	"strings"
 )
 
-// FormatTelegram renders a lead as an HTML-formatted Telegram message.
-// Free-form visitor input (Name, Phone, Page, Message) is HTML-escaped —
-// unlike the admin bot's own templates, this text comes from random site
-// visitors, not staff. Case ID and Client ID are wrapped in <code> so
-// tapping them in Telegram copies the value directly, no manual selection.
 func FormatTelegram(l Lead) string {
 	var b strings.Builder
 	b.WriteString("📩 Нова заявка\n")
@@ -20,6 +15,14 @@ func FormatTelegram(l Lead) string {
 	writeField(&b, "Ім'я", l.Name)
 	writeField(&b, "Телефон", l.Phone)
 	writeField(&b, "Сторінка", l.Page)
+	if l.TelegramUsername != "" {
+		username := html.EscapeString(l.TelegramUsername)
+		b.WriteString("Telegram: <a href=\"https://t.me/")
+		b.WriteString(username)
+		b.WriteString("\">@")
+		b.WriteString(username)
+		b.WriteString("</a>\n")
+	}
 
 	if strings.TrimSpace(l.Message) != "" {
 		b.WriteString("\nКоментар:\n")
