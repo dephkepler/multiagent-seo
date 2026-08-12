@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { Card } from '@/components/ui/card'
@@ -26,6 +26,7 @@ interface LeadStats {
   by_page: { key: string; count: number }[]
   by_creator: { key: string; bookings: number; revenue_earned: number }[]
   by_status: { key: string; count: number }[]
+  by_category: { key: string; cases: number; contracted: number; paid: number }[]
 }
 
 const STATUS_LABEL: Record<string, string> = {
@@ -72,6 +73,8 @@ export default function LeadsPage() {
   const [from, setFrom] = useState(() => toISODate(daysAgo(90)))
   const [to, setTo] = useState(() => toISODate(new Date()))
   const [activePreset, setActivePreset] = useState('90 дней')
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const pickerRef = useRef<HTMLDivElement>(null)
 
   const spanDays = useMemo(() => {
     const a = new Date(from).getTime()
@@ -89,7 +92,27 @@ export default function LeadsPage() {
     setFrom(toISODate(p.from()))
     setTo(toISODate(new Date()))
     setActivePreset(p.label)
+    setPickerOpen(false)
   }
+
+  // Click outside the picker (button + panel) closes it — the panel itself
+  // is positioned inside pickerRef, so any click landing outside that whole
+  // subtree means "done".
+  useEffect(() => {
+    if (!pickerOpen) return
+    function onClick(e: MouseEvent) {
+      if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) setPickerOpen(false)
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setPickerOpen(false)
+    }
+    document.addEventListener('mousedown', onClick)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onClick)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [pickerOpen])
 
   return (
     <div className='max-w-6xl space-y-6'>
@@ -102,49 +125,75 @@ export default function LeadsPage() {
         </p>
       </div>
 
-      <Card className='flex flex-wrap items-center gap-2'>
-        <span className='text-xs text-gray-500'>Период:</span>
-        {PRESETS.map((p) => (
-          <button
-            key={p.label}
-            onClick={() => applyPreset(p)}
-            className={cx(
-              'rounded-full border px-3 py-1 text-xs',
-              activePreset === p.label
-                ? 'border-emerald-500 bg-emerald-500 text-white font-medium'
-                : 'border-gray-200 text-gray-600 hover:border-emerald-300'
-            )}
-          >
-            {p.label}
-          </button>
-        ))}
-        <span className='mx-1 h-5 w-px bg-gray-200' />
-        <span className='flex items-center gap-1 text-xs text-gray-600'>
-          с
-          <input
-            type='date'
-            value={from}
-            onChange={(e) => {
-              setFrom(e.target.value)
-              setActivePreset('')
-            }}
-            className='rounded border border-gray-200 px-2 py-1 text-xs'
-          />
-          по
-          <input
-            type='date'
-            value={to}
-            onChange={(e) => {
-              setTo(e.target.value)
-              setActivePreset('')
-            }}
-            className='rounded border border-gray-200 px-2 py-1 text-xs'
-          />
-        </span>
-        <span className='ml-auto text-xs text-gray-400'>
-          группировка: {groupBy === 'day' ? 'по дням' : 'по месяцам'}
-        </span>
-      </Card>
+      <div ref={pickerRef} className='relative flex items-center gap-3'>
+        <button
+          type='button'
+          onClick={() => setPickerOpen((v) => !v)}
+          className={cx(
+            'flex items-center gap-2 rounded-lg border bg-white px-3 py-2 text-sm shadow-sm',
+            pickerOpen ? 'border-emerald-400 ring-2 ring-emerald-100' : 'border-gray-200 hover:border-gray-300'
+          )}
+        >
+          <span aria-hidden>📅</span>
+          <span className='font-medium'>{activePreset || `${fmtDate(from)} – ${fmtDate(to)}`}</span>
+          {activePreset && <span className='text-gray-400'>{fmtDate(from)} – {fmtDate(to)}</span>}
+          <span className={cx('text-gray-400 transition-transform', pickerOpen && 'rotate-180')}>▾</span>
+        </button>
+        <span className='text-xs text-gray-400'>группировка: {groupBy === 'day' ? 'по дням' : 'по месяцам'}</span>
+
+        {pickerOpen && (
+          <div className='absolute top-full left-0 z-20 mt-2 flex w-[420px] gap-4 rounded-lg border border-gray-200 bg-white p-4 shadow-lg'>
+            <div className='flex w-36 shrink-0 flex-col gap-1'>
+              {PRESETS.map((p) => (
+                <button
+                  key={p.label}
+                  onClick={() => applyPreset(p)}
+                  className={cx(
+                    'rounded-md px-2 py-1.5 text-left text-sm',
+                    activePreset === p.label ? 'bg-emerald-100 font-medium text-emerald-800' : 'text-gray-700 hover:bg-gray-100'
+                  )}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+            <div className='w-px bg-gray-100' />
+            <div className='flex flex-1 flex-col gap-3'>
+              <div className='text-xs font-medium text-gray-500'>Свой период</div>
+              <label className='flex flex-col gap-1 text-xs text-gray-500'>
+                с
+                <input
+                  type='date'
+                  value={from}
+                  onChange={(e) => {
+                    setFrom(e.target.value)
+                    setActivePreset('')
+                  }}
+                  className='rounded border border-gray-200 px-2 py-1.5 text-sm text-gray-800'
+                />
+              </label>
+              <label className='flex flex-col gap-1 text-xs text-gray-500'>
+                по
+                <input
+                  type='date'
+                  value={to}
+                  onChange={(e) => {
+                    setTo(e.target.value)
+                    setActivePreset('')
+                  }}
+                  className='rounded border border-gray-200 px-2 py-1.5 text-sm text-gray-800'
+                />
+              </label>
+              <button
+                onClick={() => setPickerOpen(false)}
+                className='mt-auto self-end rounded-md bg-emerald-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-600'
+              >
+                Готово
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
 
       {isError && (
         <Card className='border-red-200 bg-red-50 text-sm text-red-700'>
@@ -202,6 +251,15 @@ export default function LeadsPage() {
               <KpiTile label='Долг клиентов' value={fmtMoney(data.totals.case_owed)} accent={data.totals.case_owed > 0 ? 'bad' : undefined} />
             </div>
           </div>
+
+          <Card>
+            <h2 className='mb-1 text-sm font-medium'>Какое направление приносит больше денег</h2>
+            <p className='mb-4 text-xs text-gray-400'>
+              По сумме договора (законтрактовано) и отдельно — сколько из этого реально оплачено. Категорию сотрудник
+              выбирает при заведении дела через <code className='rounded bg-gray-100 px-1'>/case</code> в боте.
+            </p>
+            <CategoryList rows={data.by_category} />
+          </Card>
 
           {(() => {
             const cancelled = data.by_status.find((s) => s.key === 'cancelled')?.count ?? 0
@@ -421,6 +479,36 @@ function RevenueTrendChart({
           </div>
         ))}
       </div>
+    </div>
+  )
+}
+
+function CategoryList({ rows }: { rows: { key: string; cases: number; contracted: number; paid: number }[] }) {
+  if (!rows.length) return <div className='text-sm text-gray-400'>Нет данных за период.</div>
+  const max = Math.max(1, ...rows.map((r) => r.contracted))
+  return (
+    <div className='space-y-2'>
+      {rows.slice(0, 8).map((r) => {
+        const label = r.key === '' ? '(без напрямку)' : r.key
+        const paidPct = r.contracted ? Math.round((r.paid / r.contracted) * 100) : 0
+        return (
+          <div key={label} className='flex items-center gap-3 text-sm'>
+            <div className='w-56 shrink-0 truncate text-right text-gray-600' title={label}>
+              {label}
+            </div>
+            <div className='relative h-4 flex-1 rounded bg-gray-100'>
+              <div className='h-4 rounded bg-emerald-200' style={{ width: `${Math.max(2, (r.contracted / max) * 100)}%` }} />
+              <div
+                className='absolute top-0 left-0 h-4 rounded bg-emerald-500'
+                style={{ width: `${Math.max(r.paid > 0 ? 2 : 0, (r.paid / max) * 100)}%` }}
+              />
+            </div>
+            <div className='w-44 shrink-0 tabular-nums text-gray-700'>
+              {fmtMoney(r.contracted)} · {r.cases} дел · {paidPct}% оплачено
+            </div>
+          </div>
+        )
+      })}
     </div>
   )
 }

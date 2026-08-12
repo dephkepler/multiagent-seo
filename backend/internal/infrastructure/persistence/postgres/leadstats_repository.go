@@ -182,6 +182,37 @@ func (r *LeadStatsRepository) ByConsultationStatus(ctx context.Context, from, to
 	return r.queryCounts(ctx, q, from, to)
 }
 
+// ByCaseCategory answers "which direction actually makes money" — grouped
+// by created_at same as everything else in this file, empty category
+// (nothing picked in the bot flow, or an un-categorized historical import)
+// shows up as its own row rather than silently vanishing.
+func (r *LeadStatsRepository) ByCaseCategory(ctx context.Context, from, to time.Time) ([]leadstats.CategoryRevenue, error) {
+	const q = `
+		SELECT category, count(*), coalesce(sum(fee), 0), coalesce(sum(paid_amount), 0)
+		FROM cases
+		WHERE created_at BETWEEN @from AND @to
+		GROUP BY category ORDER BY 4 DESC, count(*) DESC`
+
+	rows, err := r.db.Query(ctx, q, pgx.NamedArgs{"from": from, "to": to})
+	if err != nil {
+		return nil, fmt.Errorf("by case category: %w", err)
+	}
+	defer rows.Close()
+
+	var out []leadstats.CategoryRevenue
+	for rows.Next() {
+		var c leadstats.CategoryRevenue
+		if err := rows.Scan(&c.Key, &c.Cases, &c.Contracted, &c.Paid); err != nil {
+			return nil, fmt.Errorf("by case category: scan: %w", err)
+		}
+		out = append(out, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("by case category: %w", err)
+	}
+	return out, nil
+}
+
 func (r *LeadStatsRepository) queryCounts(ctx context.Context, q string, from, to time.Time) ([]leadstats.Count, error) {
 	rows, err := r.db.Query(ctx, q, pgx.NamedArgs{"from": from, "to": to})
 	if err != nil {

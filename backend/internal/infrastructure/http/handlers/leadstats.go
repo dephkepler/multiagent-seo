@@ -97,6 +97,16 @@ func toOapiLeadStats(s domainlead.Stats) oapigen.LeadStats {
 			RevenueEarned: float32(c.RevenueEarned),
 		}
 	}
+
+	out.ByCategory = make([]oapigen.LeadStatsCategoryRevenue, len(s.ByCategory))
+	for i, c := range s.ByCategory {
+		out.ByCategory[i] = oapigen.LeadStatsCategoryRevenue{
+			Key:        c.Key,
+			Cases:      c.Cases,
+			Contracted: float32(c.Contracted),
+			Paid:       float32(c.Paid),
+		}
+	}
 	return out
 }
 

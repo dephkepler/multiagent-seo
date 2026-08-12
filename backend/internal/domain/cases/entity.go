@@ -13,11 +13,26 @@ const (
 	StatusCancelled  = "cancelled"
 )
 
+// Categories is the fixed practice-area list offered to staff in the /case
+// flow — free text is still accepted (Category is a plain string, not an
+// enum in the DB), this is just what gets suggested. Picked from what
+// actually recurs across both "55k" and "проекти": mobilization-adjacent
+// matters dominate everything else combined.
+var Categories = []string{
+	"Мобілізація / ТЦК / ВЛК",
+	"Звільнення зі служби / СЗЧ",
+	"Борги / аліменти / майнові спори",
+	"Оренда / виселення",
+	"Виїзд за кордон",
+	"Інше",
+}
+
 type Case struct {
 	ID             string
 	ClientID       string
 	ConsultationID string // empty if not linked to a specific consultation
 	AdvocateName   string
+	Category       string // practice area — free text, see Categories for the suggested list
 	Fee            float64 // the agreed contract amount
 	PaidAmount     float64 // running total actually received — grows via AddPayment, not a full ledger
 	Status         string

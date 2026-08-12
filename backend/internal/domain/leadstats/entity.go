@@ -57,13 +57,24 @@ type CreatorRevenue struct {
 	RevenueEarned float64
 }
 
+// CategoryRevenue answers "which direction (practice area) actually makes
+// money" — Contracted is the full deal size, Paid what's actually been
+// collected so far, same Booked-vs-Earned distinction as consultations.
+type CategoryRevenue struct {
+	Key        string
+	Cases      int64
+	Contracted float64
+	Paid       float64
+}
+
 type Stats struct {
-	From      time.Time
-	To        time.Time
-	GroupBy   string
-	Totals    Totals
-	Trend     []Bucket
-	ByPage    []Count
-	ByCreator []CreatorRevenue
-	ByStatus  []Count
+	From       time.Time
+	To         time.Time
+	GroupBy    string
+	Totals     Totals
+	Trend      []Bucket
+	ByPage     []Count
+	ByCreator  []CreatorRevenue
+	ByStatus   []Count
+	ByCategory []CategoryRevenue
 }

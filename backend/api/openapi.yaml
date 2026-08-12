@@ -1142,7 +1142,7 @@ components:
 
     LeadStats:
       type: object
-      required: [ range, totals, trend, by_page, by_creator, by_status ]
+      required: [ range, totals, trend, by_page, by_creator, by_status, by_category ]
       properties:
         range:
           type: object
@@ -1205,6 +1205,10 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/LeadStatsCount"
+        by_category:
+          type: array
+          items:
+            $ref: "#/components/schemas/LeadStatsCategoryRevenue"
 
     LeadStatsBucket:
       type: object
@@ -1231,6 +1235,20 @@ components:
           type: integer
           format: int64
         revenue_earned:
+          type: number
+
+    LeadStatsCategoryRevenue:
+      type: object
+      required: [ key, cases, contracted, paid ]
+      properties:
+        key:
+          type: string
+        cases:
+          type: integer
+          format: int64
+        contracted:
+          type: number
+        paid:
           type: number
 
     LeadStatsCount:

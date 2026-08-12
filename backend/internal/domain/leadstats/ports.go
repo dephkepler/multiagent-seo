@@ -13,4 +13,5 @@ type Repository interface {
 	ByPage(ctx context.Context, from, to time.Time) ([]Count, error)
 	ByCreator(ctx context.Context, from, to time.Time) ([]CreatorRevenue, error)
 	ByConsultationStatus(ctx context.Context, from, to time.Time) ([]Count, error)
+	ByCaseCategory(ctx context.Context, from, to time.Time) ([]CategoryRevenue, error)
 }

@@ -54,6 +54,7 @@ type caseDraft struct {
 	client       consultations.Client
 	fee          float64
 	advocateName string
+	category     string
 }
 
 type consultDraft struct {
@@ -351,6 +352,11 @@ func (b *AdminBot) handle(ctx context.Context, update tgbotapi.Update) {
 			return
 		}
 		fl.kase.fee = amount
+		fl.step = "case_category"
+		b.send(ctx, chatID, "Напрямок справи ("+strings.Join(cases.Categories, " / ")+") — введіть один з варіантів або свій:")
+
+	case "case_category":
+		fl.kase.category = text
 		fl.step = "case_advocate"
 		b.send(ctx, chatID, "Введіть ПІБ адвоката, який веде справу:")
 
@@ -517,6 +523,7 @@ func (b *AdminBot) finishCase(ctx context.Context, chatID, userID int64, draft c
 		ClientID:       draft.client.ID,
 		ConsultationID: consultationID,
 		AdvocateName:   draft.advocateName,
+		Category:       draft.category,
 		Fee:            draft.fee,
 		Description:    description,
 		CreatedBy:      strconv.FormatInt(userID, 10),
@@ -528,8 +535,8 @@ func (b *AdminBot) finishCase(ctx context.Context, chatID, userID int64, draft c
 	}
 
 	b.send(ctx, chatID, fmt.Sprintf(
-		"Готово. Справа %s (%s), сума %s грн.\n\nЩоб додати оплату: /pay %s <сума>\nЩоб позначити виконаною: /caseclose %s",
-		saved.ID, draft.advocateName, formatAmount(draft.fee), saved.ID, saved.ID,
+		"Готово. Справа %s (%s, %s), сума %s грн.\n\nЩоб додати оплату: /pay %s <сума>\nЩоб позначити виконаною: /caseclose %s",
+		saved.ID, draft.advocateName, draft.category, formatAmount(draft.fee), saved.ID, saved.ID,
 	))
 }
 

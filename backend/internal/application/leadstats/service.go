@@ -45,15 +45,20 @@ func (s *Service) GetStats(ctx context.Context, from, to time.Time, groupBy stri
 	if err != nil {
 		return domain.Stats{}, fmt.Errorf("leadstats: by status: %w", err)
 	}
+	byCategory, err := s.repo.ByCaseCategory(ctx, from, toInclusive)
+	if err != nil {
+		return domain.Stats{}, fmt.Errorf("leadstats: by category: %w", err)
+	}
 
 	return domain.Stats{
-		From:      from,
-		To:        to,
-		GroupBy:   groupBy,
-		Totals:    totals,
-		Trend:     trend,
-		ByPage:    byPage,
-		ByCreator: byCreator,
-		ByStatus:  byStatus,
+		From:       from,
+		To:         to,
+		GroupBy:    groupBy,
+		Totals:     totals,
+		Trend:      trend,
+		ByPage:     byPage,
+		ByCreator:  byCreator,
+		ByStatus:   byStatus,
+		ByCategory: byCategory,
 	}, nil
 }
