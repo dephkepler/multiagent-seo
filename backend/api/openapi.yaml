@@ -1158,7 +1158,7 @@ components:
               type: string
         totals:
           type: object
-          required: [ leads, clients, consultations, revenue_booked, revenue_earned, revenue_lost, avg_ticket ]
+          required: [ leads, clients, consultations, revenue_booked, revenue_earned, revenue_lost, avg_ticket, cases_in_progress, cases_completed, case_fee_contracted, case_paid, case_owed ]
           properties:
             leads:
               type: integer
@@ -1172,6 +1172,18 @@ components:
             revenue_booked:
               type: number
             revenue_earned:
+              type: number
+            cases_in_progress:
+              type: integer
+              format: int64
+            cases_completed:
+              type: integer
+              format: int64
+            case_fee_contracted:
+              type: number
+            case_paid:
+              type: number
+            case_owed:
               type: number
             revenue_lost:
               type: number

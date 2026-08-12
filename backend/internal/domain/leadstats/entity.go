@@ -20,6 +20,16 @@ type Totals struct {
 	RevenueEarned float64
 	RevenueLost   float64
 	AvgTicket     float64 // average price of a *completed* consultation
+
+	// Cases (дела) are where most of the actual money is — a case's fee
+	// (contract amount) runs 1,000–15,000+ ₴, an order of magnitude above a
+	// consultation's 500–800 ₴. See doc/abalisbotlead for the numbers this
+	// was built to answer.
+	CasesInProgress   int64
+	CasesCompleted    int64
+	CaseFeeContracted float64 // sum of every case's agreed fee
+	CasePaid          float64 // sum of what's actually been received so far
+	CaseOwed          float64 // sum of (fee - paid) across cases still owing — the collections number
 }
 
 // Bucket is one point on the trend chart — a day or a month, per GroupBy.

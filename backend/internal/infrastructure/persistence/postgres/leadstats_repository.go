@@ -56,6 +56,23 @@ func (r *LeadStatsRepository) Totals(ctx context.Context, from, to time.Time) (l
 	if completedCount > 0 {
 		t.AvgTicket = t.RevenueEarned / float64(completedCount)
 	}
+
+	// Cases (дела) — filtered by created_at same as consultations, for the
+	// same "what happened in this period" reason. CaseOwed only counts
+	// cases still short of their fee — a case paid in full or overpaid
+	// contributes 0, never a negative "owed".
+	const casesQ = `
+		SELECT
+			count(*) FILTER (WHERE status = 'in_progress'),
+			count(*) FILTER (WHERE status = 'completed'),
+			coalesce(sum(fee), 0),
+			coalesce(sum(paid_amount), 0),
+			coalesce(sum(greatest(fee - paid_amount, 0)), 0)
+		FROM cases WHERE created_at BETWEEN @from AND @to`
+	if err := r.db.QueryRow(ctx, casesQ, pgx.NamedArgs{"from": from, "to": to}).
+		Scan(&t.CasesInProgress, &t.CasesCompleted, &t.CaseFeeContracted, &t.CasePaid, &t.CaseOwed); err != nil {
+		return t, fmt.Errorf("totals cases: %w", err)
+	}
 	return t, nil
 }
 

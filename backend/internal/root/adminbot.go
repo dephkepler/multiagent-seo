@@ -23,6 +23,7 @@ func buildAdminBot(ctx context.Context, cfg config.Config, log *slog.Logger, poo
 	}
 
 	consultationRepo := postgres.NewConsultationRepository(pool)
+	caseRepo := postgres.NewCaseRepository(pool)
 
 	var sheetSink consultations.SheetWriter = noopConsultationSink{}
 	if cfg.LeadsSheets.SpreadsheetID != "" {
@@ -48,6 +49,7 @@ func buildAdminBot(ctx context.Context, cfg config.Config, log *slog.Logger, poo
 		consultationRepo,
 		sheetSink,
 		leads,
+		caseRepo,
 		cfg.Reminder.Before,
 		log,
 	)

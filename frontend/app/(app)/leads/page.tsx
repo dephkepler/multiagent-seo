@@ -16,6 +16,11 @@ interface LeadStats {
     revenue_earned: number
     revenue_lost: number
     avg_ticket: number
+    cases_in_progress: number
+    cases_completed: number
+    case_fee_contracted: number
+    case_paid: number
+    case_owed: number
   }
   trend: { bucket: string; leads: number; consultations: number; revenue_earned: number }[]
   by_page: { key: string; count: number }[]
@@ -157,15 +162,45 @@ export default function LeadsPage() {
             <KpiTile label='Консультаций забронировано' value={data.totals.consultations.toLocaleString('ru-RU')} />
           </div>
 
-          <div className='grid grid-cols-3 gap-4'>
-            <KpiTile label='Забронировано (весь потенциал)' value={fmtMoney(data.totals.revenue_booked)} />
-            <KpiTile
-              label='Заработано (провёл)'
-              value={fmtMoney(data.totals.revenue_earned)}
-              sub={data.totals.avg_ticket > 0 ? `средний чек ${fmtMoney(data.totals.avg_ticket)}` : undefined}
-              accent='good'
-            />
-            <KpiTile label='Потеряно (отменил / не пришёл)' value={fmtMoney(data.totals.revenue_lost)} accent='bad' />
+          <div>
+            <div className='mb-2 text-xs font-medium tracking-wide text-gray-400 uppercase'>
+              Консультации — цена самой консультации (обычно 500–800 ₴), не связанные с суммой дела
+            </div>
+            <div className='grid grid-cols-3 gap-4'>
+              <KpiTile label='Забронировано (весь потенциал)' value={fmtMoney(data.totals.revenue_booked)} />
+              <KpiTile
+                label='Заработано (провёл)'
+                value={fmtMoney(data.totals.revenue_earned)}
+                sub={
+                  data.totals.avg_ticket > 0
+                    ? `средний чек ${fmtMoney(data.totals.avg_ticket)} — цена состоявшейся консультации, не дела`
+                    : undefined
+                }
+                accent='good'
+              />
+              <KpiTile label='Потеряно (отменил / не пришёл)' value={fmtMoney(data.totals.revenue_lost)} accent='bad' />
+            </div>
+          </div>
+
+          <div>
+            <div className='mb-2 text-xs font-medium tracking-wide text-gray-400 uppercase'>
+              Дела (клопотання/позов/супровід) — вот тут реальные деньги бизнеса
+            </div>
+            <div className='grid grid-cols-4 gap-4'>
+              <KpiTile
+                label='Дел'
+                value={(data.totals.cases_in_progress + data.totals.cases_completed).toLocaleString('ru-RU')}
+                sub={`${data.totals.cases_in_progress} в работе, ${data.totals.cases_completed} выполнено`}
+              />
+              <KpiTile label='Законтрактовано' value={fmtMoney(data.totals.case_fee_contracted)} />
+              <KpiTile
+                label='Получено оплат'
+                value={fmtMoney(data.totals.case_paid)}
+                sub='Растёт по мере оплаты частями — не "сумма договора", а реально поступившее'
+                accent='good'
+              />
+              <KpiTile label='Долг клиентов' value={fmtMoney(data.totals.case_owed)} accent={data.totals.case_owed > 0 ? 'bad' : undefined} />
+            </div>
           </div>
 
           {(() => {

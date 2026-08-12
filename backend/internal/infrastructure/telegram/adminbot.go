@@ -13,6 +13,7 @@ import (
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 
+	"multiagent-seo/internal/domain/cases"
 	"multiagent-seo/internal/domain/consultations"
 	domainleads "multiagent-seo/internal/domain/webleads"
 )
@@ -34,6 +35,7 @@ type AdminBot struct {
 	store          consultations.Store
 	sheet          consultations.SheetWriter
 	leads          LeadSubmitter
+	cases          cases.Store
 	reminderBefore time.Duration
 	log            *slog.Logger
 
@@ -45,6 +47,13 @@ type flow struct {
 	consult consultDraft
 	book    bookDraft
 	request requestDraft
+	kase    caseDraft
+}
+
+type caseDraft struct {
+	client       consultations.Client
+	fee          float64
+	advocateName string
 }
 
 type consultDraft struct {
@@ -77,6 +86,7 @@ func NewAdminBot(
 	store consultations.Store,
 	sheet consultations.SheetWriter,
 	leads LeadSubmitter,
+	caseStore cases.Store,
 	reminderBefore time.Duration,
 	log *slog.Logger,
 ) (*AdminBot, error) {
@@ -105,6 +115,9 @@ func NewAdminBot(
 		{Command: "consult", Description: "Згенерувати підтвердження запису на консультацію"},
 		{Command: "book", Description: "Забронювати консультацію за Client ID"},
 		{Command: "advocate", Description: "Зареєструвати адвоката"},
+		{Command: "case", Description: "Завести справу (клопотання/позов/супровід) за Client ID"},
+		{Command: "pay", Description: "Додати оплату по справі: /pay <Case ID> <сума>"},
+		{Command: "caseclose", Description: "Позначити справу виконаною: /caseclose <Case ID>"},
 	}
 	for _, id := range allowedUserIDs {
 		_, _ = bot.Request(tgbotapi.NewSetMyCommandsWithScope(tgbotapi.NewBotCommandScopeChat(id), staffCommands...))
@@ -122,6 +135,7 @@ func NewAdminBot(
 		store:          store,
 		sheet:          sheet,
 		leads:          leads,
+		cases:          caseStore,
 		reminderBefore: reminderBefore,
 		log:            log,
 		flows:          make(map[int64]*flow),
@@ -236,6 +250,25 @@ func (b *AdminBot) handle(ctx context.Context, update tgbotapi.Update) {
 		}
 		b.registerAdvocate(ctx, chatID, arg)
 		return
+
+	case strings.HasPrefix(text, "/case"):
+		arg := strings.TrimSpace(strings.TrimPrefix(text, "/case"))
+		if arg == "" {
+			b.flows[userID] = &flow{step: "case_client_id"}
+			b.send(ctx, chatID, "Введіть Client ID:")
+			return
+		}
+		b.startCase(ctx, chatID, userID, arg)
+		return
+
+	case strings.HasPrefix(text, "/pay"):
+		b.handlePay(ctx, chatID, strings.TrimSpace(strings.TrimPrefix(text, "/pay")))
+		return
+
+	case strings.HasPrefix(text, "/caseclose"):
+		caseID := strings.TrimSpace(strings.TrimPrefix(text, "/caseclose"))
+		b.handleCaseClose(ctx, chatID, caseID)
+		return
 	}
 
 	fl := b.flows[userID]
@@ -307,6 +340,27 @@ func (b *AdminBot) handle(ctx context.Context, update tgbotapi.Update) {
 	case "advocate_name":
 		delete(b.flows, userID)
 		b.registerAdvocate(ctx, chatID, text)
+
+	case "case_client_id":
+		b.startCase(ctx, chatID, userID, text)
+
+	case "case_fee":
+		amount, err := parseAmount(text)
+		if err != nil {
+			b.send(ctx, chatID, "Не розпізнав суму. Введіть число, наприклад 15000.")
+			return
+		}
+		fl.kase.fee = amount
+		fl.step = "case_advocate"
+		b.send(ctx, chatID, "Введіть ПІБ адвоката, який веде справу:")
+
+	case "case_advocate":
+		fl.kase.advocateName = text
+		fl.step = "case_description"
+		b.send(ctx, chatID, "Опишіть справу (наприклад: клопотання про відстрочку):")
+
+	case "case_description":
+		b.finishCase(ctx, chatID, userID, fl.kase, text)
 	}
 }
 
@@ -431,6 +485,88 @@ func (b *AdminBot) submitRequest(ctx context.Context, chatID int64, d requestDra
 		return
 	}
 	b.send(ctx, chatID, "Дякуємо! Заявку прийнято, найближчим часом з Вами зв'яжеться наш адвокат.")
+}
+
+func (b *AdminBot) startCase(ctx context.Context, chatID, userID int64, clientID string) {
+	client, err := b.store.FindClient(ctx, clientID)
+	if err != nil {
+		b.flows[userID] = &flow{step: "case_client_id"}
+		b.send(ctx, chatID, "Клієнта не знайдено. Введіть Client ID ще раз:")
+		return
+	}
+	b.flows[userID] = &flow{step: "case_fee", kase: caseDraft{client: client}}
+	b.send(ctx, chatID, fmt.Sprintf(
+		"Клієнт: %s (%s). Введіть суму договору в грн (наприклад 15000):",
+		client.Name, client.Phone,
+	))
+}
+
+// finishCase auto-links the client's most recent consultation, if any —
+// the "which consultation did this case grow out of" question the staff
+// member already answered just by using /case for this client right after
+// it, so there is no reason to ask again.
+func (b *AdminBot) finishCase(ctx context.Context, chatID, userID int64, draft caseDraft, description string) {
+	delete(b.flows, userID)
+
+	var consultationID string
+	if c, err := b.store.LatestConsultation(ctx, draft.client.ID); err == nil {
+		consultationID = c.ID
+	}
+
+	saved, err := b.cases.Save(ctx, cases.Case{
+		ClientID:       draft.client.ID,
+		ConsultationID: consultationID,
+		AdvocateName:   draft.advocateName,
+		Fee:            draft.fee,
+		Description:    description,
+		CreatedBy:      strconv.FormatInt(userID, 10),
+	})
+	if err != nil {
+		b.send(ctx, chatID, "Не вдалося зберегти справу, спробуйте ще раз.")
+		b.log.ErrorContext(ctx, "telegram: save case failed", "err", err)
+		return
+	}
+
+	b.send(ctx, chatID, fmt.Sprintf(
+		"Готово. Справа %s (%s), сума %s грн.\n\nЩоб додати оплату: /pay %s <сума>\nЩоб позначити виконаною: /caseclose %s",
+		saved.ID, draft.advocateName, formatAmount(draft.fee), saved.ID, saved.ID,
+	))
+}
+
+func (b *AdminBot) handlePay(ctx context.Context, chatID int64, arg string) {
+	parts := strings.Fields(arg)
+	if len(parts) != 2 {
+		b.send(ctx, chatID, "Формат: /pay <Case ID> <сума>, наприклад /pay 3f0b8beb-23c2-4ad4-90fb-48064c9359d4 5000")
+		return
+	}
+	amount, err := parseAmount(parts[1])
+	if err != nil {
+		b.send(ctx, chatID, "Не розпізнав суму.")
+		return
+	}
+	updated, err := b.cases.AddPayment(ctx, parts[0], amount)
+	if err != nil {
+		b.send(ctx, chatID, "Не вдалося зберегти оплату — перевірте Case ID.")
+		b.log.ErrorContext(ctx, "telegram: add case payment failed", "err", err)
+		return
+	}
+	b.send(ctx, chatID, fmt.Sprintf(
+		"Оплата +%s грн. Всього оплачено: %s з %s грн. Залишок: %s грн.",
+		formatAmount(amount), formatAmount(updated.PaidAmount), formatAmount(updated.Fee), formatAmount(updated.Owed()),
+	))
+}
+
+func (b *AdminBot) handleCaseClose(ctx context.Context, chatID int64, caseID string) {
+	if caseID == "" {
+		b.send(ctx, chatID, "Формат: /caseclose <Case ID>")
+		return
+	}
+	if err := b.cases.UpdateStatus(ctx, caseID, cases.StatusCompleted); err != nil {
+		b.send(ctx, chatID, "Не вдалося оновити справу — перевірте Case ID.")
+		b.log.ErrorContext(ctx, "telegram: close case failed", "err", err)
+		return
+	}
+	b.send(ctx, chatID, "Справу позначено виконаною ✅")
 }
 
 func (b *AdminBot) registerAdvocate(ctx context.Context, chatID int64, fullName string) {
