@@ -31,7 +31,7 @@ export function Nav() {
 
   return (
     <>
-      <nav className='relative z-[60] flex h-14 items-center justify-between border-b border-gray-200 bg-white px-6'>
+      <nav className='relative z-[60] flex h-14 items-center gap-3 border-b border-gray-200 bg-white px-6'>
         <div className='flex items-center gap-2 font-semibold tracking-tight'>
           <Image src='/icon.png' alt='' width={28} height={28} className='rounded-md' />
           multiagent-seo
@@ -75,11 +75,11 @@ export function Nav() {
         )}
       />
 
-      {/* right-side menu drawer */}
+      {/* left-side menu drawer */}
       <aside
         className={cx(
-          'fixed top-0 right-0 z-50 flex h-full w-72 flex-col gap-1 border-l border-gray-200 bg-white p-4 shadow-xl transition-transform duration-300 ease-out',
-          open ? 'translate-x-0' : 'translate-x-full'
+          'fixed top-0 left-0 z-50 flex h-full w-72 flex-col gap-1 border-r border-gray-200 bg-white p-4 shadow-xl transition-transform duration-300 ease-out',
+          open ? 'translate-x-0' : '-translate-x-full'
         )}
       >
         <div className='mb-3 flex items-center gap-2 px-2 pt-1'>
