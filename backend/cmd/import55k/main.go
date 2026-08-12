@@ -18,6 +18,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -160,34 +161,64 @@ func runImport(ctx context.Context, tx pgx.Tx, rows []row) importStats {
 		}
 		scheduledAt := consultationTime(r)
 		caseNote := buildCaseNote(r)
-		var exists bool
-		if err := tx.QueryRow(ctx,
-			`SELECT EXISTS(SELECT 1 FROM consultations WHERE client_id = @client_id AND scheduled_at = @scheduled_at)`,
+		status := mapConsultationStatus(r.kcStatus)
+		var existingID string
+		err = tx.QueryRow(ctx,
+			`SELECT id FROM consultations WHERE client_id = @client_id AND scheduled_at = @scheduled_at`,
 			pgx.NamedArgs{"client_id": clientID, "scheduled_at": scheduledAt},
-		).Scan(&exists); err != nil {
+		).Scan(&existingID)
+		switch {
+		case err == nil:
+			// Already imported (safe re-run) — bring its status up to date in
+			// case this run has a corrected sheet read, but don't touch
+			// anything else (case_note etc. was fine the first time).
+			if _, err := tx.Exec(ctx, `UPDATE consultations SET status = @status WHERE id = @id`,
+				pgx.NamedArgs{"status": status, "id": existingID}); err != nil {
+				log.Fatalf("row %d: update consultation status: %v", r.num, err)
+			}
+			stats.consultSkippedDup++
+		case errors.Is(err, pgx.ErrNoRows):
+			createdBy := "import:" + strings.TrimSpace(r.admin)
+			if _, err := tx.Exec(ctx, `
+				INSERT INTO consultations (client_id, scheduled_at, price, case_note, created_by, created_at, status)
+				VALUES (@client_id, @scheduled_at, @price, @case_note, @created_by, @created_at, @status)`,
+				pgx.NamedArgs{
+					"client_id":    clientID,
+					"scheduled_at": scheduledAt,
+					"price":        r.amount,
+					"case_note":    caseNote,
+					"created_by":   createdBy,
+					"created_at":   atNoon(r.date),
+					"status":       status,
+				}); err != nil {
+				log.Fatalf("row %d: insert consultation: %v", r.num, err)
+			}
+			stats.consultInserted++
+		default:
 			log.Fatalf("row %d: check existing consultation: %v", r.num, err)
 		}
-		if exists {
-			stats.consultSkippedDup++
-			continue
-		}
-		createdBy := "import:" + strings.TrimSpace(r.admin)
-		if _, err := tx.Exec(ctx, `
-			INSERT INTO consultations (client_id, scheduled_at, price, case_note, created_by, created_at)
-			VALUES (@client_id, @scheduled_at, @price, @case_note, @created_by, @created_at)`,
-			pgx.NamedArgs{
-				"client_id":   clientID,
-				"scheduled_at": scheduledAt,
-				"price":       r.amount,
-				"case_note":   caseNote,
-				"created_by":  createdBy,
-				"created_at":  atNoon(r.date),
-			}); err != nil {
-			log.Fatalf("row %d: insert consultation: %v", r.num, err)
-		}
-		stats.consultInserted++
 	}
 	return stats
+}
+
+// mapConsultationStatus translates the sheet's free-text "Статус к-ц" into
+// the four-value status the live schema uses. "Не состоялась" and "х
+// прозвон" (missed call trying to reach the client) both mean the slot
+// never actually happened — no_show is the closest of the four buckets,
+// though the sheet doesn't distinguish "client didn't show" from "we
+// couldn't reach them to begin with". Anything else in-flight (В работе,
+// Ожидает, blank) is left at the DB default, scheduled.
+func mapConsultationStatus(raw string) string {
+	switch raw {
+	case "Отмена":
+		return "cancelled"
+	case "Выполнил":
+		return "completed"
+	case "Не состоялась", "х прозвон":
+		return "no_show"
+	default:
+		return "scheduled"
+	}
 }
 
 // upsertHistoricalClient mirrors LeadRepository.ResolveClient's dedupe-by-phone

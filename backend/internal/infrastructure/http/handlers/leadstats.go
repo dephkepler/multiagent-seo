@@ -76,6 +76,7 @@ func toOapiLeadStats(s domainlead.Stats) oapigen.LeadStats {
 	}
 	out.ByPage = toOapiCounts(s.ByPage)
 	out.ByCreator = toOapiCounts(s.ByCreator)
+	out.ByStatus = toOapiCounts(s.ByStatus)
 	return out
 }
 

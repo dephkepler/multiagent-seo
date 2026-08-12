@@ -18,6 +18,20 @@ interface LeadStats {
   trend: { bucket: string; leads: number; consultations: number }[]
   by_page: { key: string; count: number }[]
   by_creator: { key: string; count: number }[]
+  by_status: { key: string; count: number }[]
+}
+
+const STATUS_LABEL: Record<string, string> = {
+  scheduled: 'Запланирована',
+  completed: 'Провёл',
+  cancelled: 'Отменил',
+  no_show: 'Не пришёл',
+}
+const STATUS_COLOR: Record<string, string> = {
+  scheduled: 'bg-gray-400',
+  completed: 'bg-emerald-500',
+  cancelled: 'bg-red-500',
+  no_show: 'bg-amber-500',
 }
 
 function toISODate(d: Date): string {
@@ -146,6 +160,19 @@ export default function LeadsPage() {
             />
           </div>
 
+          {(() => {
+            const cancelled = data.by_status.find((s) => s.key === 'cancelled')?.count ?? 0
+            const pct = data.totals.consultations ? (cancelled / data.totals.consultations) * 100 : 0
+            if (!data.totals.consultations) return null
+            return (
+              <Card className={cx('p-4', pct >= 30 && 'border-red-200 bg-red-50')}>
+                <div className='text-xs text-gray-500'>Отменено из забронированных консультаций</div>
+                <div className={cx('mt-1 text-2xl font-semibold tabular-nums', pct >= 30 && 'text-red-700')}>{pct.toFixed(0)}%</div>
+                <div className='mt-1 text-xs text-gray-400'>{cancelled} из {data.totals.consultations}</div>
+              </Card>
+            )
+          })()}
+
           <Card>
             <h2 className='mb-1 text-sm font-medium'>Обращения по периоду</h2>
             <p className='mb-4 text-xs text-gray-400'>Заявки vs забронированные консультации, {groupBy === 'day' ? 'по дням' : 'по месяцам'}</p>
@@ -169,6 +196,21 @@ export default function LeadsPage() {
               <HBarList rows={data.by_creator} emptyLabel='(не указано)' />
             </Card>
           </div>
+
+          <Card>
+            <h2 className='mb-1 text-sm font-medium'>Что происходит с забронированными консультациями</h2>
+            <p className='mb-4 text-xs text-gray-400'>
+              Статус ставит сотрудник кнопками под сообщением о брони в Telegram — не через админку.
+            </p>
+            <HBarList
+              rows={data.by_status.map((s) => ({ ...s, key: STATUS_LABEL[s.key] ?? s.key }))}
+              emptyLabel='(без статуса)'
+              colorFor={(label) => {
+                const entry = Object.entries(STATUS_LABEL).find(([, v]) => v === label)
+                return entry ? STATUS_COLOR[entry[0]] : 'bg-gray-400'
+              }}
+            />
+          </Card>
         </>
       )}
     </div>
@@ -185,7 +227,15 @@ function KpiTile({ label, value, sub }: { label: string; value: string; sub?: st
   )
 }
 
-function HBarList({ rows, emptyLabel }: { rows: { key: string; count: number }[]; emptyLabel: string }) {
+function HBarList({
+  rows,
+  emptyLabel,
+  colorFor,
+}: {
+  rows: { key: string; count: number }[]
+  emptyLabel: string
+  colorFor?: (label: string) => string
+}) {
   if (!rows.length) return <div className='text-sm text-gray-400'>Нет данных за период.</div>
   const total = rows.reduce((s, r) => s + r.count, 0)
   const max = Math.max(...rows.map((r) => r.count))
@@ -201,7 +251,7 @@ function HBarList({ rows, emptyLabel }: { rows: { key: string; count: number }[]
             </div>
             <div className='h-4 flex-1 rounded bg-gray-100'>
               <div
-                className='h-4 rounded bg-emerald-500'
+                className={cx('h-4 rounded', colorFor ? colorFor(label) : 'bg-emerald-500')}
                 style={{ width: `${Math.max(2, (r.count / max) * 100)}%` }}
               />
             </div>

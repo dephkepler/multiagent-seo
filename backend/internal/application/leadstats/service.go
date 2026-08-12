@@ -41,6 +41,10 @@ func (s *Service) GetStats(ctx context.Context, from, to time.Time, groupBy stri
 	if err != nil {
 		return domain.Stats{}, fmt.Errorf("leadstats: by creator: %w", err)
 	}
+	byStatus, err := s.repo.ByConsultationStatus(ctx, from, toInclusive)
+	if err != nil {
+		return domain.Stats{}, fmt.Errorf("leadstats: by status: %w", err)
+	}
 
 	return domain.Stats{
 		From:      from,
@@ -50,5 +54,6 @@ func (s *Service) GetStats(ctx context.Context, from, to time.Time, groupBy stri
 		Trend:     trend,
 		ByPage:    byPage,
 		ByCreator: byCreator,
+		ByStatus:  byStatus,
 	}, nil
 }

@@ -43,8 +43,11 @@ func (r *ConsultationRepository) SetClientTelegram(ctx context.Context, clientID
 }
 
 func (r *ConsultationRepository) Save(ctx context.Context, c consultations.Consultation) (consultations.Consultation, error) {
-	const q = `INSERT INTO consultations (client_id, scheduled_at, price, case_note, created_by)
-		VALUES (@client_id, @scheduled_at, @price, @case_note, @created_by)
+	if c.Status == "" {
+		c.Status = consultations.StatusScheduled
+	}
+	const q = `INSERT INTO consultations (client_id, scheduled_at, price, case_note, created_by, status)
+		VALUES (@client_id, @scheduled_at, @price, @case_note, @created_by, @status)
 		RETURNING id`
 
 	err := r.db.QueryRow(ctx, q, pgx.NamedArgs{
@@ -53,6 +56,7 @@ func (r *ConsultationRepository) Save(ctx context.Context, c consultations.Consu
 		"price":        c.Price,
 		"case_note":    c.CaseNote,
 		"created_by":   c.CreatedBy,
+		"status":       c.Status,
 	}).Scan(&c.ID)
 	if err != nil {
 		return consultations.Consultation{}, fmt.Errorf("save consultation for client %q: %w", c.ClientID, err)
@@ -61,17 +65,32 @@ func (r *ConsultationRepository) Save(ctx context.Context, c consultations.Consu
 }
 
 func (r *ConsultationRepository) LatestConsultation(ctx context.Context, clientID string) (consultations.Consultation, error) {
-	const q = `SELECT id, client_id, scheduled_at, price, case_note, created_by
+	const q = `SELECT id, client_id, scheduled_at, price, case_note, created_by, status
 		FROM consultations WHERE client_id = @client_id
 		ORDER BY created_at DESC LIMIT 1`
 	var c consultations.Consultation
 	err := r.db.QueryRow(ctx, q, pgx.NamedArgs{"client_id": clientID}).Scan(
-		&c.ID, &c.ClientID, &c.ScheduledAt, &c.Price, &c.CaseNote, &c.CreatedBy,
+		&c.ID, &c.ClientID, &c.ScheduledAt, &c.Price, &c.CaseNote, &c.CreatedBy, &c.Status,
 	)
 	if err != nil {
 		return consultations.Consultation{}, fmt.Errorf("latest consultation for client %q: %w", clientID, err)
 	}
 	return c, nil
+}
+
+// UpdateStatus is how staff mark a consultation's outcome — driven by the
+// inline buttons on the booking confirmation the bot sends (see
+// AdminBot.handleCallback), not by anything in the admin web UI.
+func (r *ConsultationRepository) UpdateStatus(ctx context.Context, consultationID, status string) error {
+	const q = `UPDATE consultations SET status = @status WHERE id = @id`
+	tag, err := r.db.Exec(ctx, q, pgx.NamedArgs{"status": status, "id": consultationID})
+	if err != nil {
+		return fmt.Errorf("update consultation status %q: %w", consultationID, err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("update consultation status: no consultation with id %q", consultationID)
+	}
+	return nil
 }
 
 // UpsertAdvocate keeps a single row — there is only one advocate for now

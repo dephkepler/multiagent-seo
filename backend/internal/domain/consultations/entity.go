@@ -2,6 +2,16 @@ package consultations
 
 import "time"
 
+// Status values a consultation can hold. Every consultation starts
+// Scheduled (the DB column defaults to it) — staff move it to one of the
+// other three from the inline buttons the bot sends after booking.
+const (
+	StatusScheduled = "scheduled"
+	StatusCompleted = "completed"
+	StatusCancelled = "cancelled"
+	StatusNoShow    = "no_show"
+)
+
 type Consultation struct {
 	ID          string
 	ClientID    string
@@ -9,6 +19,7 @@ type Consultation struct {
 	Price       float64
 	CaseNote    string
 	CreatedBy   string
+	Status      string
 }
 
 type Client struct {

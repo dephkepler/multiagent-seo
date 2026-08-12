@@ -1142,7 +1142,7 @@ components:
 
     LeadStats:
       type: object
-      required: [ range, totals, trend, by_page, by_creator ]
+      required: [ range, totals, trend, by_page, by_creator, by_status ]
       properties:
         range:
           type: object
@@ -1182,6 +1182,10 @@ components:
           items:
             $ref: "#/components/schemas/LeadStatsCount"
         by_creator:
+          type: array
+          items:
+            $ref: "#/components/schemas/LeadStatsCount"
+        by_status:
           type: array
           items:
             $ref: "#/components/schemas/LeadStatsCount"

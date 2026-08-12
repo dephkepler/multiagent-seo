@@ -36,4 +36,5 @@ type Stats struct {
 	Trend     []Bucket
 	ByPage    []Count
 	ByCreator []Count
+	ByStatus  []Count
 }

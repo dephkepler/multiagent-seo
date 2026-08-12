@@ -124,6 +124,19 @@ func (r *LeadStatsRepository) ByCreator(ctx context.Context, from, to time.Time)
 	return r.queryCounts(ctx, q, from, to)
 }
 
+// ByConsultationStatus feeds the "what happened to booked consultations"
+// panel — the funnel-outcome view (scheduled/completed/cancelled/no_show).
+// Every consultation always has a status (DB default 'scheduled'), so this
+// slice's counts sum to exactly Totals.Consultations for the same range —
+// no separate denominator needed to turn a count into a percentage.
+func (r *LeadStatsRepository) ByConsultationStatus(ctx context.Context, from, to time.Time) ([]leadstats.Count, error) {
+	const q = `
+		SELECT status, count(*) FROM consultations
+		WHERE created_at BETWEEN @from AND @to
+		GROUP BY status ORDER BY count(*) DESC`
+	return r.queryCounts(ctx, q, from, to)
+}
+
 func (r *LeadStatsRepository) queryCounts(ctx context.Context, q string, from, to time.Time) ([]leadstats.Count, error) {
 	rows, err := r.db.Query(ctx, q, pgx.NamedArgs{"from": from, "to": to})
 	if err != nil {

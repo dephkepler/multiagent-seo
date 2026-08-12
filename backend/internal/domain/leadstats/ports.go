@@ -12,4 +12,5 @@ type Repository interface {
 	Trend(ctx context.Context, from, to time.Time, groupBy string) ([]Bucket, error)
 	ByPage(ctx context.Context, from, to time.Time) ([]Count, error)
 	ByCreator(ctx context.Context, from, to time.Time) ([]Count, error)
+	ByConsultationStatus(ctx context.Context, from, to time.Time) ([]Count, error)
 }

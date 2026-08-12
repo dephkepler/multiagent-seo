@@ -165,6 +165,11 @@ func (b *AdminBot) Run(ctx context.Context) {
 }
 
 func (b *AdminBot) handle(ctx context.Context, update tgbotapi.Update) {
+	if update.CallbackQuery != nil {
+		b.handleCallback(ctx, update.CallbackQuery)
+		return
+	}
+
 	msg := update.Message
 	if msg == nil || msg.From == nil {
 		return
@@ -493,7 +498,77 @@ func (b *AdminBot) finishBooking(ctx context.Context, chatID, userID int64, draf
 	}
 
 	link := fmt.Sprintf("https://t.me/%s?start=%s", b.bot.Self.UserName, draft.client.ID)
-	b.send(ctx, chatID, "Готово. Перешліть клієнту:\n\n"+link)
+	msg := tgbotapi.NewMessage(chatID, "Готово. Перешліть клієнту:\n\n"+link)
+	msg.ReplyMarkup = statusKeyboard(c.ID)
+	if _, err := b.bot.Send(msg); err != nil {
+		b.log.ErrorContext(ctx, "telegram: send booking confirmation failed", "err", err)
+	}
+}
+
+// statusKeyboard is attached to the booking-confirmation message so staff
+// can record the outcome later (after the consultation date has passed)
+// without hunting for a command — just tap the button under the message
+// they already have.
+func statusKeyboard(consultationID string) tgbotapi.InlineKeyboardMarkup {
+	return tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("✅ Провів", "cstatus:"+consultationID+":"+consultations.StatusCompleted),
+			tgbotapi.NewInlineKeyboardButtonData("❌ Скасував", "cstatus:"+consultationID+":"+consultations.StatusCancelled),
+			tgbotapi.NewInlineKeyboardButtonData("🚫 Не прийшов", "cstatus:"+consultationID+":"+consultations.StatusNoShow),
+		),
+	)
+}
+
+func statusLabel(status string) string {
+	switch status {
+	case consultations.StatusCompleted:
+		return "Провів ✅"
+	case consultations.StatusCancelled:
+		return "Скасував ❌"
+	case consultations.StatusNoShow:
+		return "Не прийшов 🚫"
+	default:
+		return status
+	}
+}
+
+// handleCallback is the inline-button counterpart of handle — Telegram
+// sends a callback query (not a Message) when a button is tapped. Staff-only:
+// clients never see these buttons, but the sender is still checked in case a
+// button ends up forwarded.
+func (b *AdminBot) handleCallback(ctx context.Context, cb *tgbotapi.CallbackQuery) {
+	if cb.From == nil || !b.allowedUsers[cb.From.ID] {
+		b.answerCallback(ctx, cb.ID, "")
+		return
+	}
+
+	parts := strings.SplitN(cb.Data, ":", 3)
+	if len(parts) != 3 || parts[0] != "cstatus" {
+		b.answerCallback(ctx, cb.ID, "")
+		return
+	}
+	consultationID, status := parts[1], parts[2]
+
+	if err := b.store.UpdateStatus(ctx, consultationID, status); err != nil {
+		b.log.ErrorContext(ctx, "telegram: update consultation status failed", "err", err)
+		b.answerCallback(ctx, cb.ID, "Не вдалося зберегти")
+		return
+	}
+	b.answerCallback(ctx, cb.ID, "Статус: "+statusLabel(status))
+
+	if cb.Message == nil {
+		return
+	}
+	edited := tgbotapi.NewEditMessageText(cb.Message.Chat.ID, cb.Message.MessageID, cb.Message.Text+"\n\nСтатус: "+statusLabel(status))
+	if _, err := b.bot.Send(edited); err != nil {
+		b.log.WarnContext(ctx, "telegram: edit booking confirmation failed", "err", err)
+	}
+}
+
+func (b *AdminBot) answerCallback(ctx context.Context, callbackID, text string) {
+	if _, err := b.bot.Request(tgbotapi.NewCallback(callbackID, text)); err != nil {
+		b.log.WarnContext(ctx, "telegram: answer callback failed", "err", err)
+	}
 }
 
 func (b *AdminBot) SendReminders(ctx context.Context) {
