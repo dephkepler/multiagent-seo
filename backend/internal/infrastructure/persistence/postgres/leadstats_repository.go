@@ -23,6 +23,12 @@ func NewLeadStatsRepository(db *pgxpool.Pool) *LeadStatsRepository {
 // deliberately not the same column, since a consultation's created_at is
 // "when it was booked" (what happened this period) while its scheduled_at
 // is a future appointment date; booked-in-period is the useful number here.
+//
+// Revenue is split by status in one pass (FILTER, not three separate
+// queries) — Booked is every priced consultation regardless of outcome,
+// Earned only completed ones, Lost what cancelled/no_show ones would have
+// been worth. AvgTicket is the average price of a *completed* consultation
+// (not of everything booked) — the useful "typical sale size" number.
 func (r *LeadStatsRepository) Totals(ctx context.Context, from, to time.Time) (leadstats.Totals, error) {
 	var t leadstats.Totals
 
@@ -34,25 +40,21 @@ func (r *LeadStatsRepository) Totals(ctx context.Context, from, to time.Time) (l
 		return t, fmt.Errorf("totals leads: %w", err)
 	}
 
-	var revenue *float64
 	const consultQ = `
-		SELECT count(*), sum(price) FILTER (WHERE price > 0)
+		SELECT
+			count(*),
+			coalesce(sum(price) FILTER (WHERE price > 0), 0),
+			coalesce(sum(price) FILTER (WHERE price > 0 AND status = 'completed'), 0),
+			coalesce(sum(price) FILTER (WHERE price > 0 AND status IN ('cancelled', 'no_show')), 0),
+			count(*) FILTER (WHERE price > 0 AND status = 'completed')
 		FROM consultations WHERE created_at BETWEEN @from AND @to`
+	var completedCount int64
 	if err := r.db.QueryRow(ctx, consultQ, pgx.NamedArgs{"from": from, "to": to}).
-		Scan(&t.Consultations, &revenue); err != nil {
+		Scan(&t.Consultations, &t.RevenueBooked, &t.RevenueEarned, &t.RevenueLost, &completedCount); err != nil {
 		return t, fmt.Errorf("totals consultations: %w", err)
 	}
-	if revenue != nil {
-		t.Revenue = *revenue
-	}
-
-	const paidQ = `SELECT count(*) FROM consultations WHERE created_at BETWEEN @from AND @to AND price > 0`
-	var paidCount int64
-	if err := r.db.QueryRow(ctx, paidQ, pgx.NamedArgs{"from": from, "to": to}).Scan(&paidCount); err != nil {
-		return t, fmt.Errorf("totals paid count: %w", err)
-	}
-	if paidCount > 0 {
-		t.AvgTicket = t.Revenue / float64(paidCount)
+	if completedCount > 0 {
+		t.AvgTicket = t.RevenueEarned / float64(completedCount)
 	}
 	return t, nil
 }
@@ -60,6 +62,8 @@ func (r *LeadStatsRepository) Totals(ctx context.Context, from, to time.Time) (l
 // Trend buckets leads (by received_at) and consultations (by created_at)
 // into the same day/month buckets and full-outer-joins them, so a bucket
 // with only one of the two still shows up with 0 on the other side.
+// RevenueEarned per bucket only counts completed consultations — same
+// reasoning as Totals.
 func (r *LeadStatsRepository) Trend(ctx context.Context, from, to time.Time, groupBy string) ([]leadstats.Bucket, error) {
 	trunc := "day"
 	if groupBy == "month" {
@@ -72,11 +76,13 @@ func (r *LeadStatsRepository) Trend(ctx context.Context, from, to time.Time, gro
 			FROM leads WHERE received_at BETWEEN @from AND @to
 			GROUP BY 1
 		), c AS (
-			SELECT date_trunc('%s', created_at) AS bucket, count(*) AS consultations
+			SELECT date_trunc('%s', created_at) AS bucket,
+				count(*) AS consultations,
+				coalesce(sum(price) FILTER (WHERE price > 0 AND status = 'completed'), 0) AS revenue_earned
 			FROM consultations WHERE created_at BETWEEN @from AND @to
 			GROUP BY 1
 		)
-		SELECT coalesce(l.bucket, c.bucket) AS bucket, coalesce(l.leads, 0), coalesce(c.consultations, 0)
+		SELECT coalesce(l.bucket, c.bucket) AS bucket, coalesce(l.leads, 0), coalesce(c.consultations, 0), coalesce(c.revenue_earned, 0)
 		FROM l FULL OUTER JOIN c ON l.bucket = c.bucket
 		ORDER BY 1`, trunc, trunc)
 	// trunc is one of two hardcoded literals picked above, never caller input —
@@ -92,7 +98,7 @@ func (r *LeadStatsRepository) Trend(ctx context.Context, from, to time.Time, gro
 	for rows.Next() {
 		var b leadstats.Bucket
 		var bucketAt time.Time
-		if err := rows.Scan(&bucketAt, &b.Leads, &b.Consultations); err != nil {
+		if err := rows.Scan(&bucketAt, &b.Leads, &b.Consultations, &b.RevenueEarned); err != nil {
 			return nil, fmt.Errorf("trend: scan: %w", err)
 		}
 		if trunc == "month" {
@@ -116,12 +122,34 @@ func (r *LeadStatsRepository) ByPage(ctx context.Context, from, to time.Time) ([
 	return r.queryCounts(ctx, q, from, to)
 }
 
-func (r *LeadStatsRepository) ByCreator(ctx context.Context, from, to time.Time) ([]leadstats.Count, error) {
+// ByCreator ranks staff by earned revenue, not booking volume — a plain
+// count rewards whoever books the most regardless of how many of those
+// bookings actually happened.
+func (r *LeadStatsRepository) ByCreator(ctx context.Context, from, to time.Time) ([]leadstats.CreatorRevenue, error) {
 	const q = `
-		SELECT created_by, count(*) FROM consultations
+		SELECT created_by, count(*), coalesce(sum(price) FILTER (WHERE price > 0 AND status = 'completed'), 0)
+		FROM consultations
 		WHERE created_at BETWEEN @from AND @to
-		GROUP BY created_by ORDER BY count(*) DESC`
-	return r.queryCounts(ctx, q, from, to)
+		GROUP BY created_by ORDER BY 3 DESC, count(*) DESC`
+
+	rows, err := r.db.Query(ctx, q, pgx.NamedArgs{"from": from, "to": to})
+	if err != nil {
+		return nil, fmt.Errorf("by creator: %w", err)
+	}
+	defer rows.Close()
+
+	var out []leadstats.CreatorRevenue
+	for rows.Next() {
+		var c leadstats.CreatorRevenue
+		if err := rows.Scan(&c.Key, &c.Bookings, &c.RevenueEarned); err != nil {
+			return nil, fmt.Errorf("by creator: scan: %w", err)
+		}
+		out = append(out, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("by creator: %w", err)
+	}
+	return out, nil
 }
 
 // ByConsultationStatus feeds the "what happened to booked consultations"

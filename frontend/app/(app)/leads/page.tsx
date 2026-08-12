@@ -12,12 +12,14 @@ interface LeadStats {
     leads: number
     clients: number
     consultations: number
-    revenue: number
+    revenue_booked: number
+    revenue_earned: number
+    revenue_lost: number
     avg_ticket: number
   }
-  trend: { bucket: string; leads: number; consultations: number }[]
+  trend: { bucket: string; leads: number; consultations: number; revenue_earned: number }[]
   by_page: { key: string; count: number }[]
-  by_creator: { key: string; count: number }[]
+  by_creator: { key: string; bookings: number; revenue_earned: number }[]
   by_status: { key: string; count: number }[]
 }
 
@@ -149,15 +151,21 @@ export default function LeadsPage() {
 
       {data && (
         <>
-          <div className='grid grid-cols-2 gap-4 md:grid-cols-4'>
+          <div className='grid grid-cols-3 gap-4'>
             <KpiTile label='Заявок' value={data.totals.leads.toLocaleString('ru-RU')} sub={`${fmtDate(data.range.from)} – ${fmtDate(data.range.to)}`} />
             <KpiTile label='Уникальных клиентов' value={data.totals.clients.toLocaleString('ru-RU')} />
             <KpiTile label='Консультаций забронировано' value={data.totals.consultations.toLocaleString('ru-RU')} />
+          </div>
+
+          <div className='grid grid-cols-3 gap-4'>
+            <KpiTile label='Забронировано (весь потенциал)' value={fmtMoney(data.totals.revenue_booked)} />
             <KpiTile
-              label='Выручка'
-              value={fmtMoney(data.totals.revenue)}
+              label='Заработано (провёл)'
+              value={fmtMoney(data.totals.revenue_earned)}
               sub={data.totals.avg_ticket > 0 ? `средний чек ${fmtMoney(data.totals.avg_ticket)}` : undefined}
+              accent='good'
             />
+            <KpiTile label='Потеряно (отменил / не пришёл)' value={fmtMoney(data.totals.revenue_lost)} accent='bad' />
           </div>
 
           {(() => {
@@ -179,6 +187,14 @@ export default function LeadsPage() {
             <TrendChart trend={data.trend} groupBy={data.range.group_by} />
           </Card>
 
+          <Card>
+            <h2 className='mb-1 text-sm font-medium'>Выручка по периоду</h2>
+            <p className='mb-4 text-xs text-gray-400'>
+              Только проведённые консультации — своя шкала, это деньги, не штуки, специально отдельный график.
+            </p>
+            <RevenueTrendChart trend={data.trend} groupBy={data.range.group_by} />
+          </Card>
+
           <div className='grid gap-4 md:grid-cols-2'>
             <Card>
               <h2 className='mb-1 text-sm font-medium'>Источники (page)</h2>
@@ -188,12 +204,13 @@ export default function LeadsPage() {
               <HBarList rows={data.by_page} emptyLabel='(без источника)' />
             </Card>
             <Card>
-              <h2 className='mb-1 text-sm font-medium'>Кто забронировал</h2>
+              <h2 className='mb-1 text-sm font-medium'>Кто приносит выручку</h2>
               <p className='mb-4 text-xs text-gray-400'>
-                <code className='rounded bg-gray-100 px-1'>import:Имя</code> — из истории (55k), число — Telegram ID
-                сотрудника, бронировавшего вживую.
+                Сортировка по заработанному, не по числу записей — сотрудник с меньшим числом броней, но выше
+                конверсией, может быть выше. <code className='rounded bg-gray-100 px-1'>import:Имя</code> — из
+                истории (55k), число — Telegram ID сотрудника.
               </p>
-              <HBarList rows={data.by_creator} emptyLabel='(не указано)' />
+              <CreatorList rows={data.by_creator} />
             </Card>
           </div>
 
@@ -217,11 +234,29 @@ export default function LeadsPage() {
   )
 }
 
-function KpiTile({ label, value, sub }: { label: string; value: string; sub?: string }) {
+function KpiTile({
+  label,
+  value,
+  sub,
+  accent,
+}: {
+  label: string
+  value: string
+  sub?: string
+  accent?: 'good' | 'bad'
+}) {
   return (
     <Card className='p-4'>
       <div className='text-xs text-gray-500'>{label}</div>
-      <div className='mt-1 text-2xl font-semibold tabular-nums'>{value}</div>
+      <div
+        className={cx(
+          'mt-1 text-2xl font-semibold tabular-nums',
+          accent === 'good' && 'text-emerald-700',
+          accent === 'bad' && 'text-red-700'
+        )}
+      >
+        {value}
+      </div>
       {sub && <div className='mt-1 text-xs text-gray-400'>{sub}</div>}
     </Card>
   )
@@ -265,20 +300,20 @@ function HBarList({
   )
 }
 
+function bucketLabel(bucket: string, groupBy: string): string {
+  if (groupBy === 'month') {
+    const [y, m] = bucket.split('-')
+    const names = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек']
+    return `${names[parseInt(m, 10) - 1]}'${y.slice(2)}`
+  }
+  const [, m, d] = bucket.split('-')
+  return `${d}.${m}`
+}
+
 function TrendChart({ trend, groupBy }: { trend: { bucket: string; leads: number; consultations: number }[]; groupBy: string }) {
   if (!trend.length) return <div className='text-sm text-gray-400'>Нет данных за период.</div>
   const max = Math.max(1, ...trend.map((t) => Math.max(t.leads, t.consultations)))
   const step = Math.max(1, Math.ceil(trend.length / 14))
-
-  function label(bucket: string): string {
-    if (groupBy === 'month') {
-      const [y, m] = bucket.split('-')
-      const names = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек']
-      return `${names[parseInt(m, 10) - 1]}'${y.slice(2)}`
-    }
-    const [, m, d] = bucket.split('-')
-    return `${d}.${m}`
-  }
 
   return (
     <div>
@@ -298,7 +333,7 @@ function TrendChart({ trend, groupBy }: { trend: { bucket: string; leads: number
           <div
             key={t.bucket}
             className='flex min-w-0 flex-1 items-end justify-center gap-0.5'
-            title={`${label(t.bucket)}: ${t.leads} заявок, ${t.consultations} консультаций`}
+            title={`${bucketLabel(t.bucket, groupBy)}: ${t.leads} заявок, ${t.consultations} консультаций`}
           >
             <div className='w-1/2 max-w-[10px] rounded-t bg-emerald-500' style={{ height: `${Math.max(2, (t.leads / max) * 100)}%` }} />
             <div className='w-1/2 max-w-[10px] rounded-t bg-sky-500' style={{ height: `${Math.max(2, (t.consultations / max) * 100)}%` }} />
@@ -308,10 +343,77 @@ function TrendChart({ trend, groupBy }: { trend: { bucket: string; leads: number
       <div className='mt-1 flex gap-1'>
         {trend.map((t, i) => (
           <div key={t.bucket} className='min-w-0 flex-1 truncate text-center text-[10px] text-gray-400'>
-            {i % step === 0 ? label(t.bucket) : ''}
+            {i % step === 0 ? bucketLabel(t.bucket, groupBy) : ''}
           </div>
         ))}
       </div>
+    </div>
+  )
+}
+
+// Deliberately its own chart, not a third series on TrendChart above — money
+// and counts live on different scales, and a chart with two y-axes is the
+// single most common way to make a chart lie (one series looks bigger than
+// it is just because its axis is stretched differently).
+function RevenueTrendChart({
+  trend,
+  groupBy,
+}: {
+  trend: { bucket: string; revenue_earned: number }[]
+  groupBy: string
+}) {
+  if (!trend.length) return <div className='text-sm text-gray-400'>Нет данных за период.</div>
+  const max = Math.max(1, ...trend.map((t) => t.revenue_earned))
+  const step = Math.max(1, Math.ceil(trend.length / 14))
+
+  return (
+    <div>
+      <div className='flex h-32 gap-1 border-b border-gray-200'>
+        {trend.map((t) => (
+          <div
+            key={t.bucket}
+            className='flex min-w-0 flex-1 items-end justify-center'
+            title={`${bucketLabel(t.bucket, groupBy)}: ${fmtMoney(t.revenue_earned)}`}
+          >
+            <div className='w-3/5 max-w-[18px] rounded-t bg-emerald-500' style={{ height: `${Math.max(2, (t.revenue_earned / max) * 100)}%` }} />
+          </div>
+        ))}
+      </div>
+      <div className='mt-1 flex gap-1'>
+        {trend.map((t, i) => (
+          <div key={t.bucket} className='min-w-0 flex-1 truncate text-center text-[10px] text-gray-400'>
+            {i % step === 0 ? bucketLabel(t.bucket, groupBy) : ''}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function CreatorList({ rows }: { rows: { key: string; bookings: number; revenue_earned: number }[] }) {
+  if (!rows.length) return <div className='text-sm text-gray-400'>Нет данных за период.</div>
+  const max = Math.max(1, ...rows.map((r) => r.revenue_earned))
+  return (
+    <div className='space-y-2'>
+      {rows.slice(0, 8).map((r) => {
+        const label = r.key === '' ? '(не указано)' : r.key
+        return (
+          <div key={label} className='flex items-center gap-3 text-sm'>
+            <div className='w-32 shrink-0 truncate text-right text-gray-600' title={label}>
+              {label}
+            </div>
+            <div className='h-4 flex-1 rounded bg-gray-100'>
+              <div
+                className='h-4 rounded bg-emerald-500'
+                style={{ width: `${Math.max(2, (r.revenue_earned / max) * 100)}%` }}
+              />
+            </div>
+            <div className='w-36 shrink-0 tabular-nums text-gray-700'>
+              {fmtMoney(r.revenue_earned)} · {r.bookings} бр.
+            </div>
+          </div>
+        )
+      })}
     </div>
   )
 }

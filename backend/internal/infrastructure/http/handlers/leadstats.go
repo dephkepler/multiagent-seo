@@ -67,16 +67,31 @@ func toOapiLeadStats(s domainlead.Stats) oapigen.LeadStats {
 	out.Totals.Leads = s.Totals.Leads
 	out.Totals.Clients = s.Totals.Clients
 	out.Totals.Consultations = s.Totals.Consultations
-	out.Totals.Revenue = float32(s.Totals.Revenue)
+	out.Totals.RevenueBooked = float32(s.Totals.RevenueBooked)
+	out.Totals.RevenueEarned = float32(s.Totals.RevenueEarned)
+	out.Totals.RevenueLost = float32(s.Totals.RevenueLost)
 	out.Totals.AvgTicket = float32(s.Totals.AvgTicket)
 
 	out.Trend = make([]oapigen.LeadStatsBucket, len(s.Trend))
 	for i, b := range s.Trend {
-		out.Trend[i] = oapigen.LeadStatsBucket{Bucket: b.Bucket, Leads: b.Leads, Consultations: b.Consultations}
+		out.Trend[i] = oapigen.LeadStatsBucket{
+			Bucket:        b.Bucket,
+			Leads:         b.Leads,
+			Consultations: b.Consultations,
+			RevenueEarned: float32(b.RevenueEarned),
+		}
 	}
 	out.ByPage = toOapiCounts(s.ByPage)
-	out.ByCreator = toOapiCounts(s.ByCreator)
 	out.ByStatus = toOapiCounts(s.ByStatus)
+
+	out.ByCreator = make([]oapigen.LeadStatsCreatorRevenue, len(s.ByCreator))
+	for i, c := range s.ByCreator {
+		out.ByCreator[i] = oapigen.LeadStatsCreatorRevenue{
+			Key:           c.Key,
+			Bookings:      c.Bookings,
+			RevenueEarned: float32(c.RevenueEarned),
+		}
+	}
 	return out
 }
 

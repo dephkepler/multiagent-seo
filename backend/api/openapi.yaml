@@ -1158,7 +1158,7 @@ components:
               type: string
         totals:
           type: object
-          required: [ leads, clients, consultations, revenue, avg_ticket ]
+          required: [ leads, clients, consultations, revenue_booked, revenue_earned, revenue_lost, avg_ticket ]
           properties:
             leads:
               type: integer
@@ -1169,7 +1169,11 @@ components:
             consultations:
               type: integer
               format: int64
-            revenue:
+            revenue_booked:
+              type: number
+            revenue_earned:
+              type: number
+            revenue_lost:
               type: number
             avg_ticket:
               type: number
@@ -1184,7 +1188,7 @@ components:
         by_creator:
           type: array
           items:
-            $ref: "#/components/schemas/LeadStatsCount"
+            $ref: "#/components/schemas/LeadStatsCreatorRevenue"
         by_status:
           type: array
           items:
@@ -1192,7 +1196,7 @@ components:
 
     LeadStatsBucket:
       type: object
-      required: [ bucket, leads, consultations ]
+      required: [ bucket, leads, consultations, revenue_earned ]
       properties:
         bucket:
           type: string
@@ -1202,6 +1206,20 @@ components:
         consultations:
           type: integer
           format: int64
+        revenue_earned:
+          type: number
+
+    LeadStatsCreatorRevenue:
+      type: object
+      required: [ key, bookings, revenue_earned ]
+      properties:
+        key:
+          type: string
+        bookings:
+          type: integer
+          format: int64
+        revenue_earned:
+          type: number
 
     LeadStatsCount:
       type: object
