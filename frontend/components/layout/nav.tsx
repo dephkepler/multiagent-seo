@@ -31,38 +31,17 @@ export function Nav() {
 
   return (
     <>
-      <nav className='relative z-[60] flex h-14 items-center gap-3 border-b border-gray-200 bg-white px-6'>
-        <div className='flex items-center gap-2 font-semibold tracking-tight'>
-          <Image src='/icon.png' alt='' width={28} height={28} className='rounded-md' />
-          multiagent-seo
-        </div>
-
+      <nav className='relative z-[60] flex h-14 items-center gap-2 border-b border-gray-200 bg-white px-6'>
         <button
           type='button'
           aria-label={open ? 'Закрыть меню' : 'Открыть меню'}
           aria-expanded={open}
           onClick={() => setOpen((v) => !v)}
-          className={cx(
-            'flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gray-900 transition-transform duration-300 ease-out hover:bg-gray-800',
-            open && 'rotate-180'
-          )}
+          className={cx('shrink-0 rounded-md transition-transform duration-300 ease-out hover:opacity-80', open && 'rotate-180')}
         >
-          <span className='flex h-3.5 w-4 flex-col justify-between'>
-            <span
-              className={cx(
-                'h-0.5 w-full rounded-full bg-white transition-transform duration-300 ease-out',
-                open && 'translate-y-[6px] rotate-45'
-              )}
-            />
-            <span className={cx('h-0.5 w-full rounded-full bg-white transition-opacity duration-200', open && 'opacity-0')} />
-            <span
-              className={cx(
-                'h-0.5 w-full rounded-full bg-white transition-transform duration-300 ease-out',
-                open && '-translate-y-[6px] -rotate-45'
-              )}
-            />
-          </span>
+          <Image src='/icon.png' alt='' width={28} height={28} className='rounded-md' />
         </button>
+        <span className='font-semibold tracking-tight'>multiagent-seo</span>
       </nav>
 
       {/* backdrop — click to close, fades with the drawer */}
