@@ -252,15 +252,6 @@ export default function LeadsPage() {
             </div>
           </div>
 
-          <Card>
-            <h2 className='mb-1 text-sm font-medium'>Какое направление приносит больше денег</h2>
-            <p className='mb-4 text-xs text-gray-400'>
-              По сумме договора (законтрактовано) и отдельно — сколько из этого реально оплачено. Категорию сотрудник
-              выбирает при заведении дела через <code className='rounded bg-gray-100 px-1'>/case</code> в боте.
-            </p>
-            <CategoryList rows={data.by_category} />
-          </Card>
-
           {(() => {
             const cancelled = data.by_status.find((s) => s.key === 'cancelled')?.count ?? 0
             const pct = data.totals.consultations ? (cancelled / data.totals.consultations) * 100 : 0
@@ -274,53 +265,61 @@ export default function LeadsPage() {
             )
           })()}
 
-          <Card>
-            <h2 className='mb-1 text-sm font-medium'>Обращения по периоду</h2>
-            <p className='mb-4 text-xs text-gray-400'>Заявки vs забронированные консультации, {groupBy === 'day' ? 'по дням' : 'по месяцам'}</p>
-            <TrendChart trend={data.trend} groupBy={data.range.group_by} />
-          </Card>
+          {/* Cifры выше открыты всегда; графики свёрнуты по умолчанию — каждый
+              открывается своей кнопкой независимо от остальных и остаётся
+              открытым, пока не нажать ту же кнопку ещё раз. */}
+          <div className='space-y-2'>
+            <CollapsibleChart icon='🎯' title='Какое направление приносит больше денег'>
+              <p className='mb-4 text-xs text-gray-400'>
+                По сумме договора (законтрактовано) и отдельно — сколько из этого реально оплачено. Категорию
+                сотрудник выбирает при заведении дела через <code className='rounded bg-gray-100 px-1'>/case</code> в
+                боте.
+              </p>
+              <CategoryList rows={data.by_category} />
+            </CollapsibleChart>
 
-          <Card>
-            <h2 className='mb-1 text-sm font-medium'>Выручка по периоду</h2>
-            <p className='mb-4 text-xs text-gray-400'>
-              Только проведённые консультации — своя шкала, это деньги, не штуки, специально отдельный график.
-            </p>
-            <RevenueTrendChart trend={data.trend} groupBy={data.range.group_by} />
-          </Card>
+            <CollapsibleChart icon='📈' title='Обращения по периоду' subtitle={groupBy === 'day' ? 'по дням' : 'по месяцам'}>
+              <p className='mb-4 text-xs text-gray-400'>Заявки vs забронированные консультации, {groupBy === 'day' ? 'по дням' : 'по месяцам'}</p>
+              <TrendChart trend={data.trend} groupBy={data.range.group_by} />
+            </CollapsibleChart>
 
-          <div className='grid gap-4 md:grid-cols-2'>
-            <Card>
-              <h2 className='mb-1 text-sm font-medium'>Источники (page)</h2>
+            <CollapsibleChart icon='💰' title='Выручка по периоду'>
+              <p className='mb-4 text-xs text-gray-400'>
+                Только проведённые консультации — своя шкала, это деньги, не штуки, специально отдельный график.
+              </p>
+              <RevenueTrendChart trend={data.trend} groupBy={data.range.group_by} />
+            </CollapsibleChart>
+
+            <CollapsibleChart icon='🌐' title='Источники (page)'>
               <p className='mb-4 text-xs text-gray-400'>
                 Пусто — письма без формы с сайта (в т.ч. вся история до бота). Заполнено — реальная страница/форма.
               </p>
               <HBarList rows={data.by_page} emptyLabel='(без источника)' />
-            </Card>
-            <Card>
-              <h2 className='mb-1 text-sm font-medium'>Кто приносит выручку</h2>
+            </CollapsibleChart>
+
+            <CollapsibleChart icon='👤' title='Кто приносит выручку'>
               <p className='mb-4 text-xs text-gray-400'>
                 Сортировка по заработанному, не по числу записей — сотрудник с меньшим числом броней, но выше
                 конверсией, может быть выше. <code className='rounded bg-gray-100 px-1'>import:Имя</code> — из
                 истории (55k), число — Telegram ID сотрудника.
               </p>
               <CreatorList rows={data.by_creator} />
-            </Card>
-          </div>
+            </CollapsibleChart>
 
-          <Card>
-            <h2 className='mb-1 text-sm font-medium'>Что происходит с забронированными консультациями</h2>
-            <p className='mb-4 text-xs text-gray-400'>
-              Статус ставит сотрудник кнопками под сообщением о брони в Telegram — не через админку.
-            </p>
-            <HBarList
-              rows={data.by_status.map((s) => ({ ...s, key: STATUS_LABEL[s.key] ?? s.key }))}
-              emptyLabel='(без статуса)'
-              colorFor={(label) => {
-                const entry = Object.entries(STATUS_LABEL).find(([, v]) => v === label)
-                return entry ? STATUS_COLOR[entry[0]] : 'bg-gray-400'
-              }}
-            />
-          </Card>
+            <CollapsibleChart icon='📋' title='Что происходит с забронированными консультациями'>
+              <p className='mb-4 text-xs text-gray-400'>
+                Статус ставит сотрудник кнопками под сообщением о брони в Telegram — не через админку.
+              </p>
+              <HBarList
+                rows={data.by_status.map((s) => ({ ...s, key: STATUS_LABEL[s.key] ?? s.key }))}
+                emptyLabel='(без статуса)'
+                colorFor={(label) => {
+                  const entry = Object.entries(STATUS_LABEL).find(([, v]) => v === label)
+                  return entry ? STATUS_COLOR[entry[0]] : 'bg-gray-400'
+                }}
+              />
+            </CollapsibleChart>
+          </div>
         </>
       )}
     </div>
@@ -351,6 +350,47 @@ function KpiTile({
         {value}
       </div>
       {sub && <div className='mt-1 text-xs text-gray-400'>{sub}</div>}
+    </Card>
+  )
+}
+
+// CollapsibleChart is a chart/list section that starts closed — the header
+// (icon + title) doubles as its own toggle button, so a stack of these reads
+// as a compact menu until you open the one you actually want. Each one is
+// independent: opening one doesn't close the others, and it stays open
+// until the same button is clicked again.
+function CollapsibleChart({
+  icon,
+  title,
+  subtitle,
+  children,
+}: {
+  icon: string
+  title: string
+  subtitle?: string
+  children: React.ReactNode
+}) {
+  const [open, setOpen] = useState(false)
+  return (
+    <Card className='overflow-hidden p-0'>
+      <button
+        type='button'
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className='flex w-full items-center gap-3 p-4 text-left hover:bg-gray-50'
+      >
+        <span className='text-xl' aria-hidden>
+          {icon}
+        </span>
+        <span className='flex-1'>
+          <span className='block text-sm font-medium'>{title}</span>
+          {subtitle && <span className='block text-xs text-gray-400'>{subtitle}</span>}
+        </span>
+        <span className={cx('text-gray-400 transition-transform', open && 'rotate-180')} aria-hidden>
+          ▾
+        </span>
+      </button>
+      {open && <div className='border-t border-gray-100 p-4 pt-4'>{children}</div>}
     </Card>
   )
 }
