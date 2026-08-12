@@ -13,24 +13,37 @@ var (
 )
 
 type CreateSite struct {
-	Alias       string
-	URL         string
+	Alias    string
+	Provider Provider
+	URL      string
+
 	Username    string
 	AppPassword string
+
+	Languages map[string]LanguageConfig
 }
 
 type UpdateSite struct {
-	Alias       *string
-	URL         *string
+	Alias   *string
+	URL     *string
+	Enabled *bool
+
 	Username    *string
 	AppPassword *string
-	Enabled     *bool
+
+	// Languages, when non-nil, replaces the whole map — there's no partial
+	// per-language patch, the caller always submits the full picture.
+	Languages map[string]LanguageConfig
 }
 
 type Credentials struct {
-	URL         string
+	Provider Provider
+	URL      string
+
 	Username    string
 	AppPassword string
+
+	Languages map[string]LanguageConfig
 }
 
 type Repository interface {

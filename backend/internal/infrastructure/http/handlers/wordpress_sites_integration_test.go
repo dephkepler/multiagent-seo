@@ -35,7 +35,7 @@ func itWPServer(t *testing.T, pool *pgxpool.Pool) *httptest.Server {
 		handlers.NewLoginHandler(nil),
 		handlers.NewArticlesHandler(nil),
 		handlers.NewLinkbuildingHandler(nil),
-		handlers.NewApiTokensHandler(nil), handlers.NewEmailScrapeHandler(nil),
+		handlers.NewApiTokensHandler(nil), handlers.NewEmailScrapeHandler(nil), handlers.NewLeadStatsHandler(nil),
 	)
 	router := apihttp.NewRouter(config.ServerConfig{
 		BasePath:           "/",
@@ -90,11 +90,14 @@ func TestWordpressSitesCRUD_Integration(t *testing.T) {
 	pool := testsupport.NewTestDB(t, baseConnStr)
 	srv := itWPServer(t, pool)
 
+	adminUsername := "admin"
+	appPassword := "super secret app password"
 	createResp := itWPDo(t, srv, http.MethodPost, "/wordpress-sites", oapigen.CreateWordpressSiteRequest{
 		Alias:       "blog",
+		Provider:    oapigen.Wordpress,
 		Url:         "https://blog.example.com",
-		Username:    "admin",
-		AppPassword: "super secret app password",
+		Username:    &adminUsername,
+		AppPassword: &appPassword,
 	})
 	if createResp.StatusCode != http.StatusCreated {
 		t.Fatalf("create status = %d, want 201 (body=%s)", createResp.StatusCode, itWPBody(t, createResp))

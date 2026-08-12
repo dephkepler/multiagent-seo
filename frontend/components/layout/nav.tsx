@@ -11,6 +11,7 @@ const links = [
   { href: '/sites', label: 'Sites' },
   { href: '/linkbuilding/place-backlinks', label: 'Place backlinks' },
   { href: '/emailscrape', label: 'Email scrape' },
+  { href: '/leads', label: 'Leads' },
 ]
 
 export function Nav() {

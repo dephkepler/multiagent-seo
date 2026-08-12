@@ -8,8 +8,9 @@ type Server struct {
 	*LinkbuildingHandler
 	*ApiTokensHandler
 	*EmailScrapeHandler
+	*LeadStatsHandler
 }
 
-func NewServer(health *HealthHandler, wordpress *WordpressSitesHandler, login *LoginHandler, articles *ArticlesHandler, linkbuilding *LinkbuildingHandler, apiTokens *ApiTokensHandler, emailScrape *EmailScrapeHandler) *Server {
-	return &Server{HealthHandler: health, WordpressSitesHandler: wordpress, LoginHandler: login, ArticlesHandler: articles, LinkbuildingHandler: linkbuilding, ApiTokensHandler: apiTokens, EmailScrapeHandler: emailScrape}
+func NewServer(health *HealthHandler, wordpress *WordpressSitesHandler, login *LoginHandler, articles *ArticlesHandler, linkbuilding *LinkbuildingHandler, apiTokens *ApiTokensHandler, emailScrape *EmailScrapeHandler, leadStats *LeadStatsHandler) *Server {
+	return &Server{HealthHandler: health, WordpressSitesHandler: wordpress, LoginHandler: login, ArticlesHandler: articles, LinkbuildingHandler: linkbuilding, ApiTokensHandler: apiTokens, EmailScrapeHandler: emailScrape, LeadStatsHandler: leadStats}
 }

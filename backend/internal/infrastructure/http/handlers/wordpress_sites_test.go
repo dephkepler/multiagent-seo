@@ -52,6 +52,7 @@ func (r *fakeWordpressRepo) Create(_ context.Context, in domainwp.CreateSite) (d
 	site := domainwp.Site{
 		ID:       uuid.New(),
 		Alias:    in.Alias,
+		Provider: in.Provider,
 		URL:      in.URL,
 		Username: in.Username,
 		Enabled:  true,
@@ -117,7 +118,7 @@ func (r *fakeWordpressRepo) Credentials(_ context.Context, id uuid.UUID) (domain
 	if !ok || !s.Enabled {
 		return domainwp.Credentials{}, domainwp.ErrNotFound
 	}
-	return domainwp.Credentials{URL: s.URL, Username: s.Username, AppPassword: r.passes[id]}, nil
+	return domainwp.Credentials{Provider: s.Provider, URL: s.URL, Username: s.Username, AppPassword: r.passes[id]}, nil
 }
 
 func (r *fakeWordpressRepo) Delete(_ context.Context, id uuid.UUID) error {
@@ -134,7 +135,7 @@ func (r *fakeWordpressRepo) Delete(_ context.Context, id uuid.UUID) error {
 func newWordpressRouter(repo domainwp.Repository) http.Handler {
 	healthHandler := handlers.NewHealthHandler(apphealth.NewService(domainhealth.NewService(stubRepo{})))
 	wpSvc := appwordpress.NewService(repo)
-	server := handlers.NewServer(healthHandler, handlers.NewWordpressSitesHandler(wpSvc), handlers.NewLoginHandler(nil), handlers.NewArticlesHandler(nil), handlers.NewLinkbuildingHandler(nil), handlers.NewApiTokensHandler(nil), handlers.NewEmailScrapeHandler(nil))
+	server := handlers.NewServer(healthHandler, handlers.NewWordpressSitesHandler(wpSvc), handlers.NewLoginHandler(nil), handlers.NewArticlesHandler(nil), handlers.NewLinkbuildingHandler(nil), handlers.NewApiTokensHandler(nil), handlers.NewEmailScrapeHandler(nil), handlers.NewLeadStatsHandler(nil))
 	return apihttp.NewRouter(config.ServerConfig{
 		Host:               "localhost",
 		Port:               "0",
@@ -161,9 +162,10 @@ func TestWordpress_CreateAndList(t *testing.T) {
 
 	rec := doJSON(t, router, http.MethodPost, "/wordpress-sites", oapigen.CreateWordpressSiteRequest{
 		Alias:       "blog",
+		Provider:    oapigen.Wordpress,
 		Url:         "https://blog.example.com",
-		Username:    "admin",
-		AppPassword: "secret pass",
+		Username:    ptrTo("admin"),
+		AppPassword: ptrTo("secret pass"),
 	})
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("create status = %d, want 201 (body=%s)", rec.Code, rec.Body.String())
@@ -196,9 +198,10 @@ func TestWordpress_CreateDuplicate(t *testing.T) {
 	router := newWordpressRouter(newFakeRepo())
 	req := oapigen.CreateWordpressSiteRequest{
 		Alias:       "dup",
+		Provider:    oapigen.Wordpress,
 		Url:         "https://a.example.com",
-		Username:    "admin",
-		AppPassword: "p",
+		Username:    ptrTo("admin"),
+		AppPassword: ptrTo("p"),
 	}
 	if rec := doJSON(t, router, http.MethodPost, "/wordpress-sites", req); rec.Code != http.StatusCreated {
 		t.Fatalf("first create status = %d, want 201", rec.Code)
@@ -232,7 +235,7 @@ func TestWordpress_Update(t *testing.T) {
 	router := newWordpressRouter(repo)
 
 	rec := doJSON(t, router, http.MethodPost, "/wordpress-sites", oapigen.CreateWordpressSiteRequest{
-		Alias: "orig", Url: "https://x.example.com", Username: "u", AppPassword: "p",
+		Alias: "orig", Provider: oapigen.Wordpress, Url: "https://x.example.com", Username: ptrTo("u"), AppPassword: ptrTo("p"),
 	})
 	var created oapigen.WordpressSite
 	if err := json.NewDecoder(rec.Body).Decode(&created); err != nil {
@@ -265,7 +268,7 @@ func TestWordpress_Delete(t *testing.T) {
 	router := newWordpressRouter(repo)
 
 	rec := doJSON(t, router, http.MethodPost, "/wordpress-sites", oapigen.CreateWordpressSiteRequest{
-		Alias: "todelete", Url: "https://d.example.com", Username: "u", AppPassword: "p",
+		Alias: "todelete", Provider: oapigen.Wordpress, Url: "https://d.example.com", Username: ptrTo("u"), AppPassword: ptrTo("p"),
 	})
 	var created oapigen.WordpressSite
 	if err := json.NewDecoder(rec.Body).Decode(&created); err != nil {

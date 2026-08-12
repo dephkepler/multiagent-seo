@@ -5,6 +5,22 @@ import (
 	"strings"
 )
 
+// Telegram's sendMessage hard-caps text at 4096 UTF-16 code units; the rest
+// of FormatTelegram's fixed fields (case id, name, phone, page, date) run to
+// a few hundred at most, so this leaves comfortable headroom. Only the
+// Telegram notification is truncated — the lead itself is stored with the
+// full comment via store.Save/sheet.AppendRow, which don't go through this
+// function.
+const maxTelegramMessageLen = 3500
+
+func truncateMessage(s string) string {
+	r := []rune(s)
+	if len(r) <= maxTelegramMessageLen {
+		return s
+	}
+	return string(r[:maxTelegramMessageLen]) + "… (обрізано)"
+}
+
 func FormatTelegram(l Lead) string {
 	var b strings.Builder
 	b.WriteString("📩 Нова заявка\n")
@@ -26,7 +42,7 @@ func FormatTelegram(l Lead) string {
 
 	if strings.TrimSpace(l.Message) != "" {
 		b.WriteString("\nКоментар:\n")
-		b.WriteString(html.EscapeString(l.Message))
+		b.WriteString(html.EscapeString(truncateMessage(l.Message)))
 		b.WriteString("\n")
 	}
 

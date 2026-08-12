@@ -27,6 +27,14 @@ type TopicSource interface {
 	Clusters(ctx context.Context) (map[string]Cluster, error)
 }
 
+// TopicSourceProvider resolves the TopicSource a site's keywords should come
+// from for a given language — a site with its own configured keyword sheet
+// for that language gets a source scoped to that sheet, anything else falls
+// back to a shared default.
+type TopicSourceProvider interface {
+	ForSite(ctx context.Context, siteID uuid.UUID, language string) (TopicSource, error)
+}
+
 type ContentChecker interface {
 	Check(ctx context.Context, content string) (*CheckResult, error)
 }
@@ -40,8 +48,11 @@ type Publisher interface {
 	Publish(ctx context.Context, postID int64) (postURL string, err error)
 }
 
+// ForSite resolves the language a site publishes with — a WordPress site
+// ignores it (it isn't bilingual in this system's model), MODX uses it to
+// pick which context (and thus URL prefix) the article lands under.
 type PublisherProvider interface {
-	ForSite(ctx context.Context, siteID uuid.UUID) (Publisher, error)
+	ForSite(ctx context.Context, siteID uuid.UUID, language string) (Publisher, error)
 }
 
 type PromptStore interface {

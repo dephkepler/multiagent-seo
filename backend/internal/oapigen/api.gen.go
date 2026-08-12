@@ -66,6 +66,42 @@ func (e RateArticleRequestRating) Valid() bool {
 	}
 }
 
+// Defines values for SiteProvider.
+const (
+	Modx      SiteProvider = "modx"
+	Wordpress SiteProvider = "wordpress"
+)
+
+// Valid indicates whether the value is a known member of the SiteProvider enum.
+func (e SiteProvider) Valid() bool {
+	switch e {
+	case Modx:
+		return true
+	case Wordpress:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetLeadStatsParamsGroupBy.
+const (
+	Day   GetLeadStatsParamsGroupBy = "day"
+	Month GetLeadStatsParamsGroupBy = "month"
+)
+
+// Valid indicates whether the value is a known member of the GetLeadStatsParamsGroupBy enum.
+func (e GetLeadStatsParamsGroupBy) Valid() bool {
+	switch e {
+	case Day:
+		return true
+	case Month:
+		return true
+	default:
+		return false
+	}
+}
+
 // ApiToken defines model for ApiToken.
 type ApiToken struct {
 	CreatedAt time.Time          `json:"createdAt"`
@@ -123,10 +159,12 @@ type CreateApiTokenRequest struct {
 
 // CreateWordpressSiteRequest defines model for CreateWordpressSiteRequest.
 type CreateWordpressSiteRequest struct {
-	Alias       string `json:"alias" validate:"required,min=1,max=100"`
-	AppPassword string `json:"appPassword" validate:"required,min=1"`
-	Url         string `json:"url" validate:"required,url"`
-	Username    string `json:"username" validate:"required,min=1,max=255"`
+	Alias       string                    `json:"alias" validate:"required,min=1,max=100"`
+	AppPassword *string                   `json:"appPassword,omitempty" validate:"required"`
+	Languages   map[string]LanguageConfig `json:"languages,omitempty"`
+	Provider    SiteProvider              `json:"provider" validate:"required,oneof=wordpress modx"`
+	Url         string                    `json:"url" validate:"required,url"`
+	Username    *string                   `json:"username,omitempty" validate:"required_if=Provider wordpress,omitempty,max=255"`
 }
 
 // ErrorResponse RFC 7807 problem details
@@ -202,6 +240,45 @@ type HealthResponse struct {
 
 // HealthResponseStatus defines model for HealthResponse.Status.
 type HealthResponseStatus string
+
+// LanguageConfig Per-language settings for a bilingual site — which MODX context a language publishes into, and which keyword sheet (if any) supplies its generation topics.
+type LanguageConfig struct {
+	ContextKey            *string `json:"contextKey,omitempty"`
+	KeywordsSheet         *string `json:"keywordsSheet,omitempty"`
+	KeywordsSpreadsheetId *string `json:"keywordsSpreadsheetId,omitempty"`
+}
+
+// LeadStats defines model for LeadStats.
+type LeadStats struct {
+	ByCreator []LeadStatsCount `json:"by_creator"`
+	ByPage    []LeadStatsCount `json:"by_page"`
+	Range     struct {
+		From    openapi_types.Date `json:"from"`
+		GroupBy string             `json:"group_by"`
+		To      openapi_types.Date `json:"to"`
+	} `json:"range"`
+	Totals struct {
+		AvgTicket     float32 `json:"avg_ticket"`
+		Clients       int64   `json:"clients"`
+		Consultations int64   `json:"consultations"`
+		Leads         int64   `json:"leads"`
+		Revenue       float32 `json:"revenue"`
+	} `json:"totals"`
+	Trend []LeadStatsBucket `json:"trend"`
+}
+
+// LeadStatsBucket defines model for LeadStatsBucket.
+type LeadStatsBucket struct {
+	Bucket        string `json:"bucket"`
+	Consultations int64  `json:"consultations"`
+	Leads         int64  `json:"leads"`
+}
+
+// LeadStatsCount defines model for LeadStatsCount.
+type LeadStatsCount struct {
+	Count int64  `json:"count"`
+	Key   string `json:"key"`
+}
 
 // LoginRequest defines model for LoginRequest.
 type LoginRequest struct {
@@ -287,13 +364,17 @@ type ScrapeJob struct {
 	Total     int    `json:"total"`
 }
 
+// SiteProvider defines model for SiteProvider.
+type SiteProvider string
+
 // UpdateWordpressSiteRequest defines model for UpdateWordpressSiteRequest.
 type UpdateWordpressSiteRequest struct {
-	Alias       *string `json:"alias,omitempty" validate:"omitempty,min=1,max=100"`
-	AppPassword *string `json:"appPassword,omitempty" validate:"omitempty,min=1"`
-	Enabled     *bool   `json:"enabled,omitempty"`
-	Url         *string `json:"url,omitempty" validate:"omitempty,url"`
-	Username    *string `json:"username,omitempty" validate:"omitempty,min=1,max=255"`
+	Alias       *string                   `json:"alias,omitempty" validate:"omitempty,min=1,max=100"`
+	AppPassword *string                   `json:"appPassword,omitempty"`
+	Enabled     *bool                     `json:"enabled,omitempty"`
+	Languages   map[string]LanguageConfig `json:"languages,omitempty"`
+	Url         *string                   `json:"url,omitempty" validate:"omitempty,url"`
+	Username    *string                   `json:"username,omitempty" validate:"omitempty,max=255"`
 }
 
 // User defines model for User.
@@ -305,13 +386,15 @@ type User struct {
 
 // WordpressSite defines model for WordpressSite.
 type WordpressSite struct {
-	Alias     string             `json:"alias"`
-	CreatedAt time.Time          `json:"createdAt"`
-	Enabled   bool               `json:"enabled"`
-	Id        openapi_types.UUID `json:"id"`
-	UpdatedAt time.Time          `json:"updatedAt"`
-	Url       string             `json:"url"`
-	Username  string             `json:"username"`
+	Alias     string                    `json:"alias"`
+	CreatedAt time.Time                 `json:"createdAt"`
+	Enabled   bool                      `json:"enabled"`
+	Id        openapi_types.UUID        `json:"id"`
+	Languages map[string]LanguageConfig `json:"languages,omitempty"`
+	Provider  SiteProvider              `json:"provider"`
+	UpdatedAt time.Time                 `json:"updatedAt"`
+	Url       string                    `json:"url"`
+	Username  string                    `json:"username"`
 }
 
 // BadRequest RFC 7807 problem details
@@ -334,6 +417,16 @@ type ListArticlesParams struct {
 	Limit  *int `form:"limit,omitempty" json:"limit,omitempty"`
 	Offset *int `form:"offset,omitempty" json:"offset,omitempty"`
 }
+
+// GetLeadStatsParams defines parameters for GetLeadStats.
+type GetLeadStatsParams struct {
+	From    openapi_types.Date         `form:"from" json:"from"`
+	To      openapi_types.Date         `form:"to" json:"to"`
+	GroupBy *GetLeadStatsParamsGroupBy `form:"group_by,omitempty" json:"group_by,omitempty"`
+}
+
+// GetLeadStatsParamsGroupBy defines parameters for GetLeadStats.
+type GetLeadStatsParamsGroupBy string
 
 // ListPlacementsParams defines parameters for ListPlacements.
 type ListPlacementsParams struct {
@@ -417,6 +510,9 @@ type ServerInterface interface {
 	// Health check
 	// (GET /healthz)
 	GetHealthz(w http.ResponseWriter, r *http.Request)
+	// Aggregate lead/consultation stats over a date range, for the admin dashboard
+	// (GET /leads/stats)
+	GetLeadStats(w http.ResponseWriter, r *http.Request, params GetLeadStatsParams)
 	// Place a backlink to one of our WordPress sites in each suitable donor's latest post
 	// (POST /linkbuilding/place-backlinks)
 	PlaceBacklinks(w http.ResponseWriter, r *http.Request)
@@ -534,6 +630,12 @@ func (_ Unimplemented) GenerateBatch(w http.ResponseWriter, r *http.Request) {
 // Health check
 // (GET /healthz)
 func (_ Unimplemented) GetHealthz(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Aggregate lead/consultation stats over a date range, for the admin dashboard
+// (GET /leads/stats)
+func (_ Unimplemented) GetLeadStats(w http.ResponseWriter, r *http.Request, params GetLeadStatsParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -969,6 +1071,71 @@ func (siw *ServerInterfaceWrapper) GetHealthz(w http.ResponseWriter, r *http.Req
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetHealthz(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetLeadStats operation middleware
+func (siw *ServerInterfaceWrapper) GetLeadStats(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetLeadStatsParams
+
+	// ------------- Required query parameter "from" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "from", r.URL.Query(), &params.From, runtime.BindQueryParameterOptions{Type: "string", Format: "date"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "from"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "from", Err: err})
+		}
+		return
+	}
+
+	// ------------- Required query parameter "to" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "to", r.URL.Query(), &params.To, runtime.BindQueryParameterOptions{Type: "string", Format: "date"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "to"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "to", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "group_by" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "group_by", r.URL.Query(), &params.GroupBy, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "group_by"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "group_by", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetLeadStats(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1433,6 +1600,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Get(options.BaseURL+"/healthz", wrapper.GetHealthz)
 	})
 	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/leads/stats", wrapper.GetLeadStats)
+	})
+	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/linkbuilding/place-backlinks", wrapper.PlaceBacklinks)
 	})
 	r.Group(func(r chi.Router) {
@@ -1471,66 +1641,75 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"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",
+	"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",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

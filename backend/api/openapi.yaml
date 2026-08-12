@@ -544,6 +544,42 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+  /leads/stats:
+    get:
+      operationId: getLeadStats
+      security:
+        - bearerAuth: [ ]
+      tags: [ Leads ]
+      summary: Aggregate lead/consultation stats over a date range, for the admin dashboard
+      parameters:
+        - name: from
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+        - name: group_by
+          in: query
+          schema:
+            type: string
+            enum: [ day, month ]
+            default: day
+      responses:
+        "200":
+          description: Aggregated stats for the range
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LeadStats"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
 components:
   securitySchemes:
     bearerAuth:
@@ -1004,20 +1040,44 @@ components:
         instance:
           type: string
 
+    SiteProvider:
+      type: string
+      enum: [ wordpress, modx ]
+
+    LanguageConfig:
+      type: object
+      description: >
+        Per-language settings for a bilingual site — which MODX context a
+        language publishes into, and which keyword sheet (if any) supplies
+        its generation topics.
+      properties:
+        contextKey:
+          type: string
+        keywordsSpreadsheetId:
+          type: string
+        keywordsSheet:
+          type: string
+
     WordpressSite:
       type: object
-      required: [ id, alias, url, username, enabled, createdAt, updatedAt ]
+      required: [ id, alias, provider, url, username, enabled, createdAt, updatedAt ]
       properties:
         id:
           type: string
           format: uuid
         alias:
           type: string
+        provider:
+          $ref: "#/components/schemas/SiteProvider"
         url:
           type: string
           format: uri
         username:
           type: string
+        languages:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/LanguageConfig"
         enabled:
           type: boolean
         createdAt:
@@ -1029,12 +1089,16 @@ components:
 
     CreateWordpressSiteRequest:
       type: object
-      required: [ alias, url, username, appPassword ]
+      required: [ alias, provider, url ]
       properties:
         alias:
           type: string
           x-oapi-codegen-extra-tags:
             validate: "required,min=1,max=100"
+        provider:
+          allOf: [ $ref: "#/components/schemas/SiteProvider" ]
+          x-oapi-codegen-extra-tags:
+            validate: "required,oneof=wordpress modx"
         url:
           type: string
           x-oapi-codegen-extra-tags:
@@ -1042,11 +1106,15 @@ components:
         username:
           type: string
           x-oapi-codegen-extra-tags:
-            validate: "required,min=1,max=255"
+            validate: "required_if=Provider wordpress,omitempty,max=255"
         appPassword:
           type: string
           x-oapi-codegen-extra-tags:
-            validate: "required,min=1"
+            validate: "required"
+        languages:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/LanguageConfig"
 
     UpdateWordpressSiteRequest:
       type: object
@@ -1062,10 +1130,81 @@ components:
         username:
           type: string
           x-oapi-codegen-extra-tags:
-            validate: "omitempty,min=1,max=255"
+            validate: "omitempty,max=255"
         appPassword:
           type: string
-          x-oapi-codegen-extra-tags:
-            validate: "omitempty,min=1"
+        languages:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/LanguageConfig"
         enabled:
           type: boolean
+
+    LeadStats:
+      type: object
+      required: [ range, totals, trend, by_page, by_creator ]
+      properties:
+        range:
+          type: object
+          required: [ from, to, group_by ]
+          properties:
+            from:
+              type: string
+              format: date
+            to:
+              type: string
+              format: date
+            group_by:
+              type: string
+        totals:
+          type: object
+          required: [ leads, clients, consultations, revenue, avg_ticket ]
+          properties:
+            leads:
+              type: integer
+              format: int64
+            clients:
+              type: integer
+              format: int64
+            consultations:
+              type: integer
+              format: int64
+            revenue:
+              type: number
+            avg_ticket:
+              type: number
+        trend:
+          type: array
+          items:
+            $ref: "#/components/schemas/LeadStatsBucket"
+        by_page:
+          type: array
+          items:
+            $ref: "#/components/schemas/LeadStatsCount"
+        by_creator:
+          type: array
+          items:
+            $ref: "#/components/schemas/LeadStatsCount"
+
+    LeadStatsBucket:
+      type: object
+      required: [ bucket, leads, consultations ]
+      properties:
+        bucket:
+          type: string
+        leads:
+          type: integer
+          format: int64
+        consultations:
+          type: integer
+          format: int64
+
+    LeadStatsCount:
+      type: object
+      required: [ key, count ]
+      properties:
+        key:
+          type: string
+        count:
+          type: integer
+          format: int64

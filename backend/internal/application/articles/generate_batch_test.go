@@ -28,7 +28,7 @@ func batchDefaults() apparticles.Defaults {
 	}
 }
 
-func newBatchService(repo *fakeRepo, topics articles.TopicSource) *apparticles.Service {
+func newBatchService(repo *fakeRepo, topics articles.TopicSourceProvider) *apparticles.Service {
 	return apparticles.NewService(
 		repo,
 		fakeLLMFactory{},
@@ -63,6 +63,7 @@ func (c configTopics) Lookup(_ context.Context, topic string) (articles.Cluster,
 	}
 	return articles.Cluster{}, nil
 }
+func (c configTopics) ForSite(context.Context, uuid.UUID, string) (articles.TopicSource, error) { return c, nil }
 
 // spyTopics records whether Lookup was invoked. Lookup returns a deliberately
 // distinct cluster so a test can prove the pre-resolved cluster (not Lookup's)
@@ -82,6 +83,7 @@ func (s *spyTopics) Lookup(context.Context, string) (articles.Cluster, error) {
 	s.lookupCalled = true
 	return s.lookupResult, nil
 }
+func (s *spyTopics) ForSite(context.Context, uuid.UUID, string) (articles.TopicSource, error) { return s, nil }
 
 // errTopics injects errors from each TopicSource method independently.
 type errTopics struct {
@@ -98,6 +100,7 @@ func (e errTopics) Clusters(context.Context) (map[string]articles.Cluster, error
 func (e errTopics) Lookup(_ context.Context, topic string) (articles.Cluster, error) {
 	return articles.Cluster{Keywords: []string{topic, "secondary"}, Title: "Title"}, nil
 }
+func (e errTopics) ForSite(context.Context, uuid.UUID, string) (articles.TopicSource, error) { return e, nil }
 
 // createErrRepo fails Create for one keyword and delegates the rest to fakeRepo.
 type createErrRepo struct {

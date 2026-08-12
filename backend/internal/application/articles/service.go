@@ -63,7 +63,7 @@ type Service struct {
 	repo      articles.ArticleRepository
 	llm       articles.LLMFactory
 	serp      articles.SERPProvider
-	topics    articles.TopicSource
+	topics    articles.TopicSourceProvider
 	checker   articles.ContentChecker
 	images    articles.ImageResolver
 	publisher articles.PublisherProvider
@@ -77,7 +77,7 @@ func NewService(
 	repo articles.ArticleRepository,
 	llm articles.LLMFactory,
 	serp articles.SERPProvider,
-	topics articles.TopicSource,
+	topics articles.TopicSourceProvider,
 	checker articles.ContentChecker,
 	images articles.ImageResolver,
 	publisher articles.PublisherProvider,
@@ -246,7 +246,11 @@ func (s *Service) resolve(ctx context.Context, req GenerateRequest) (genSettings
 	if req.cluster != nil {
 		cluster = *req.cluster
 	} else {
-		c, err := s.topics.Lookup(ctx, req.Keyword)
+		topics, err := s.topics.ForSite(ctx, req.SiteID, settings.language)
+		if err != nil {
+			return genSettings{}, fmt.Errorf("topic source for site %s: %w", req.SiteID, err)
+		}
+		c, err := topics.Lookup(ctx, req.Keyword)
 		if err != nil {
 			return genSettings{}, fmt.Errorf("cluster lookup: %w", err)
 		}
@@ -356,11 +360,16 @@ func (s *Service) GenerateBatch(ctx context.Context, count int, shared GenerateR
 		count = maxBatchCount
 	}
 
-	topics, err := s.topics.Topics(ctx)
+	language := pickStr(shared.Language, s.defaults.Language)
+	topicSource, err := s.topics.ForSite(ctx, shared.SiteID, language)
+	if err != nil {
+		return nil, fmt.Errorf("topic source for site %s: %w", shared.SiteID, err)
+	}
+	topics, err := topicSource.Topics(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list topics: %w", err)
 	}
-	clusters, err := s.topics.Clusters(ctx)
+	clusters, err := topicSource.Clusters(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list clusters: %w", err)
 	}
@@ -611,7 +620,7 @@ func (s *Service) finalizeDraft(ctx context.Context, log *slog.Logger, articleID
 		content.tokens,
 	)
 
-	pub, err := s.publisher.ForSite(ctx, settings.siteID)
+	pub, err := s.publisher.ForSite(ctx, settings.siteID, settings.language)
 	if err != nil {
 		return false, fmt.Errorf("resolve publisher: %w", err)
 	}
@@ -796,7 +805,11 @@ func (s *Service) publish(ctx context.Context, log *slog.Logger, articleID int64
 		return articles.Article{}, ErrNoDraftToPublish
 	}
 
-	pub, err := s.publisher.ForSite(ctx, article.SiteID)
+	var params articleRequestParams
+	if err := json.Unmarshal(article.RequestParams, &params); err != nil {
+		return articles.Article{}, fmt.Errorf("decode stored request params: %w", err)
+	}
+	pub, err := s.publisher.ForSite(ctx, article.SiteID, params.Language)
 	if err != nil {
 		return articles.Article{}, fmt.Errorf("resolve publisher: %w", err)
 	}

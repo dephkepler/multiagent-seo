@@ -23,6 +23,7 @@ func TestWordpressSiteRepository_CreateEncryptsAppPassword(t *testing.T) {
 
 	const appPassword = "super secret app password"
 	site, err := repo.Create(ctx, wordpress.CreateSite{
+		Provider:    wordpress.ProviderWordPress,
 		Alias:       "blog",
 		URL:         "https://blog.example.com",
 		Username:    "admin",
@@ -54,6 +55,7 @@ func TestWordpressSiteRepository_CredentialsRoundTrip(t *testing.T) {
 
 	const appPassword = "abcd efgh ijkl mnop"
 	site, err := repo.Create(ctx, wordpress.CreateSite{
+		Provider:    wordpress.ProviderWordPress,
 		Alias:       "creds",
 		URL:         "https://creds.example.com",
 		Username:    "editor",
@@ -83,7 +85,8 @@ func TestWordpressSiteRepository_GetAndList(t *testing.T) {
 	repo := postgres.NewWordpressSiteRepository(testsupport.NewTestDB(t, baseConnStr), testEncKey)
 
 	site, err := repo.Create(ctx, wordpress.CreateSite{
-		Alias: "one", URL: "https://one.example.com", Username: "u", AppPassword: "p",
+		Provider: wordpress.ProviderWordPress,
+		Alias:    "one", URL: "https://one.example.com", Username: "u", AppPassword: "p",
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -121,7 +124,8 @@ func TestWordpressSiteRepository_Update(t *testing.T) {
 	repo := postgres.NewWordpressSiteRepository(testsupport.NewTestDB(t, baseConnStr), testEncKey)
 
 	site, err := repo.Create(ctx, wordpress.CreateSite{
-		Alias: "before", URL: "https://before.example.com", Username: "u", AppPassword: "p",
+		Provider: wordpress.ProviderWordPress,
+		Alias:    "before", URL: "https://before.example.com", Username: "u", AppPassword: "p",
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -145,7 +149,8 @@ func TestWordpressSiteRepository_DeleteSoftDeletes(t *testing.T) {
 	repo := postgres.NewWordpressSiteRepository(testsupport.NewTestDB(t, baseConnStr), testEncKey)
 
 	site, err := repo.Create(ctx, wordpress.CreateSite{
-		Alias: "doomed", URL: "https://doomed.example.com", Username: "u", AppPassword: "p",
+		Provider: wordpress.ProviderWordPress,
+		Alias:    "doomed", URL: "https://doomed.example.com", Username: "u", AppPassword: "p",
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)

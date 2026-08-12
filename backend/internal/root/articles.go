@@ -27,11 +27,13 @@ func buildArticles(ctx context.Context, cfg config.Config, log *slog.Logger, poo
 	promptRepo := postgres.NewPromptRepository(pool)
 	llmFactory := infrallm.NewFactory(cfg.LLM, log)
 
+	topicsProvider := sheets.NewTopicProvider(wordpressRepo, cfg.Sheets.CredentialsFile, newTopics(ctx, cfg, log), log)
+
 	svc := apparticles.NewService(
 		articleRepo,
 		llmFactory,
 		newSERP(cfg, log),
-		newTopics(ctx, cfg, log),
+		topicsProvider,
 		newChecker(cfg, log),
 		pexels.New(cfg.Pexels.APIKey, log),
 		infrawp.NewProvider(wordpressRepo, log, cfg.WordPress.HTTPTimeout),

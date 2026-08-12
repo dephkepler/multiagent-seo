@@ -64,9 +64,11 @@ func (h *WordpressSitesHandler) CreateWordpressSite(w http.ResponseWriter, r *ht
 
 	site, err := h.sites.Create(r.Context(), domainwp.CreateSite{
 		Alias:       body.Alias,
+		Provider:    domainwp.Provider(body.Provider),
 		URL:         body.Url,
-		Username:    body.Username,
-		AppPassword: body.AppPassword,
+		Username:    strPtrValue(body.Username),
+		AppPassword: strPtrValue(body.AppPassword),
+		Languages:   fromAPILanguages(body.Languages),
 	})
 	if err != nil {
 		h.writeError(r.Context(), w, "create_site", err)
@@ -104,6 +106,7 @@ func (h *WordpressSitesHandler) UpdateWordpressSite(w http.ResponseWriter, r *ht
 		Username:    body.Username,
 		AppPassword: body.AppPassword,
 		Enabled:     body.Enabled,
+		Languages:   fromAPILanguages(body.Languages),
 	})
 	if err != nil {
 		h.writeError(r.Context(), w, "update_site", err)
@@ -133,10 +136,56 @@ func toAPISite(s domainwp.Site) oapigen.WordpressSite {
 	return oapigen.WordpressSite{
 		Id:        s.ID,
 		Alias:     s.Alias,
+		Provider:  oapigen.SiteProvider(s.Provider),
 		Url:       s.URL,
 		Username:  s.Username,
+		Languages: toAPILanguages(s.Languages),
 		Enabled:   s.Enabled,
 		CreatedAt: s.CreatedAt,
 		UpdatedAt: s.UpdatedAt,
 	}
+}
+
+func fromAPILanguages(in map[string]oapigen.LanguageConfig) map[string]domainwp.LanguageConfig {
+	if in == nil {
+		return nil
+	}
+	out := make(map[string]domainwp.LanguageConfig, len(in))
+	for lang, cfg := range in {
+		out[lang] = domainwp.LanguageConfig{
+			ContextKey:            strPtrValue(cfg.ContextKey),
+			KeywordsSpreadsheetID: strPtrValue(cfg.KeywordsSpreadsheetId),
+			KeywordsSheet:         strPtrValue(cfg.KeywordsSheet),
+		}
+	}
+	return out
+}
+
+func toAPILanguages(in map[string]domainwp.LanguageConfig) map[string]oapigen.LanguageConfig {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]oapigen.LanguageConfig, len(in))
+	for lang, cfg := range in {
+		out[lang] = oapigen.LanguageConfig{
+			ContextKey:            ptrOrNil(cfg.ContextKey),
+			KeywordsSpreadsheetId: ptrOrNil(cfg.KeywordsSpreadsheetID),
+			KeywordsSheet:         ptrOrNil(cfg.KeywordsSheet),
+		}
+	}
+	return out
+}
+
+func strPtrValue(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
+func ptrOrNil(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
 }

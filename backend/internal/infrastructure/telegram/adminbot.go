@@ -2,9 +2,11 @@ package telegram
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"html"
 	"log/slog"
+	"net/http"
 	"strconv"
 	"strings"
 	"time"
@@ -126,19 +128,36 @@ func NewAdminBot(
 	}, nil
 }
 
+// Run polls for updates itself instead of using the library's
+// GetUpdatesChan, which logs every failed poll straight to the stdlib
+// log package regardless of cause. A 409 Conflict here just means another
+// instance (usually prod) already holds this bot token's long-poll slot —
+// expected during local dev, not worth a log line every 3 seconds.
 func (b *AdminBot) Run(ctx context.Context) {
-	u := tgbotapi.NewUpdate(0)
-	u.Timeout = 60
-	updates := b.bot.GetUpdatesChan(u)
-
+	offset := 0
 	for {
 		select {
 		case <-ctx.Done():
-			b.bot.StopReceivingUpdates()
 			return
-		case update, ok := <-updates:
-			if !ok {
-				return
+		default:
+		}
+
+		u := tgbotapi.NewUpdate(offset)
+		u.Timeout = 60
+
+		updates, err := b.bot.GetUpdates(u)
+		if err != nil {
+			var tgErr *tgbotapi.Error
+			if !errors.As(err, &tgErr) || tgErr.Code != http.StatusConflict {
+				b.log.WarnContext(ctx, "telegram getUpdates failed", "error", err)
+			}
+			time.Sleep(3 * time.Second)
+			continue
+		}
+
+		for _, update := range updates {
+			if update.UpdateID >= offset {
+				offset = update.UpdateID + 1
 			}
 			b.handle(ctx, update)
 		}

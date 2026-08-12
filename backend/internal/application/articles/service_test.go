@@ -91,6 +91,9 @@ func (fakeTopics) Lookup(_ context.Context, topic string) (articles.Cluster, err
 func (fakeTopics) Topics(context.Context) ([]string, error) {
 	return []string{"topic-a", "topic-b"}, nil
 }
+func (fakeTopics) ForSite(context.Context, uuid.UUID, string) (articles.TopicSource, error) {
+	return fakeTopics{}, nil
+}
 func (fakeTopics) Clusters(context.Context) (map[string]articles.Cluster, error) {
 	return map[string]articles.Cluster{
 		"topic-a": {Keywords: []string{"topic-a", "secondary"}, Title: "Title"},
@@ -119,7 +122,7 @@ func (fakePub) Publish(context.Context, int64) (string, error) { return "http://
 
 type fakePubProvider struct{}
 
-func (fakePubProvider) ForSite(context.Context, uuid.UUID) (articles.Publisher, error) {
+func (fakePubProvider) ForSite(context.Context, uuid.UUID, string) (articles.Publisher, error) {
 	return fakePub{}, nil
 }
 
@@ -167,6 +170,9 @@ func (emptyTopics) Lookup(context.Context, string) (articles.Cluster, error) {
 	return articles.Cluster{}, nil
 }
 func (emptyTopics) Topics(context.Context) ([]string, error) { return nil, nil }
+func (emptyTopics) ForSite(context.Context, uuid.UUID, string) (articles.TopicSource, error) {
+	return emptyTopics{}, nil
+}
 func (emptyTopics) Clusters(context.Context) (map[string]articles.Cluster, error) {
 	return nil, nil
 }

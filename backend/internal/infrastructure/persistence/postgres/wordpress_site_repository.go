@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -23,17 +24,28 @@ func NewWordpressSiteRepository(db *pgxpool.Pool, encKey string) *WordpressSiteR
 }
 
 func (r *WordpressSiteRepository) Create(ctx context.Context, in wordpress.CreateSite) (wordpress.Site, error) {
+	langs, err := marshalLanguages(in.Languages)
+	if err != nil {
+		return wordpress.Site{}, fmt.Errorf("marshal languages: %w", err)
+	}
+
 	const q = `
-		INSERT INTO wordpress_sites (alias, url, username, app_password)
-		VALUES (@alias, @url, @username, pgp_sym_encrypt(@app_password, @enc_key))
-		RETURNING id, alias, url, username, enabled, created_at, updated_at`
+		INSERT INTO wordpress_sites (alias, provider, url, username, app_password, languages)
+		VALUES (
+			@alias, @provider, @url, @username,
+			CASE WHEN @app_password = '' THEN NULL ELSE pgp_sym_encrypt(@app_password, @enc_key) END,
+			@languages
+		)
+		RETURNING id, alias, provider, url, coalesce(username, ''), languages, enabled, created_at, updated_at`
 
 	row := r.db.QueryRow(ctx, q, pgx.NamedArgs{
 		"alias":        in.Alias,
+		"provider":     string(in.Provider),
 		"url":          in.URL,
-		"username":     in.Username,
+		"username":     nullify(in.Username),
 		"app_password": in.AppPassword,
 		"enc_key":      r.encKey,
+		"languages":    langs,
 	})
 
 	site, err := scanSite(row)
@@ -46,6 +58,23 @@ func (r *WordpressSiteRepository) Create(ctx context.Context, in wordpress.Creat
 	return site, nil
 }
 
+// nullify turns an empty string into a nil driver value, so optional
+// provider-specific fields (e.g. WordPress username on a MODX row) land as
+// SQL NULL instead of an empty string.
+func nullify(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
+}
+
+func marshalLanguages(langs map[string]wordpress.LanguageConfig) ([]byte, error) {
+	if langs == nil {
+		langs = map[string]wordpress.LanguageConfig{}
+	}
+	return json.Marshal(langs)
+}
+
 func mapSiteAliasError(err error) error {
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
@@ -56,7 +85,7 @@ func mapSiteAliasError(err error) error {
 
 func (r *WordpressSiteRepository) List(ctx context.Context) ([]wordpress.Site, error) {
 	const q = `
-		SELECT id, alias, url, username, enabled, created_at, updated_at
+		SELECT id, alias, provider, url, coalesce(username, ''), languages, enabled, created_at, updated_at
 		FROM wordpress_sites
 		WHERE deleted_at IS NULL
 		ORDER BY created_at`
@@ -83,7 +112,7 @@ func (r *WordpressSiteRepository) List(ctx context.Context) ([]wordpress.Site, e
 
 func (r *WordpressSiteRepository) Get(ctx context.Context, id uuid.UUID) (wordpress.Site, error) {
 	const q = `
-		SELECT id, alias, url, username, enabled, created_at, updated_at
+		SELECT id, alias, provider, url, coalesce(username, ''), languages, enabled, created_at, updated_at
 		FROM wordpress_sites
 		WHERE id = @id AND deleted_at IS NULL`
 
@@ -99,6 +128,15 @@ func (r *WordpressSiteRepository) Get(ctx context.Context, id uuid.UUID) (wordpr
 }
 
 func (r *WordpressSiteRepository) Update(ctx context.Context, id uuid.UUID, in wordpress.UpdateSite) (wordpress.Site, error) {
+	var langs []byte
+	if in.Languages != nil {
+		var err error
+		langs, err = json.Marshal(in.Languages)
+		if err != nil {
+			return wordpress.Site{}, fmt.Errorf("marshal languages: %w", err)
+		}
+	}
+
 	const q = `
 		UPDATE wordpress_sites SET
 			alias        = COALESCE(@alias, alias),
@@ -107,9 +145,10 @@ func (r *WordpressSiteRepository) Update(ctx context.Context, id uuid.UUID, in w
 			enabled      = COALESCE(@enabled, enabled),
 			app_password = CASE WHEN @app_password::text IS NULL THEN app_password
 			                    ELSE pgp_sym_encrypt(@app_password, @enc_key) END,
+			languages    = COALESCE(@languages, languages),
 			updated_at   = now()
 		WHERE id = @id AND deleted_at IS NULL
-		RETURNING id, alias, url, username, enabled, created_at, updated_at`
+		RETURNING id, alias, provider, url, coalesce(username, ''), languages, enabled, created_at, updated_at`
 
 	row := r.db.QueryRow(ctx, q, pgx.NamedArgs{
 		"id":           id,
@@ -119,6 +158,7 @@ func (r *WordpressSiteRepository) Update(ctx context.Context, id uuid.UUID, in w
 		"enabled":      in.Enabled,
 		"app_password": in.AppPassword,
 		"enc_key":      r.encKey,
+		"languages":    langs,
 	})
 
 	site, err := scanSite(row)
@@ -136,18 +176,28 @@ func (r *WordpressSiteRepository) Update(ctx context.Context, id uuid.UUID, in w
 
 func (r *WordpressSiteRepository) Credentials(ctx context.Context, id uuid.UUID) (wordpress.Credentials, error) {
 	const q = `
-		SELECT url, username, pgp_sym_decrypt(app_password, @enc_key)
+		SELECT provider, url, coalesce(username, ''), coalesce(pgp_sym_decrypt(app_password, @enc_key), ''), languages
 		FROM wordpress_sites
 		WHERE id = @id AND deleted_at IS NULL AND enabled = true`
 
 	row := r.db.QueryRow(ctx, q, pgx.NamedArgs{"id": id, "enc_key": r.encKey})
-	var c wordpress.Credentials
-	if err := row.Scan(&c.URL, &c.Username, &c.AppPassword); err != nil {
+	var (
+		c          wordpress.Credentials
+		provider   string
+		languagesB []byte
+	)
+	if err := row.Scan(&provider, &c.URL, &c.Username, &c.AppPassword, &languagesB); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return wordpress.Credentials{}, wordpress.ErrNotFound
 		}
 		return wordpress.Credentials{}, fmt.Errorf("get wordpress credentials: %w", err)
 	}
+	c.Provider = wordpress.Provider(provider)
+	langs, err := unmarshalLanguages(languagesB)
+	if err != nil {
+		return wordpress.Credentials{}, fmt.Errorf("decode languages: %w", err)
+	}
+	c.Languages = langs
 	return c, nil
 }
 
@@ -167,7 +217,31 @@ func (r *WordpressSiteRepository) Delete(ctx context.Context, id uuid.UUID) erro
 }
 
 func scanSite(row pgx.Row) (wordpress.Site, error) {
-	var s wordpress.Site
-	err := row.Scan(&s.ID, &s.Alias, &s.URL, &s.Username, &s.Enabled, &s.CreatedAt, &s.UpdatedAt)
-	return s, err
+	var (
+		s          wordpress.Site
+		provider   string
+		languagesB []byte
+	)
+	if err := row.Scan(&s.ID, &s.Alias, &provider, &s.URL, &s.Username, &languagesB,
+		&s.Enabled, &s.CreatedAt, &s.UpdatedAt); err != nil {
+		return wordpress.Site{}, err
+	}
+	s.Provider = wordpress.Provider(provider)
+	langs, err := unmarshalLanguages(languagesB)
+	if err != nil {
+		return wordpress.Site{}, fmt.Errorf("decode languages: %w", err)
+	}
+	s.Languages = langs
+	return s, nil
+}
+
+func unmarshalLanguages(b []byte) (map[string]wordpress.LanguageConfig, error) {
+	langs := map[string]wordpress.LanguageConfig{}
+	if len(b) == 0 {
+		return langs, nil
+	}
+	if err := json.Unmarshal(b, &langs); err != nil {
+		return nil, err
+	}
+	return langs, nil
 }

@@ -28,6 +28,9 @@ func (lookupPanicTopics) Lookup(context.Context, string) (articles.Cluster, erro
 	panic("Lookup must not be called when req.cluster is pre-resolved")
 }
 func (lookupPanicTopics) Topics(context.Context) ([]string, error) { return nil, nil }
+func (lookupPanicTopics) ForSite(context.Context, uuid.UUID, string) (articles.TopicSource, error) {
+	return lookupPanicTopics{}, nil
+}
 func (lookupPanicTopics) Clusters(context.Context) (map[string]articles.Cluster, error) {
 	return nil, nil
 }

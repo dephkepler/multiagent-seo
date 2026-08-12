@@ -232,6 +232,7 @@ export default function GeneratePage() {
             <Select value={form.language} onChange={(e) => on('language', e.target.value)}>
               <option value='en'>English</option>
               <option value='ru'>Russian</option>
+              <option value='uk'>Ukrainian</option>
             </Select>
           </Field>
           <Field label='Provider'>

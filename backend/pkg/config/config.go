@@ -139,6 +139,15 @@ type WordPressConfig struct {
 	HTTPTimeout   time.Duration `env:"WP_HTTP_TIMEOUT" envDefault:"30s"`
 }
 
+type MODXConfig struct {
+	DBHost     string `env:"MODX_DB_HOST"`
+	DBPort     string `env:"MODX_DB_PORT" envDefault:"3306"`
+	DBUser     string `env:"MODX_DB_USER"`
+	DBPassword string `env:"MODX_DB_PASSWORD"`
+	DBName     string `env:"MODX_DB_NAME"`
+	SiteURL    string `env:"MODX_SITE_URL"`
+}
+
 type JWTConfig struct {
 	Secret string        `env:"JWT_SECRET" envDefault:"dev-insecure-change-me" validate:"required"`
 	TTL    time.Duration `env:"JWT_TTL" envDefault:"24h"`
@@ -165,6 +174,7 @@ type Config struct {
 	Telegram     TelegramConfig
 	LeadsSheets  LeadsSheetsConfig
 	Reminder     ReminderConfig
+	MODX         MODXConfig
 }
 
 type PromptConfig struct {
