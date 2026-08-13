@@ -22,6 +22,11 @@ type Client struct {
 	propertyID string
 }
 
+// ga4MinStartDate is the Data API's own documented floor (2015-08-14) —
+// one day past the "must be greater than 2015-08-13" it reports on a
+// too-early start_date.
+var ga4MinStartDate = time.Date(2015, 8, 14, 0, 0, 0, 0, time.UTC)
+
 func New(ctx context.Context, credentialsFile, propertyID string) (*Client, error) {
 	if credentialsFile == "" || propertyID == "" {
 		return nil, fmt.Errorf("ga4: credentialsFile and propertyID are required")
@@ -50,6 +55,16 @@ func (c *Client) SessionsByPeriod(ctx context.Context, from, to time.Time, group
 	dateDim := "date"
 	if groupBy == "month" {
 		dateDim = "yearMonth"
+	}
+
+	// The dashboard's own "весь период" preset starts from an arbitrarily
+	// early stand-in date (2000-01-01) to mean "no real lower bound" — fine
+	// for Postgres, but GA4's Data API hard-rejects anything before
+	// 2015-08-14 with a 400, which used to take out the *entire* traffic
+	// section (mergeTraffic degrades any GA4 error to "just show zeros").
+	// Clamping here means the caller never has to know GA4's floor.
+	if from.Before(ga4MinStartDate) {
+		from = ga4MinStartDate
 	}
 
 	resp, err := c.svc.Properties.RunReport("properties/"+c.propertyID, &analyticsdata.RunReportRequest{
