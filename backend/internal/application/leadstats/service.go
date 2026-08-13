@@ -3,17 +3,23 @@ package leadstats
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	domain "multiagent-seo/internal/domain/leadstats"
 )
 
 type Service struct {
-	repo domain.Repository
+	repo    domain.Repository
+	traffic domain.TrafficSource // nil if GA4 isn't configured — every traffic field just stays 0
+	log     *slog.Logger
 }
 
-func NewService(repo domain.Repository) *Service {
-	return &Service{repo: repo}
+func NewService(repo domain.Repository, traffic domain.TrafficSource, log *slog.Logger) *Service {
+	if log == nil {
+		log = slog.Default()
+	}
+	return &Service{repo: repo, traffic: traffic, log: log}
 }
 
 // GetStats fetches everything the dashboard needs for one date range in one
@@ -50,6 +56,8 @@ func (s *Service) GetStats(ctx context.Context, from, to time.Time, groupBy stri
 		return domain.Stats{}, fmt.Errorf("leadstats: by category: %w", err)
 	}
 
+	s.mergeTraffic(ctx, from, toInclusive, groupBy, &totals, trend)
+
 	return domain.Stats{
 		From:       from,
 		To:         to,
@@ -61,4 +69,32 @@ func (s *Service) GetStats(ctx context.Context, from, to time.Time, groupBy stri
 		ByStatus:   byStatus,
 		ByCategory: byCategory,
 	}, nil
+}
+
+// mergeTraffic folds GA4 sessions into the already-built trend buckets (by
+// matching Bucket key) and sums them into Totals — a GA4 failure only logs
+// and leaves traffic fields at 0, it never fails the whole dashboard, same
+// as how a sheet-write failure never blocks a lead in ProcessNewLeads.
+func (s *Service) mergeTraffic(ctx context.Context, from, to time.Time, groupBy string, totals *domain.Totals, trend []domain.Bucket) {
+	if s.traffic == nil {
+		return
+	}
+	buckets, err := s.traffic.SessionsByPeriod(ctx, from, to, groupBy)
+	if err != nil {
+		s.log.WarnContext(ctx, "leadstats: ga4 sessions failed, showing dashboard without traffic", "err", err)
+		return
+	}
+
+	byKey := make(map[string]domain.TrafficBucket, len(buckets))
+	for _, b := range buckets {
+		byKey[b.Bucket] = b
+	}
+	for i := range trend {
+		if b, ok := byKey[trend[i].Bucket]; ok {
+			trend[i].SiteSessions = b.Sessions
+			trend[i].OrganicSessions = b.OrganicSessions
+			totals.SiteSessions += b.Sessions
+			totals.OrganicSessions += b.OrganicSessions
+		}
+	}
 }

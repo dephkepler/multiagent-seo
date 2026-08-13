@@ -79,6 +79,15 @@ type LeadsSheetsConfig struct {
 	ConsultationsSheet string `env:"LEADS_SHEETS_CONSULTATIONS_SHEET" envDefault:"consultations"`
 }
 
+// GA4Config is the site-traffic side of the leads dashboard ("Сайт,
+// посетители" / "Сео" columns) — optional, same service account as Sheets
+// (CF_SHEETS_CREDENTIALS_FILE), just needs Viewer on the GA4 property and
+// this numeric property ID. Empty PropertyID disables it, same no-op
+// pattern as LeadsSheets.
+type GA4Config struct {
+	PropertyID string `env:"GA4_PROPERTY_ID"`
+}
+
 type TelegramConfig struct {
 	BotToken     string  `env:"TELEGRAM_BOT_TOKEN"`
 	ChatID       int64   `env:"TELEGRAM_CHAT_ID"`
@@ -173,6 +182,7 @@ type Config struct {
 	Mail         MailConfig
 	Telegram     TelegramConfig
 	LeadsSheets  LeadsSheetsConfig
+	GA4          GA4Config
 	Reminder     ReminderConfig
 	MODX         MODXConfig
 }

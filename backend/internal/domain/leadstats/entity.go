@@ -30,14 +30,32 @@ type Totals struct {
 	CaseFeeContracted float64 // sum of every case's agreed fee
 	CasePaid          float64 // sum of what's actually been received so far
 	CaseOwed          float64 // sum of (fee - paid) across cases still owing — the collections number
+
+	// Site traffic (GA4) — optional, both stay 0 if CF_GA4_PROPERTY_ID isn't
+	// configured. Sessions is every visit regardless of source, Organic is
+	// just organic-search sessions — the old spreadsheet's "Сайт,
+	// посетители" / "Сео" columns.
+	SiteSessions    int64
+	OrganicSessions int64
 }
 
 // Bucket is one point on the trend chart — a day or a month, per GroupBy.
 type Bucket struct {
-	Bucket        string
-	Leads         int64
-	Consultations int64
-	RevenueEarned float64
+	Bucket          string
+	Leads           int64
+	Consultations   int64
+	RevenueEarned   float64
+	SiteSessions    int64 // 0 if GA4 isn't configured, or this bucket predates it
+	OrganicSessions int64
+}
+
+// TrafficBucket is what a TrafficSource returns per period — merged into
+// Bucket by matching Bucket keys (same "2006-01-02"/"2006-01" format),
+// not carried as its own parallel list.
+type TrafficBucket struct {
+	Bucket          string
+	Sessions        int64
+	OrganicSessions int64
 }
 
 // Count is a generic "this key, this many" row — used for the by-page

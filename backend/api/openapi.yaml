@@ -1158,7 +1158,7 @@ components:
               type: string
         totals:
           type: object
-          required: [ leads, clients, consultations, revenue_booked, revenue_earned, revenue_lost, avg_ticket, cases_in_progress, cases_completed, case_fee_contracted, case_paid, case_owed ]
+          required: [ leads, clients, consultations, revenue_booked, revenue_earned, revenue_lost, avg_ticket, cases_in_progress, cases_completed, case_fee_contracted, case_paid, case_owed, site_sessions, organic_sessions ]
           properties:
             leads:
               type: integer
@@ -1189,6 +1189,12 @@ components:
               type: number
             avg_ticket:
               type: number
+            site_sessions:
+              type: integer
+              format: int64
+            organic_sessions:
+              type: integer
+              format: int64
         trend:
           type: array
           items:
@@ -1212,7 +1218,7 @@ components:
 
     LeadStatsBucket:
       type: object
-      required: [ bucket, leads, consultations, revenue_earned ]
+      required: [ bucket, leads, consultations, revenue_earned, site_sessions, organic_sessions ]
       properties:
         bucket:
           type: string
@@ -1224,6 +1230,12 @@ components:
           format: int64
         revenue_earned:
           type: number
+        site_sessions:
+          type: integer
+          format: int64
+        organic_sessions:
+          type: integer
+          format: int64
 
     LeadStatsCreatorRevenue:
       type: object

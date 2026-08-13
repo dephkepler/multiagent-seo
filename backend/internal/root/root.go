@@ -17,7 +17,9 @@ import (
 	appwordpress "multiagent-seo/internal/application/wordpress"
 	domainauth "multiagent-seo/internal/domain/auth"
 	domainhealth "multiagent-seo/internal/domain/health"
+	domainleadstats "multiagent-seo/internal/domain/leadstats"
 	"multiagent-seo/internal/infrastructure/db"
+	"multiagent-seo/internal/infrastructure/ga4"
 	apihttp "multiagent-seo/internal/infrastructure/http"
 	"multiagent-seo/internal/infrastructure/http/handlers"
 	httpMiddleware "multiagent-seo/internal/infrastructure/http/middleware"
@@ -59,7 +61,16 @@ func Run(ctx context.Context, cfg config.Config) error {
 	emailScrapeSvc, emailRunner := buildEmailScrape(ctx, cfg, slogLog, pool)
 	leadsSvc := buildLeads(ctx, cfg, slogLog, pool)
 	adminBot := buildAdminBot(ctx, cfg, slogLog, pool, leadsSvc)
-	leadStatsSvc := appleadstats.NewService(postgres.NewLeadStatsRepository(pool))
+	var trafficSource domainleadstats.TrafficSource
+	if cfg.GA4.PropertyID != "" {
+		ga4Client, err := ga4.New(ctx, cfg.Sheets.CredentialsFile, cfg.GA4.PropertyID)
+		if err != nil {
+			slogLog.Warn("leadstats: ga4 disabled, client unavailable", "err", err)
+		} else {
+			trafficSource = ga4Client
+		}
+	}
+	leadStatsSvc := appleadstats.NewService(postgres.NewLeadStatsRepository(pool), trafficSource, slogLog)
 
 	healthSvc := apphealth.NewService(domainhealth.NewService(healthRepo))
 	server := handlers.NewServer(

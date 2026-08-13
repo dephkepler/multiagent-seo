@@ -15,3 +15,9 @@ type Repository interface {
 	ByConsultationStatus(ctx context.Context, from, to time.Time) ([]Count, error)
 	ByCaseCategory(ctx context.Context, from, to time.Time) ([]CategoryRevenue, error)
 }
+
+// TrafficSource is GA4 — optional (the service works fine with it nil, same
+// no-op pattern as the Sheets sink elsewhere in the codebase).
+type TrafficSource interface {
+	SessionsByPeriod(ctx context.Context, from, to time.Time, groupBy string) ([]TrafficBucket, error)
+}

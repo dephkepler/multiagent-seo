@@ -76,14 +76,18 @@ func toOapiLeadStats(s domainlead.Stats) oapigen.LeadStats {
 	out.Totals.CaseFeeContracted = float32(s.Totals.CaseFeeContracted)
 	out.Totals.CasePaid = float32(s.Totals.CasePaid)
 	out.Totals.CaseOwed = float32(s.Totals.CaseOwed)
+	out.Totals.SiteSessions = s.Totals.SiteSessions
+	out.Totals.OrganicSessions = s.Totals.OrganicSessions
 
 	out.Trend = make([]oapigen.LeadStatsBucket, len(s.Trend))
 	for i, b := range s.Trend {
 		out.Trend[i] = oapigen.LeadStatsBucket{
-			Bucket:        b.Bucket,
-			Leads:         b.Leads,
-			Consultations: b.Consultations,
-			RevenueEarned: float32(b.RevenueEarned),
+			Bucket:          b.Bucket,
+			Leads:           b.Leads,
+			Consultations:   b.Consultations,
+			RevenueEarned:   float32(b.RevenueEarned),
+			SiteSessions:    b.SiteSessions,
+			OrganicSessions: b.OrganicSessions,
 		}
 	}
 	out.ByPage = toOapiCounts(s.ByPage)

@@ -21,8 +21,17 @@ interface LeadStats {
     case_fee_contracted: number
     case_paid: number
     case_owed: number
+    site_sessions: number
+    organic_sessions: number
   }
-  trend: { bucket: string; leads: number; consultations: number; revenue_earned: number }[]
+  trend: {
+    bucket: string
+    leads: number
+    consultations: number
+    revenue_earned: number
+    site_sessions: number
+    organic_sessions: number
+  }[]
   by_page: { key: string; count: number }[]
   by_creator: { key: string; bookings: number; revenue_earned: number }[]
   by_status: { key: string; count: number }[]
@@ -252,6 +261,27 @@ export default function LeadsPage() {
             </div>
           </div>
 
+          {data.totals.site_sessions > 0 && (
+            <div>
+              <div className='mb-2 text-xs font-medium tracking-wide text-gray-400 uppercase'>
+                Трафик сайта (GA4) — визиты, не заявки
+              </div>
+              <div className='grid grid-cols-3 gap-4'>
+                <KpiTile label='Визитов на сайт' value={data.totals.site_sessions.toLocaleString('ru-RU')} />
+                <KpiTile
+                  label='Из поиска (Сео)'
+                  value={data.totals.organic_sessions.toLocaleString('ru-RU')}
+                  sub={`${Math.round((data.totals.organic_sessions / data.totals.site_sessions) * 100)}% от всего трафика`}
+                />
+                <KpiTile
+                  label='Заявка на визит'
+                  value={`${((data.totals.leads / data.totals.site_sessions) * 100).toFixed(1)}%`}
+                  sub={`${data.totals.leads} заявок из ${data.totals.site_sessions} визитов`}
+                />
+              </div>
+            </div>
+          )}
+
           {(() => {
             const cancelled = data.by_status.find((s) => s.key === 'cancelled')?.count ?? 0
             const pct = data.totals.consultations ? (cancelled / data.totals.consultations) * 100 : 0
@@ -289,6 +319,15 @@ export default function LeadsPage() {
               </p>
               <RevenueTrendChart trend={data.trend} groupBy={data.range.group_by} />
             </CollapsibleChart>
+
+            {data.totals.site_sessions > 0 && (
+              <CollapsibleChart icon='🌐' title='Трафик сайта по периоду'>
+                <p className='mb-4 text-xs text-gray-400'>
+                  Все визиты и отдельно — сколько из поиска (Сео). Из GA4, своя шкала — цифры на порядок больше заявок.
+                </p>
+                <TrafficTrendChart trend={data.trend} groupBy={data.range.group_by} />
+              </CollapsibleChart>
+            )}
 
             <CollapsibleChart icon='🌐' title='Источники (page)'>
               <p className='mb-4 text-xs text-gray-400'>
@@ -509,6 +548,54 @@ function RevenueTrendChart({
             title={`${bucketLabel(t.bucket, groupBy)}: ${fmtMoney(t.revenue_earned)}`}
           >
             <div className='w-3/5 max-w-[18px] rounded-t bg-emerald-500' style={{ height: `${Math.max(2, (t.revenue_earned / max) * 100)}%` }} />
+          </div>
+        ))}
+      </div>
+      <div className='mt-1 flex gap-1'>
+        {trend.map((t, i) => (
+          <div key={t.bucket} className='min-w-0 flex-1 truncate text-center text-[10px] text-gray-400'>
+            {i % step === 0 ? bucketLabel(t.bucket, groupBy) : ''}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// Two series (total vs organic sessions), same scale — unlike Revenue vs
+// counts, these two genuinely share a y-axis (both are "sessions"), so one
+// chart with two bars is honest here, same pattern as the leads/consultations
+// TrendChart above.
+function TrafficTrendChart({
+  trend,
+  groupBy,
+}: {
+  trend: { bucket: string; site_sessions: number; organic_sessions: number }[]
+  groupBy: string
+}) {
+  if (!trend.length) return <div className='text-sm text-gray-400'>Нет данных за период.</div>
+  const max = Math.max(1, ...trend.map((t) => t.site_sessions))
+  const step = Math.max(1, Math.ceil(trend.length / 14))
+
+  return (
+    <div>
+      <div className='mb-2 flex items-center gap-4 text-xs text-gray-500'>
+        <span className='flex items-center gap-1'>
+          <span className='h-2 w-2 rounded-full bg-sky-500' /> все визиты
+        </span>
+        <span className='flex items-center gap-1'>
+          <span className='h-2 w-2 rounded-full bg-emerald-500' /> из поиска
+        </span>
+      </div>
+      <div className='flex h-40 gap-1 border-b border-gray-200'>
+        {trend.map((t) => (
+          <div
+            key={t.bucket}
+            className='flex min-w-0 flex-1 items-end justify-center gap-0.5'
+            title={`${bucketLabel(t.bucket, groupBy)}: ${t.site_sessions} визитов, ${t.organic_sessions} из поиска`}
+          >
+            <div className='w-1/2 max-w-[10px] rounded-t bg-sky-500' style={{ height: `${Math.max(2, (t.site_sessions / max) * 100)}%` }} />
+            <div className='w-1/2 max-w-[10px] rounded-t bg-emerald-500' style={{ height: `${Math.max(2, (t.organic_sessions / max) * 100)}%` }} />
           </div>
         ))}
       </div>
