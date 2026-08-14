@@ -4,6 +4,11 @@ credentials.json
 .env
 .envrc.local
 
+# MTProto session for the personal-account Telegram tools (cmd/tgsession) —
+# this is full account access, more sensitive than the bot token in .env
+tgsession.json
+*.session
+
 # local notes / workspaces
 seo.txt
 docs/kreya/
@@ -11,6 +16,7 @@ docs/kreya/
 # go build output
 contentflow
 /server
+/tgsession
 *.exe
 *.test
 *.out

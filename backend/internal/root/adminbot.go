@@ -13,6 +13,7 @@ import (
 	"multiagent-seo/internal/infrastructure/persistence/postgres"
 	"multiagent-seo/internal/infrastructure/sheets"
 	"multiagent-seo/internal/infrastructure/telegram"
+	"multiagent-seo/internal/infrastructure/telegramuser"
 	"multiagent-seo/pkg/config"
 )
 
@@ -42,6 +43,23 @@ func buildAdminBot(ctx context.Context, cfg config.Config, log *slog.Logger, poo
 		log.Warn("admin bot: self-booking requests disabled, webleads service unavailable")
 	}
 
+	// /creategroup needs the personal-account MTProto session (see
+	// cmd/tgsession) — the Bot API this bot otherwise runs on has no way to
+	// create a group chat at all. Falls back to a noop (command just errors)
+	// rather than failing the whole admin bot when it's not configured or
+	// the session/connection isn't available.
+	var groups telegram.GroupCreator = noopGroupCreator{}
+	if cfg.TelegramUser.APIID != 0 && cfg.TelegramUser.APIHash != "" {
+		tgUser, err := telegramuser.New(ctx, cfg.TelegramUser.APIID, cfg.TelegramUser.APIHash, cfg.TelegramUser.SessionFile, log)
+		if err != nil {
+			log.Warn("admin bot: /creategroup disabled, personal Telegram session unavailable", "err", err)
+		} else {
+			groups = tgUser
+		}
+	} else {
+		log.Warn("admin bot: /creategroup disabled, CF_TELEGRAM_USER_API_ID/HASH not configured")
+	}
+
 	bot, err := telegram.NewAdminBot(
 		cfg.Telegram.BotToken,
 		cfg.Telegram.PaymentCard,
@@ -50,6 +68,7 @@ func buildAdminBot(ctx context.Context, cfg config.Config, log *slog.Logger, poo
 		sheetSink,
 		leads,
 		caseRepo,
+		groups,
 		cfg.Reminder.Before,
 		log,
 	)
@@ -72,4 +91,10 @@ type noopLeadSubmitter struct{}
 
 func (noopLeadSubmitter) SubmitLead(context.Context, domainleads.Lead) error {
 	return fmt.Errorf("webleads service unavailable")
+}
+
+type noopGroupCreator struct{}
+
+func (noopGroupCreator) CreateGroup(context.Context, string, []string) (int64, error) {
+	return 0, fmt.Errorf("personal Telegram session unavailable")
 }

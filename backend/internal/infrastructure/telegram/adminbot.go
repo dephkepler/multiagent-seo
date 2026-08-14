@@ -25,6 +25,13 @@ type LeadSubmitter interface {
 	SubmitLead(ctx context.Context, lead domainleads.Lead) error
 }
 
+// GroupCreator makes a Telegram group chat and invites usernames into it.
+// Backed by the personal-account MTProto session (see telegramuser) — the
+// Bot API this bot otherwise runs on has no method to create a chat at all.
+type GroupCreator interface {
+	CreateGroup(ctx context.Context, title string, usernames []string) (int64, error)
+}
+
 // The bot has no way to message a client or the advocate directly until
 // each has tapped their own /start deep-link once, so for staff-initiated
 // bookings the first contact is still sent by hand, outside Telegram.
@@ -36,6 +43,7 @@ type AdminBot struct {
 	sheet          consultations.SheetWriter
 	leads          LeadSubmitter
 	cases          cases.Store
+	groups         GroupCreator
 	reminderBefore time.Duration
 	log            *slog.Logger
 
@@ -88,6 +96,7 @@ func NewAdminBot(
 	sheet consultations.SheetWriter,
 	leads LeadSubmitter,
 	caseStore cases.Store,
+	groups GroupCreator,
 	reminderBefore time.Duration,
 	log *slog.Logger,
 ) (*AdminBot, error) {
@@ -119,6 +128,7 @@ func NewAdminBot(
 		{Command: "case", Description: "Завести справу (клопотання/позов/супровід) за Client ID"},
 		{Command: "pay", Description: "Додати оплату по справі: /pay <Case ID> <сума>"},
 		{Command: "caseclose", Description: "Позначити справу виконаною: /caseclose <Case ID>"},
+		{Command: "creategroup", Description: "Створити групу з клієнтом і адвокатом"},
 	}
 	for _, id := range allowedUserIDs {
 		_, _ = bot.Request(tgbotapi.NewSetMyCommandsWithScope(tgbotapi.NewBotCommandScopeChat(id), staffCommands...))
@@ -137,6 +147,7 @@ func NewAdminBot(
 		sheet:          sheet,
 		leads:          leads,
 		cases:          caseStore,
+		groups:         groups,
 		reminderBefore: reminderBefore,
 		log:            log,
 		flows:          make(map[int64]*flow),
@@ -252,6 +263,14 @@ func (b *AdminBot) handle(ctx context.Context, update tgbotapi.Update) {
 		b.registerAdvocate(ctx, chatID, arg)
 		return
 
+	// /caseclose has to be checked before /case — "/caseclose ..." also
+	// starts with "/case", so the shorter prefix would swallow it first
+	// otherwise and this branch would never fire.
+	case strings.HasPrefix(text, "/caseclose"):
+		caseID := strings.TrimSpace(strings.TrimPrefix(text, "/caseclose"))
+		b.handleCaseClose(ctx, chatID, caseID)
+		return
+
 	case strings.HasPrefix(text, "/case"):
 		arg := strings.TrimSpace(strings.TrimPrefix(text, "/case"))
 		if arg == "" {
@@ -266,9 +285,14 @@ func (b *AdminBot) handle(ctx context.Context, update tgbotapi.Update) {
 		b.handlePay(ctx, chatID, strings.TrimSpace(strings.TrimPrefix(text, "/pay")))
 		return
 
-	case strings.HasPrefix(text, "/caseclose"):
-		caseID := strings.TrimSpace(strings.TrimPrefix(text, "/caseclose"))
-		b.handleCaseClose(ctx, chatID, caseID)
+	case strings.HasPrefix(text, "/creategroup"):
+		query := strings.TrimSpace(strings.TrimPrefix(text, "/creategroup"))
+		if query == "" {
+			b.flows[userID] = &flow{step: "creategroup_query"}
+			b.send(ctx, chatID, "Введіть ім'я, юзернейм або телефон клієнта:")
+			return
+		}
+		b.searchForGroup(ctx, chatID, query)
 		return
 	}
 
@@ -367,6 +391,10 @@ func (b *AdminBot) handle(ctx context.Context, update tgbotapi.Update) {
 
 	case "case_description":
 		b.finishCase(ctx, chatID, userID, fl.kase, text)
+
+	case "creategroup_query":
+		delete(b.flows, userID)
+		b.searchForGroup(ctx, chatID, text)
 	}
 }
 
@@ -686,12 +714,22 @@ func (b *AdminBot) handleCallback(ctx context.Context, cb *tgbotapi.CallbackQuer
 	}
 
 	parts := strings.SplitN(cb.Data, ":", 3)
-	if len(parts) != 3 || parts[0] != "cstatus" {
+	if len(parts) != 3 {
 		b.answerCallback(ctx, cb.ID, "")
 		return
 	}
-	consultationID, status := parts[1], parts[2]
 
+	switch parts[0] {
+	case "cstatus":
+		b.handleStatusCallback(ctx, cb, parts[1], parts[2])
+	case "crgrp":
+		b.handleCreateGroupCallback(ctx, cb, parts[1], parts[2])
+	default:
+		b.answerCallback(ctx, cb.ID, "")
+	}
+}
+
+func (b *AdminBot) handleStatusCallback(ctx context.Context, cb *tgbotapi.CallbackQuery, consultationID, status string) {
 	if err := b.store.UpdateStatus(ctx, consultationID, status); err != nil {
 		b.log.ErrorContext(ctx, "telegram: update consultation status failed", "err", err)
 		b.answerCallback(ctx, cb.ID, "Не вдалося зберегти")
@@ -705,6 +743,149 @@ func (b *AdminBot) handleCallback(ctx context.Context, cb *tgbotapi.CallbackQuer
 	edited := tgbotapi.NewEditMessageText(cb.Message.Chat.ID, cb.Message.MessageID, cb.Message.Text+"\n\nСтатус: "+statusLabel(status))
 	if _, err := b.bot.Send(edited); err != nil {
 		b.log.WarnContext(ctx, "telegram: edit booking confirmation failed", "err", err)
+	}
+}
+
+// searchForGroup is /creategroup's entry point — looks a client up by
+// whatever the staff member remembers (name, @username, phone) instead of
+// making them copy a Client ID, and offers the matches as tappable buttons.
+func (b *AdminBot) searchForGroup(ctx context.Context, chatID int64, query string) {
+	clients, err := b.store.SearchClients(ctx, query)
+	if err != nil {
+		b.log.ErrorContext(ctx, "telegram: search clients failed", "err", err)
+		b.send(ctx, chatID, "Помилка пошуку, спробуйте ще раз.")
+		return
+	}
+	if len(clients) == 0 {
+		b.send(ctx, chatID, "Нічого не знайдено. Спробуйте /creategroup ще раз з іншим запитом.")
+		return
+	}
+
+	rows := make([][]tgbotapi.InlineKeyboardButton, 0, len(clients))
+	for _, c := range clients {
+		label := c.Name
+		if label == "" {
+			label = c.TelegramName
+		}
+		if c.Phone != "" {
+			label += " (" + c.Phone + ")"
+		}
+		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(label, "crgrp:pick:"+c.ID),
+		))
+	}
+	msg := tgbotapi.NewMessage(chatID, "Оберіть клієнта:")
+	msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(rows...)
+	if _, err := b.bot.Send(msg); err != nil {
+		b.log.ErrorContext(ctx, "telegram: send client picker failed", "err", err)
+	}
+}
+
+// handleCreateGroupCallback drives /creategroup's pick → confirm → create
+// steps. There's no advocate picker (yet) — UpsertAdvocate only ever keeps
+// one row today (see ABL 017), so GetAdvocate is unambiguous; add one here
+// once a second advocate is actually registered.
+func (b *AdminBot) handleCreateGroupCallback(ctx context.Context, cb *tgbotapi.CallbackQuery, action, clientID string) {
+	switch action {
+	case "pick":
+		b.confirmCreateGroup(ctx, cb, clientID)
+	case "confirm":
+		b.doCreateGroup(ctx, cb, clientID)
+	case "cancel":
+		b.answerCallback(ctx, cb.ID, "Скасовано")
+		b.editCallbackMessage(ctx, cb, "Скасовано")
+	default:
+		b.answerCallback(ctx, cb.ID, "")
+	}
+}
+
+func (b *AdminBot) confirmCreateGroup(ctx context.Context, cb *tgbotapi.CallbackQuery, clientID string) {
+	client, err := b.store.FindClient(ctx, clientID)
+	if err != nil {
+		b.log.WarnContext(ctx, "telegram: creategroup: find client failed", "client_id", clientID, "err", err)
+		b.answerCallback(ctx, cb.ID, "Клієнта не знайдено")
+		return
+	}
+	advocate, err := b.store.GetAdvocate(ctx)
+	if err != nil {
+		b.log.WarnContext(ctx, "telegram: creategroup: get advocate failed", "err", err)
+		b.answerCallback(ctx, cb.ID, "Адвокат не зареєстрований — спочатку /advocate")
+		return
+	}
+	b.answerCallback(ctx, cb.ID, "")
+
+	text := fmt.Sprintf("Створити групу: %s + %s?", client.Name, advocate.FullName)
+	keyboard := tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("✅ Створити", "crgrp:confirm:"+clientID),
+			tgbotapi.NewInlineKeyboardButtonData("❌ Скасувати", "crgrp:cancel:"+clientID),
+		),
+	)
+	if cb.Message == nil {
+		return
+	}
+	edited := tgbotapi.NewEditMessageTextAndMarkup(cb.Message.Chat.ID, cb.Message.MessageID, text, keyboard)
+	if _, err := b.bot.Send(edited); err != nil {
+		b.log.WarnContext(ctx, "telegram: edit group-confirm message failed", "err", err)
+	}
+}
+
+func (b *AdminBot) doCreateGroup(ctx context.Context, cb *tgbotapi.CallbackQuery, clientID string) {
+	client, err := b.store.FindClient(ctx, clientID)
+	if err != nil {
+		b.log.WarnContext(ctx, "telegram: creategroup: find client failed", "client_id", clientID, "err", err)
+		b.answerCallback(ctx, cb.ID, "Клієнта не знайдено")
+		return
+	}
+	advocate, err := b.store.GetAdvocate(ctx)
+	if err != nil {
+		b.log.WarnContext(ctx, "telegram: creategroup: get advocate failed", "err", err)
+		b.answerCallback(ctx, cb.ID, "Адвокат не зареєстрований")
+		return
+	}
+
+	clientUsername, ok := publicUsername(client.TelegramName)
+	if !ok {
+		b.log.WarnContext(ctx, "telegram: creategroup: client has no public username", "client_id", clientID, "telegram_name", client.TelegramName)
+		b.answerCallback(ctx, cb.ID, "У клієнта немає публічного юзернейму")
+		b.editCallbackMessage(ctx, cb, "Не можу створити групу: у клієнта немає публічного @username в Telegram (лише ім'я/телефон). Попросіть клієнта встановити юзернейм в налаштуваннях Telegram.")
+		return
+	}
+	if advocate.TelegramUsername == "" {
+		b.log.WarnContext(ctx, "telegram: creategroup: advocate has no username", "advocate_id", advocate.ID)
+		b.answerCallback(ctx, cb.ID, "У адвоката немає юзернейму")
+		b.editCallbackMessage(ctx, cb, "Не можу створити групу: у адвоката немає @username.")
+		return
+	}
+
+	b.log.InfoContext(ctx, "telegram: creategroup: creating group", "client_id", clientID, "client_username", clientUsername, "advocate_username", advocate.TelegramUsername)
+	b.answerCallback(ctx, cb.ID, "Створюю групу...")
+
+	title := "Абаліс: " + client.Name
+	if _, err := b.groups.CreateGroup(ctx, title, []string{clientUsername, advocate.TelegramUsername}); err != nil {
+		b.log.ErrorContext(ctx, "telegram: creategroup: create group failed", "client_id", clientID, "err", err)
+		b.editCallbackMessage(ctx, cb, "Не вдалося створити групу. Деталі — в логах сервера.")
+		return
+	}
+	b.log.InfoContext(ctx, "telegram: creategroup: group created", "client_id", clientID)
+	b.editCallbackMessage(ctx, cb, fmt.Sprintf("Групу створено ✅ (%s + %s)", client.Name, advocate.FullName))
+}
+
+// publicUsername extracts the bare @username telegramName carries — it's
+// either "@handle" (see telegramName()) or a plain display name when the
+// person has no public username, in which case ok is false: MTProto can't
+// resolve/invite them by name alone.
+func publicUsername(telegramName string) (string, bool) {
+	return strings.CutPrefix(telegramName, "@")
+}
+
+func (b *AdminBot) editCallbackMessage(ctx context.Context, cb *tgbotapi.CallbackQuery, text string) {
+	if cb.Message == nil {
+		return
+	}
+	edited := tgbotapi.NewEditMessageText(cb.Message.Chat.ID, cb.Message.MessageID, text)
+	if _, err := b.bot.Send(edited); err != nil {
+		b.log.WarnContext(ctx, "telegram: edit callback message failed", "err", err)
 	}
 }
 

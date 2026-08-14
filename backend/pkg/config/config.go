@@ -95,6 +95,21 @@ type TelegramConfig struct {
 	AllowedUsers []int64 `env:"TELEGRAM_ALLOWED_USERS" envSeparator:","`
 }
 
+// TelegramUserConfig is for the personal-account MTProto client (cmd/tgsession,
+// cmd/tgimport, and the /creategroup flow) — separate from TelegramConfig,
+// which is the Bot API token for the Abalis bot. A personal account needs its
+// own api_id/api_hash from https://my.telegram.org, not a bot token.
+type TelegramUserConfig struct {
+	APIID       int    `env:"TELEGRAM_USER_API_ID"`
+	APIHash     string `env:"TELEGRAM_USER_API_HASH"`
+	Phone       string `env:"TELEGRAM_USER_PHONE"`
+	SessionFile string `env:"TELEGRAM_USER_SESSION_FILE" envDefault:"./tgsession.json"`
+	// Exclude is Telegram @usernames (no @) to skip on import — personal
+	// contacts (friends, other advocates) who show up in dialogs but aren't
+	// client correspondence.
+	Exclude []string `env:"TELEGRAM_USER_EXCLUDE" envSeparator:","`
+}
+
 type ReminderConfig struct {
 	CheckInterval time.Duration `env:"REMINDER_CHECK_INTERVAL" envDefault:"5m"`
 	Before        time.Duration `env:"REMINDER_BEFORE" envDefault:"30m"`
@@ -181,6 +196,7 @@ type Config struct {
 	EmailScrape  EmailScrapeConfig
 	Mail         MailConfig
 	Telegram     TelegramConfig
+	TelegramUser TelegramUserConfig
 	LeadsSheets  LeadsSheetsConfig
 	GA4          GA4Config
 	Reminder     ReminderConfig

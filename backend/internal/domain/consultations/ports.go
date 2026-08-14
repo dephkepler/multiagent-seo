@@ -7,6 +7,10 @@ import (
 
 type Store interface {
 	FindClient(ctx context.Context, clientID string) (Client, error)
+	// SearchClients matches name, telegram name, or phone against query —
+	// used by /creategroup so staff can find a client by typing what they
+	// remember instead of copying a Client ID.
+	SearchClients(ctx context.Context, query string) ([]Client, error)
 	SetClientTelegram(ctx context.Context, clientID string, chatID int64, telegramName string) error
 	Save(ctx context.Context, c Consultation) (Consultation, error)
 	LatestConsultation(ctx context.Context, clientID string) (Consultation, error)

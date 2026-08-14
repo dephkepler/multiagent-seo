@@ -36,6 +36,16 @@ run: build
 clean:
 	rm -rf bin tmp
 
+# One-off: log the personal Telegram account into MTProto and save the
+# session (see cmd/tgsession). Run by hand, once.
+tgsession:
+	$(GOCMD) run ./cmd/tgsession
+
+# Pull personal-Telegram contacts into telegram_contacts (see cmd/tgimport).
+# Safe to rerun any time — upserts by Telegram user id, never duplicates.
+tgimport:
+	$(GOCMD) run ./cmd/tgimport
+
 # ── Compose: Postgres for dev, full stack (app+frontend) for prod ──
 db:
 	$(COMPOSE) up -d postgres

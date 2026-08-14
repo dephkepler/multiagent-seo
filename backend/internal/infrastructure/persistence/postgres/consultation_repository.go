@@ -30,6 +30,35 @@ func (r *ConsultationRepository) FindClient(ctx context.Context, clientID string
 	return c, nil
 }
 
+func (r *ConsultationRepository) SearchClients(ctx context.Context, query string) ([]consultations.Client, error) {
+	const q = `SELECT id, name, phone, coalesce(telegram_name, '')
+		FROM clients
+		WHERE name ILIKE '%' || @query || '%'
+			OR telegram_name ILIKE '%' || @query || '%'
+			OR phone ILIKE '%' || @query || '%'
+		ORDER BY last_seen_at DESC
+		LIMIT 8`
+
+	rows, err := r.db.Query(ctx, q, pgx.NamedArgs{"query": query})
+	if err != nil {
+		return nil, fmt.Errorf("search clients %q: %w", query, err)
+	}
+	defer rows.Close()
+
+	var out []consultations.Client
+	for rows.Next() {
+		var c consultations.Client
+		if err := rows.Scan(&c.ID, &c.Name, &c.Phone, &c.TelegramName); err != nil {
+			return nil, fmt.Errorf("search clients %q: scan: %w", query, err)
+		}
+		out = append(out, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("search clients %q: %w", query, err)
+	}
+	return out, nil
+}
+
 func (r *ConsultationRepository) SetClientTelegram(ctx context.Context, clientID string, chatID int64, telegramName string) error {
 	const q = `UPDATE clients SET telegram_chat_id = @chat_id, telegram_name = @telegram_name WHERE id = @id`
 	tag, err := r.db.Exec(ctx, q, pgx.NamedArgs{"chat_id": chatID, "telegram_name": telegramName, "id": clientID})
