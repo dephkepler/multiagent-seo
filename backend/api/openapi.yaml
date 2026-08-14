@@ -23,6 +23,8 @@ tags:
     description: Donor-website login and backlink placement
   - name: API Tokens
     description: Long-lived per-user API keys
+  - name: Clients
+    description: Client base with derived funnel segment (обращение → консультація → дело)
 
 paths:
   /healthz:
@@ -579,6 +581,23 @@ paths:
                 $ref: "#/components/schemas/LeadStats"
         "400":
           $ref: "#/components/responses/BadRequest"
+
+  /clients:
+    get:
+      operationId: listClientSegments
+      security:
+        - bearerAuth: [ ]
+      tags: [ Clients ]
+      summary: Every client with their derived funnel segment and tags — no date range, this is a snapshot of all-time activity, not a period aggregate
+      responses:
+        "200":
+          description: Clients with segment and tags
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ClientSegment"
 
 components:
   securitySchemes:
@@ -1272,3 +1291,31 @@ components:
         count:
           type: integer
           format: int64
+
+    ClientSegment:
+      type: object
+      required: [ client_id, name, phone, segment, tags, last_activity, case_count, case_fee, case_paid ]
+      properties:
+        client_id:
+          type: string
+        name:
+          type: string
+        phone:
+          type: string
+        segment:
+          type: string
+          enum: [ lead, booked, consulted, client, repeat, lost ]
+        tags:
+          type: array
+          items:
+            type: string
+        last_activity:
+          type: string
+          format: date-time
+        case_count:
+          type: integer
+          format: int64
+        case_fee:
+          type: number
+        case_paid:
+          type: number

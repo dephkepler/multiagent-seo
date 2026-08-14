@@ -12,6 +12,7 @@ import (
 
 	appapitoken "multiagent-seo/internal/application/apitoken"
 	appauth "multiagent-seo/internal/application/auth"
+	appclientsegments "multiagent-seo/internal/application/clientsegments"
 	apphealth "multiagent-seo/internal/application/health"
 	appleadstats "multiagent-seo/internal/application/leadstats"
 	appwordpress "multiagent-seo/internal/application/wordpress"
@@ -71,6 +72,7 @@ func Run(ctx context.Context, cfg config.Config) error {
 		}
 	}
 	leadStatsSvc := appleadstats.NewService(postgres.NewLeadStatsRepository(pool), trafficSource, slogLog)
+	clientSegmentsSvc := appclientsegments.NewService(postgres.NewClientSegmentsRepository(pool))
 
 	healthSvc := apphealth.NewService(domainhealth.NewService(healthRepo))
 	server := handlers.NewServer(
@@ -82,6 +84,7 @@ func Run(ctx context.Context, cfg config.Config) error {
 		handlers.NewApiTokensHandler(apiTokenSvc),
 		handlers.NewEmailScrapeHandler(emailScrapeSvc),
 		handlers.NewLeadStatsHandler(leadStatsSvc),
+		handlers.NewClientSegmentsHandler(clientSegmentsSvc),
 	)
 
 	schedule(ctx, cfg.Prompt.PromoteInterval, evolveSvc.PromotePrompts)
