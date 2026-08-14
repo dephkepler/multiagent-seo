@@ -37,6 +37,12 @@ services:
     volumes:
       # Google service-account creds for the Sheets adapters (read-only mount).
       - ../backend/credentials.json:/app/credentials.json:ro
+      # Personal-account MTProto session (see cmd/tgsession) — read-write,
+      # not read-only like credentials.json above: the session file gets
+      # updated by the client itself while connected, and without a volume
+      # here it would live only in the container's own filesystem and be
+      # lost on every rebuild, forcing a fresh interactive login each time.
+      - ../backend/tgsession.json:/app/tgsession.json
     depends_on:
       postgres:
         condition: service_healthy
