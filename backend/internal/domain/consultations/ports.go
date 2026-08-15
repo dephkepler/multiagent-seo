@@ -15,8 +15,21 @@ type Store interface {
 	Save(ctx context.Context, c Consultation) (Consultation, error)
 	LatestConsultation(ctx context.Context, clientID string) (Consultation, error)
 	UpdateStatus(ctx context.Context, consultationID, status string) error
-	UpsertAdvocate(ctx context.Context, fullName string) (Advocate, error)
-	SetAdvocateTelegram(ctx context.Context, chatID int64, telegramName string) error
+	// CreateAdvocate always adds a new advocate — advocates are a roster,
+	// not a single slot (see ABL 017's original one-advocate note, since
+	// superseded).
+	CreateAdvocate(ctx context.Context, fullName string) (Advocate, error)
+	// ListAdvocates returns active-only advocates when activeOnly is true —
+	// that's what pickers (/case, /creategroup) should show, since an
+	// inactive advocate shouldn't get new work assigned.
+	ListAdvocates(ctx context.Context, activeOnly bool) ([]Advocate, error)
+	// DeactivateAdvocate is the "left the firm" action — the row (and every
+	// case/consultation already linked to it) stays untouched, the advocate
+	// just stops showing up in pickers for new work.
+	DeactivateAdvocate(ctx context.Context, advocateID string) error
+	SetAdvocateTelegram(ctx context.Context, advocateID string, chatID int64, telegramName string) error
+	// GetAdvocate is a stopgap for the reminder loop, which isn't
+	// per-advocate yet — returns the first active advocate, arbitrarily.
 	GetAdvocate(ctx context.Context) (Advocate, error)
 	DueClientReminders(ctx context.Context, before time.Duration) ([]ReminderTarget, error)
 	DueAdvocateReminders(ctx context.Context, before time.Duration) ([]ReminderTarget, error)

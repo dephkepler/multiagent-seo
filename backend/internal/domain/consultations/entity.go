@@ -40,4 +40,7 @@ type Advocate struct {
 	FullName         string
 	TelegramUsername string
 	TelegramChatID   int64
+	// IsActive is false once an advocate has left — they drop out of
+	// pickers for new work but stay on old cases/consultations untouched.
+	IsActive bool
 }

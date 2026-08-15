@@ -1,0 +1,2 @@
+ALTER TABLE cases DROP COLUMN IF EXISTS advocate_id;
+ALTER TABLE advocates DROP COLUMN IF EXISTS is_active;

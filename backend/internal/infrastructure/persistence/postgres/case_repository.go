@@ -22,18 +22,23 @@ func (r *CaseRepository) Save(ctx context.Context, c cases.Case) (cases.Case, er
 	if c.Status == "" {
 		c.Status = cases.StatusInProgress
 	}
-	const q = `INSERT INTO cases (client_id, consultation_id, advocate_name, category, fee, paid_amount, status, description, created_by)
-		VALUES (@client_id, @consultation_id, @advocate_name, @category, @fee, @paid_amount, @status, @description, @created_by)
+	const q = `INSERT INTO cases (client_id, consultation_id, advocate_id, advocate_name, category, fee, paid_amount, status, description, created_by)
+		VALUES (@client_id, @consultation_id, @advocate_id, @advocate_name, @category, @fee, @paid_amount, @status, @description, @created_by)
 		RETURNING id, created_at`
 
 	var consultationID *string
 	if c.ConsultationID != "" {
 		consultationID = &c.ConsultationID
 	}
+	var advocateID *string
+	if c.AdvocateID != "" {
+		advocateID = &c.AdvocateID
+	}
 
 	err := r.db.QueryRow(ctx, q, pgx.NamedArgs{
 		"client_id":       c.ClientID,
 		"consultation_id": consultationID,
+		"advocate_id":     advocateID,
 		"advocate_name":   c.AdvocateName,
 		"category":        c.Category,
 		"fee":             c.Fee,
@@ -49,11 +54,11 @@ func (r *CaseRepository) Save(ctx context.Context, c cases.Case) (cases.Case, er
 }
 
 func (r *CaseRepository) Get(ctx context.Context, caseID string) (cases.Case, error) {
-	const q = `SELECT id, client_id, coalesce(consultation_id::text, ''), advocate_name, category, fee, paid_amount, status, description, created_by, created_at
+	const q = `SELECT id, client_id, coalesce(consultation_id::text, ''), coalesce(advocate_id::text, ''), advocate_name, category, fee, paid_amount, status, description, created_by, created_at
 		FROM cases WHERE id = @id`
 	var c cases.Case
 	err := r.db.QueryRow(ctx, q, pgx.NamedArgs{"id": caseID}).Scan(
-		&c.ID, &c.ClientID, &c.ConsultationID, &c.AdvocateName, &c.Category, &c.Fee, &c.PaidAmount, &c.Status, &c.Description, &c.CreatedBy, &c.CreatedAt,
+		&c.ID, &c.ClientID, &c.ConsultationID, &c.AdvocateID, &c.AdvocateName, &c.Category, &c.Fee, &c.PaidAmount, &c.Status, &c.Description, &c.CreatedBy, &c.CreatedAt,
 	)
 	if err != nil {
 		return cases.Case{}, fmt.Errorf("get case %q: %w", caseID, err)
@@ -63,10 +68,10 @@ func (r *CaseRepository) Get(ctx context.Context, caseID string) (cases.Case, er
 
 func (r *CaseRepository) AddPayment(ctx context.Context, caseID string, amount float64) (cases.Case, error) {
 	const q = `UPDATE cases SET paid_amount = paid_amount + @amount WHERE id = @id
-		RETURNING id, client_id, coalesce(consultation_id::text, ''), advocate_name, category, fee, paid_amount, status, description, created_by, created_at`
+		RETURNING id, client_id, coalesce(consultation_id::text, ''), coalesce(advocate_id::text, ''), advocate_name, category, fee, paid_amount, status, description, created_by, created_at`
 	var c cases.Case
 	err := r.db.QueryRow(ctx, q, pgx.NamedArgs{"id": caseID, "amount": amount}).Scan(
-		&c.ID, &c.ClientID, &c.ConsultationID, &c.AdvocateName, &c.Category, &c.Fee, &c.PaidAmount, &c.Status, &c.Description, &c.CreatedBy, &c.CreatedAt,
+		&c.ID, &c.ClientID, &c.ConsultationID, &c.AdvocateID, &c.AdvocateName, &c.Category, &c.Fee, &c.PaidAmount, &c.Status, &c.Description, &c.CreatedBy, &c.CreatedAt,
 	)
 	if err != nil {
 		return cases.Case{}, fmt.Errorf("add payment to case %q: %w", caseID, err)

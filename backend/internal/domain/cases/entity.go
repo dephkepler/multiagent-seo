@@ -31,8 +31,9 @@ type Case struct {
 	ID             string
 	ClientID       string
 	ConsultationID string // empty if not linked to a specific consultation
+	AdvocateID     string // empty for cases created before the advocate roster (see ABL 017) — AdvocateName is the historical fallback
 	AdvocateName   string
-	Category       string // practice area — free text, see Categories for the suggested list
+	Category       string  // practice area — free text, see Categories for the suggested list
 	Fee            float64 // the agreed contract amount
 	PaidAmount     float64 // running total actually received — grows via AddPayment, not a full ledger
 	Status         string

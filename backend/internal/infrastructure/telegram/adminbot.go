@@ -51,18 +51,29 @@ type AdminBot struct {
 }
 
 type flow struct {
-	step    string
-	consult consultDraft
-	book    bookDraft
-	request requestDraft
-	kase    caseDraft
+	step        string
+	consult     consultDraft
+	book        bookDraft
+	request     requestDraft
+	kase        caseDraft
+	creategroup creategroupDraft
 }
 
 type caseDraft struct {
 	client       consultations.Client
 	fee          float64
-	advocateName string
 	category     string
+	advocateID   string
+	advocateName string
+}
+
+// creategroupDraft holds the client picked in step 1 while step 2 (advocate
+// picker) runs — Telegram's callback_data caps out at 64 bytes, nowhere
+// near enough for two UUIDs, so the in-progress pick lives here instead of
+// being round-tripped through the button itself.
+type creategroupDraft struct {
+	clientID   string
+	advocateID string
 }
 
 type consultDraft struct {
@@ -86,7 +97,10 @@ type requestDraft struct {
 	telegramUsername string
 }
 
-const advocateStartPayload = "advocate"
+// advocateStartPrefix marks a /start payload as "an advocate tapped their
+// personal link", followed by their advocates.id — needed once there's more
+// than one advocate, so SetAdvocateTelegram knows which row to update.
+const advocateStartPrefix = "advocate_"
 
 func NewAdminBot(
 	token string,
@@ -124,7 +138,8 @@ func NewAdminBot(
 		{Command: "invoice", Description: "Згенерувати рахунок на оплату"},
 		{Command: "consult", Description: "Згенерувати підтвердження запису на консультацію"},
 		{Command: "book", Description: "Забронювати консультацію за Client ID"},
-		{Command: "advocate", Description: "Зареєструвати адвоката"},
+		{Command: "advocate", Description: "Додати адвоката"},
+		{Command: "advocates", Description: "Список активних адвокатів (і деактивація)"},
 		{Command: "case", Description: "Завести справу (клопотання/позов/супровід) за Client ID"},
 		{Command: "pay", Description: "Додати оплату по справі: /pay <Case ID> <сума>"},
 		{Command: "caseclose", Description: "Позначити справу виконаною: /caseclose <Case ID>"},
@@ -251,6 +266,12 @@ func (b *AdminBot) handle(ctx context.Context, update tgbotapi.Update) {
 			return
 		}
 		b.startBooking(ctx, chatID, userID, arg)
+		return
+
+	// /advocates (list) has to be checked before /advocate (register) —
+	// same prefix-collision shape as /caseclose vs /case below.
+	case strings.HasPrefix(text, "/advocates"):
+		b.listAdvocates(ctx, chatID)
 		return
 
 	case strings.HasPrefix(text, "/advocate"):
@@ -381,13 +402,7 @@ func (b *AdminBot) handle(ctx context.Context, update tgbotapi.Update) {
 
 	case "case_category":
 		fl.kase.category = text
-		fl.step = "case_advocate"
-		b.send(ctx, chatID, "Введіть ПІБ адвоката, який веде справу:")
-
-	case "case_advocate":
-		fl.kase.advocateName = text
-		fl.step = "case_description"
-		b.send(ctx, chatID, "Опишіть справу (наприклад: клопотання про відстрочку):")
+		b.sendCaseAdvocatePicker(ctx, chatID, userID)
 
 	case "case_description":
 		b.finishCase(ctx, chatID, userID, fl.kase, text)
@@ -408,9 +423,9 @@ func (b *AdminBot) handleStart(ctx context.Context, chatID int64, payload, name 
 		return
 	}
 
-	if payload == advocateStartPayload {
-		if err := b.store.SetAdvocateTelegram(ctx, chatID, name); err != nil {
-			b.log.WarnContext(ctx, "telegram: advocate start failed", "err", err)
+	if advocateID, ok := strings.CutPrefix(payload, advocateStartPrefix); ok {
+		if err := b.store.SetAdvocateTelegram(ctx, advocateID, chatID, name); err != nil {
+			b.log.WarnContext(ctx, "telegram: advocate start failed", "advocate_id", advocateID, "err", err)
 			return
 		}
 		b.send(ctx, chatID, "Вітаємо! Сповіщення про консультації надходитимуть сюди.")
@@ -535,6 +550,60 @@ func (b *AdminBot) startCase(ctx context.Context, chatID, userID int64, clientID
 	))
 }
 
+// sendCaseAdvocatePicker replaces the old "type the advocate's full name"
+// step — offers the active roster as buttons instead, same pattern as
+// /creategroup's advocate step.
+func (b *AdminBot) sendCaseAdvocatePicker(ctx context.Context, chatID, userID int64) {
+	advocates, err := b.store.ListAdvocates(ctx, true)
+	if err != nil {
+		b.log.ErrorContext(ctx, "telegram: case: list advocates failed", "err", err)
+		b.send(ctx, chatID, "Помилка отримання адвокатів, спробуйте ще раз.")
+		return
+	}
+	if len(advocates) == 0 {
+		delete(b.flows, userID)
+		b.send(ctx, chatID, "Немає активних адвокатів — спочатку /advocate <ПІБ>, потім заново /case.")
+		return
+	}
+	if fl := b.flows[userID]; fl != nil {
+		fl.step = "case_advocate_pick"
+	}
+
+	rows := make([][]tgbotapi.InlineKeyboardButton, 0, len(advocates))
+	for _, a := range advocates {
+		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(a.FullName, "caseadv:"+a.ID),
+		))
+	}
+	msg := tgbotapi.NewMessage(chatID, "Оберіть адвоката, який веде справу:")
+	msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(rows...)
+	if _, err := b.bot.Send(msg); err != nil {
+		b.log.ErrorContext(ctx, "telegram: send case advocate picker failed", "err", err)
+	}
+}
+
+func (b *AdminBot) pickCaseAdvocate(ctx context.Context, cb *tgbotapi.CallbackQuery, advocateID string) {
+	fl := b.flows[cb.From.ID]
+	if fl == nil || fl.step != "case_advocate_pick" {
+		b.answerCallback(ctx, cb.ID, "Сесія застаріла, почніть з /case")
+		return
+	}
+	advocate, err := b.findAdvocate(ctx, advocateID)
+	if err != nil {
+		b.log.WarnContext(ctx, "telegram: case: find advocate failed", "advocate_id", advocateID, "err", err)
+		b.answerCallback(ctx, cb.ID, "Адвоката не знайдено")
+		return
+	}
+	fl.kase.advocateID = advocateID
+	fl.kase.advocateName = advocate.FullName
+	fl.step = "case_description"
+	b.answerCallback(ctx, cb.ID, "")
+	b.editCallbackMessage(ctx, cb, "Адвокат: "+advocate.FullName)
+	if cb.Message != nil {
+		b.send(ctx, cb.Message.Chat.ID, "Опишіть справу (наприклад: клопотання про відстрочку):")
+	}
+}
+
 // finishCase auto-links the client's most recent consultation, if any —
 // the "which consultation did this case grow out of" question the staff
 // member already answered just by using /case for this client right after
@@ -550,6 +619,7 @@ func (b *AdminBot) finishCase(ctx context.Context, chatID, userID int64, draft c
 	saved, err := b.cases.Save(ctx, cases.Case{
 		ClientID:       draft.client.ID,
 		ConsultationID: consultationID,
+		AdvocateID:     draft.advocateID,
 		AdvocateName:   draft.advocateName,
 		Category:       draft.category,
 		Fee:            draft.fee,
@@ -610,13 +680,51 @@ func (b *AdminBot) registerAdvocate(ctx context.Context, chatID int64, fullName 
 		b.send(ctx, chatID, "ПІБ не може бути порожнім.")
 		return
 	}
-	if _, err := b.store.UpsertAdvocate(ctx, fullName); err != nil {
+	advocate, err := b.store.CreateAdvocate(ctx, fullName)
+	if err != nil {
 		b.send(ctx, chatID, "Не вдалося зберегти адвоката, спробуйте ще раз.")
-		b.log.ErrorContext(ctx, "telegram: upsert advocate failed", "err", err)
+		b.log.ErrorContext(ctx, "telegram: create advocate failed", "err", err)
 		return
 	}
-	link := fmt.Sprintf("https://t.me/%s?start=%s", b.bot.Self.UserName, advocateStartPayload)
+	link := fmt.Sprintf("https://t.me/%s?start=%s%s", b.bot.Self.UserName, advocateStartPrefix, advocate.ID)
 	b.send(ctx, chatID, "Адвоката збережено. Перешліть йому одноразове посилання:\n\n"+link)
+}
+
+// listAdvocates shows every active advocate with a "деактивувати" button —
+// the only way to remove one from pickers short of touching the DB by hand.
+func (b *AdminBot) listAdvocates(ctx context.Context, chatID int64) {
+	advocates, err := b.store.ListAdvocates(ctx, true)
+	if err != nil {
+		b.log.ErrorContext(ctx, "telegram: list advocates failed", "err", err)
+		b.send(ctx, chatID, "Не вдалося отримати список адвокатів.")
+		return
+	}
+	if len(advocates) == 0 {
+		b.send(ctx, chatID, "Активних адвокатів немає. Додати: /advocate <ПІБ>")
+		return
+	}
+
+	rows := make([][]tgbotapi.InlineKeyboardButton, 0, len(advocates))
+	for _, a := range advocates {
+		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("❌ "+a.FullName, "advdeact:"+a.ID),
+		))
+	}
+	msg := tgbotapi.NewMessage(chatID, "Активні адвокати (тап — деактивувати):")
+	msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(rows...)
+	if _, err := b.bot.Send(msg); err != nil {
+		b.log.ErrorContext(ctx, "telegram: send advocate list failed", "err", err)
+	}
+}
+
+func (b *AdminBot) deactivateAdvocate(ctx context.Context, cb *tgbotapi.CallbackQuery, advocateID string) {
+	if err := b.store.DeactivateAdvocate(ctx, advocateID); err != nil {
+		b.log.ErrorContext(ctx, "telegram: deactivate advocate failed", "advocate_id", advocateID, "err", err)
+		b.answerCallback(ctx, cb.ID, "Не вдалося деактивувати")
+		return
+	}
+	b.answerCallback(ctx, cb.ID, "Деактивовано")
+	b.editCallbackMessage(ctx, cb, "Деактивовано ✅ (старі справи не змінились)")
 }
 
 func (b *AdminBot) startBooking(ctx context.Context, chatID, userID int64, clientID string) {
@@ -713,17 +821,30 @@ func (b *AdminBot) handleCallback(ctx context.Context, cb *tgbotapi.CallbackQuer
 		return
 	}
 
-	parts := strings.SplitN(cb.Data, ":", 3)
-	if len(parts) != 3 {
+	prefix, rest, ok := strings.Cut(cb.Data, ":")
+	if !ok {
 		b.answerCallback(ctx, cb.ID, "")
 		return
 	}
 
-	switch parts[0] {
+	switch prefix {
 	case "cstatus":
-		b.handleStatusCallback(ctx, cb, parts[1], parts[2])
+		consultationID, status, ok := strings.Cut(rest, ":")
+		if !ok {
+			b.answerCallback(ctx, cb.ID, "")
+			return
+		}
+		b.handleStatusCallback(ctx, cb, consultationID, status)
 	case "crgrp":
-		b.handleCreateGroupCallback(ctx, cb, parts[1], parts[2])
+		// action alone for confirm/cancel (arg == ""), action:arg for
+		// pick/adv — see creategroupDraft for why the ids don't both fit
+		// in callback_data.
+		action, arg, _ := strings.Cut(rest, ":")
+		b.handleCreateGroupCallback(ctx, cb, action, arg)
+	case "advdeact":
+		b.deactivateAdvocate(ctx, cb, rest)
+	case "caseadv":
+		b.pickCaseAdvocate(ctx, cb, rest)
 	default:
 		b.answerCallback(ctx, cb.ID, "")
 	}
@@ -781,17 +902,20 @@ func (b *AdminBot) searchForGroup(ctx context.Context, chatID int64, query strin
 	}
 }
 
-// handleCreateGroupCallback drives /creategroup's pick → confirm → create
-// steps. There's no advocate picker (yet) — UpsertAdvocate only ever keeps
-// one row today (see ABL 017), so GetAdvocate is unambiguous; add one here
-// once a second advocate is actually registered.
-func (b *AdminBot) handleCreateGroupCallback(ctx context.Context, cb *tgbotapi.CallbackQuery, action, clientID string) {
+// handleCreateGroupCallback drives /creategroup's pick client → pick
+// advocate → confirm → create steps. The client id (from step 1) and the
+// advocate id (from step 2) live in b.flows[userID], not in callback_data —
+// see creategroupDraft.
+func (b *AdminBot) handleCreateGroupCallback(ctx context.Context, cb *tgbotapi.CallbackQuery, action, arg string) {
 	switch action {
 	case "pick":
-		b.confirmCreateGroup(ctx, cb, clientID)
+		b.pickAdvocateForGroup(ctx, cb, arg)
+	case "adv":
+		b.confirmCreateGroup(ctx, cb, arg)
 	case "confirm":
-		b.doCreateGroup(ctx, cb, clientID)
+		b.doCreateGroup(ctx, cb)
 	case "cancel":
+		delete(b.flows, cb.From.ID)
 		b.answerCallback(ctx, cb.ID, "Скасовано")
 		b.editCallbackMessage(ctx, cb, "Скасовано")
 	default:
@@ -799,26 +923,73 @@ func (b *AdminBot) handleCreateGroupCallback(ctx context.Context, cb *tgbotapi.C
 	}
 }
 
-func (b *AdminBot) confirmCreateGroup(ctx context.Context, cb *tgbotapi.CallbackQuery, clientID string) {
+// pickAdvocateForGroup is step 2: client is chosen, now offer every active
+// advocate as a button.
+func (b *AdminBot) pickAdvocateForGroup(ctx context.Context, cb *tgbotapi.CallbackQuery, clientID string) {
+	if _, err := b.store.FindClient(ctx, clientID); err != nil {
+		b.log.WarnContext(ctx, "telegram: creategroup: find client failed", "client_id", clientID, "err", err)
+		b.answerCallback(ctx, cb.ID, "Клієнта не знайдено")
+		return
+	}
+	advocates, err := b.store.ListAdvocates(ctx, true)
+	if err != nil {
+		b.log.ErrorContext(ctx, "telegram: creategroup: list advocates failed", "err", err)
+		b.answerCallback(ctx, cb.ID, "Помилка отримання адвокатів")
+		return
+	}
+	if len(advocates) == 0 {
+		b.answerCallback(ctx, cb.ID, "Немає активних адвокатів")
+		b.editCallbackMessage(ctx, cb, "Немає жодного активного адвоката — спочатку /advocate")
+		return
+	}
+	b.flows[cb.From.ID] = &flow{step: "creategroup_advocate", creategroup: creategroupDraft{clientID: clientID}}
+	b.answerCallback(ctx, cb.ID, "")
+
+	rows := make([][]tgbotapi.InlineKeyboardButton, 0, len(advocates))
+	for _, a := range advocates {
+		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(a.FullName, "crgrp:adv:"+a.ID),
+		))
+	}
+	if cb.Message == nil {
+		return
+	}
+	edited := tgbotapi.NewEditMessageTextAndMarkup(cb.Message.Chat.ID, cb.Message.MessageID, "Оберіть адвоката:", tgbotapi.NewInlineKeyboardMarkup(rows...))
+	if _, err := b.bot.Send(edited); err != nil {
+		b.log.WarnContext(ctx, "telegram: edit advocate-picker message failed", "err", err)
+	}
+}
+
+// confirmCreateGroup is step 3: both client and advocate are chosen — show
+// the "create for real?" card.
+func (b *AdminBot) confirmCreateGroup(ctx context.Context, cb *tgbotapi.CallbackQuery, advocateID string) {
+	fl := b.flows[cb.From.ID]
+	if fl == nil || fl.step != "creategroup_advocate" {
+		b.answerCallback(ctx, cb.ID, "Сесія застаріла, почніть з /creategroup")
+		return
+	}
+	clientID := fl.creategroup.clientID
+
 	client, err := b.store.FindClient(ctx, clientID)
 	if err != nil {
 		b.log.WarnContext(ctx, "telegram: creategroup: find client failed", "client_id", clientID, "err", err)
 		b.answerCallback(ctx, cb.ID, "Клієнта не знайдено")
 		return
 	}
-	advocate, err := b.store.GetAdvocate(ctx)
+	advocate, err := b.findAdvocate(ctx, advocateID)
 	if err != nil {
-		b.log.WarnContext(ctx, "telegram: creategroup: get advocate failed", "err", err)
-		b.answerCallback(ctx, cb.ID, "Адвокат не зареєстрований — спочатку /advocate")
+		b.log.WarnContext(ctx, "telegram: creategroup: find advocate failed", "advocate_id", advocateID, "err", err)
+		b.answerCallback(ctx, cb.ID, "Адвоката не знайдено")
 		return
 	}
+	fl.creategroup.advocateID = advocateID
 	b.answerCallback(ctx, cb.ID, "")
 
 	text := fmt.Sprintf("Створити групу: %s + %s?", client.Name, advocate.FullName)
 	keyboard := tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("✅ Створити", "crgrp:confirm:"+clientID),
-			tgbotapi.NewInlineKeyboardButtonData("❌ Скасувати", "crgrp:cancel:"+clientID),
+			tgbotapi.NewInlineKeyboardButtonData("✅ Створити", "crgrp:confirm"),
+			tgbotapi.NewInlineKeyboardButtonData("❌ Скасувати", "crgrp:cancel"),
 		),
 	)
 	if cb.Message == nil {
@@ -830,17 +1001,41 @@ func (b *AdminBot) confirmCreateGroup(ctx context.Context, cb *tgbotapi.Callback
 	}
 }
 
-func (b *AdminBot) doCreateGroup(ctx context.Context, cb *tgbotapi.CallbackQuery, clientID string) {
+// findAdvocate looks an advocate up by id — ListAdvocates gives us a slice,
+// not a by-id lookup, but the roster is small enough that scanning it is
+// simpler than adding a repository method used from exactly one place.
+func (b *AdminBot) findAdvocate(ctx context.Context, advocateID string) (consultations.Advocate, error) {
+	advocates, err := b.store.ListAdvocates(ctx, false)
+	if err != nil {
+		return consultations.Advocate{}, err
+	}
+	for _, a := range advocates {
+		if a.ID == advocateID {
+			return a, nil
+		}
+	}
+	return consultations.Advocate{}, fmt.Errorf("no advocate with id %q", advocateID)
+}
+
+func (b *AdminBot) doCreateGroup(ctx context.Context, cb *tgbotapi.CallbackQuery) {
+	fl := b.flows[cb.From.ID]
+	if fl == nil || fl.step != "creategroup_advocate" || fl.creategroup.advocateID == "" {
+		b.answerCallback(ctx, cb.ID, "Сесія застаріла, почніть з /creategroup")
+		return
+	}
+	clientID, advocateID := fl.creategroup.clientID, fl.creategroup.advocateID
+	delete(b.flows, cb.From.ID)
+
 	client, err := b.store.FindClient(ctx, clientID)
 	if err != nil {
 		b.log.WarnContext(ctx, "telegram: creategroup: find client failed", "client_id", clientID, "err", err)
 		b.answerCallback(ctx, cb.ID, "Клієнта не знайдено")
 		return
 	}
-	advocate, err := b.store.GetAdvocate(ctx)
+	advocate, err := b.findAdvocate(ctx, advocateID)
 	if err != nil {
-		b.log.WarnContext(ctx, "telegram: creategroup: get advocate failed", "err", err)
-		b.answerCallback(ctx, cb.ID, "Адвокат не зареєстрований")
+		b.log.WarnContext(ctx, "telegram: creategroup: find advocate failed", "advocate_id", advocateID, "err", err)
+		b.answerCallback(ctx, cb.ID, "Адвоката не знайдено")
 		return
 	}
 

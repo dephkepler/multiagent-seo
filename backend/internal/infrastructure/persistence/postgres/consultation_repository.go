@@ -2,7 +2,6 @@ package postgres
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
@@ -122,38 +121,75 @@ func (r *ConsultationRepository) UpdateStatus(ctx context.Context, consultationI
 	return nil
 }
 
-// UpsertAdvocate keeps a single row — there is only one advocate for now
-// (see ABL 017) — updating it if present, inserting it otherwise.
-func (r *ConsultationRepository) UpsertAdvocate(ctx context.Context, fullName string) (consultations.Advocate, error) {
-	const upd = `UPDATE advocates SET full_name = @full_name
-		RETURNING id, full_name, coalesce(telegram_username, ''), coalesce(telegram_chat_id, 0)`
-	a, err := scanAdvocate(r.db.QueryRow(ctx, upd, pgx.NamedArgs{"full_name": fullName}))
-	if errors.Is(err, pgx.ErrNoRows) {
-		const ins = `INSERT INTO advocates (full_name) VALUES (@full_name)
-			RETURNING id, full_name, coalesce(telegram_username, ''), coalesce(telegram_chat_id, 0)`
-		a, err = scanAdvocate(r.db.QueryRow(ctx, ins, pgx.NamedArgs{"full_name": fullName}))
-	}
+// CreateAdvocate always inserts a new row — advocates are a roster (see
+// ports.go), not a single slot.
+func (r *ConsultationRepository) CreateAdvocate(ctx context.Context, fullName string) (consultations.Advocate, error) {
+	const q = `INSERT INTO advocates (full_name) VALUES (@full_name)
+		RETURNING id, full_name, coalesce(telegram_username, ''), coalesce(telegram_chat_id, 0), is_active`
+	a, err := scanAdvocate(r.db.QueryRow(ctx, q, pgx.NamedArgs{"full_name": fullName}))
 	if err != nil {
-		return consultations.Advocate{}, fmt.Errorf("upsert advocate: %w", err)
+		return consultations.Advocate{}, fmt.Errorf("create advocate: %w", err)
 	}
 	return a, nil
 }
 
-func (r *ConsultationRepository) SetAdvocateTelegram(ctx context.Context, chatID int64, telegramName string) error {
-	const q = `UPDATE advocates SET telegram_chat_id = @chat_id, telegram_username = @telegram_name`
-	tag, err := r.db.Exec(ctx, q, pgx.NamedArgs{"chat_id": chatID, "telegram_name": telegramName})
+func (r *ConsultationRepository) ListAdvocates(ctx context.Context, activeOnly bool) ([]consultations.Advocate, error) {
+	q := `SELECT id, full_name, coalesce(telegram_username, ''), coalesce(telegram_chat_id, 0), is_active
+		FROM advocates`
+	if activeOnly {
+		q += ` WHERE is_active`
+	}
+	q += ` ORDER BY full_name`
+
+	rows, err := r.db.Query(ctx, q)
 	if err != nil {
-		return fmt.Errorf("set advocate telegram: %w", err)
+		return nil, fmt.Errorf("list advocates: %w", err)
+	}
+	defer rows.Close()
+
+	var advocates []consultations.Advocate
+	for rows.Next() {
+		a, err := scanAdvocate(rows)
+		if err != nil {
+			return nil, fmt.Errorf("list advocates: scan: %w", err)
+		}
+		advocates = append(advocates, a)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list advocates: %w", err)
+	}
+	return advocates, nil
+}
+
+func (r *ConsultationRepository) DeactivateAdvocate(ctx context.Context, advocateID string) error {
+	const q = `UPDATE advocates SET is_active = false WHERE id = @id`
+	tag, err := r.db.Exec(ctx, q, pgx.NamedArgs{"id": advocateID})
+	if err != nil {
+		return fmt.Errorf("deactivate advocate %q: %w", advocateID, err)
 	}
 	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("set advocate telegram: no advocate registered")
+		return fmt.Errorf("deactivate advocate: no advocate with id %q", advocateID)
 	}
 	return nil
 }
 
+func (r *ConsultationRepository) SetAdvocateTelegram(ctx context.Context, advocateID string, chatID int64, telegramName string) error {
+	const q = `UPDATE advocates SET telegram_chat_id = @chat_id, telegram_username = @telegram_name WHERE id = @id`
+	tag, err := r.db.Exec(ctx, q, pgx.NamedArgs{"chat_id": chatID, "telegram_name": telegramName, "id": advocateID})
+	if err != nil {
+		return fmt.Errorf("set advocate telegram %q: %w", advocateID, err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("set advocate telegram: no advocate with id %q", advocateID)
+	}
+	return nil
+}
+
+// GetAdvocate is a stopgap for the reminder loop (see ports.go) — first
+// active advocate, arbitrarily, since reminders aren't per-advocate yet.
 func (r *ConsultationRepository) GetAdvocate(ctx context.Context) (consultations.Advocate, error) {
-	const q = `SELECT id, full_name, coalesce(telegram_username, ''), coalesce(telegram_chat_id, 0)
-		FROM advocates LIMIT 1`
+	const q = `SELECT id, full_name, coalesce(telegram_username, ''), coalesce(telegram_chat_id, 0), is_active
+		FROM advocates WHERE is_active ORDER BY created_at LIMIT 1`
 	a, err := scanAdvocate(r.db.QueryRow(ctx, q))
 	if err != nil {
 		return consultations.Advocate{}, fmt.Errorf("get advocate: %w", err)
@@ -163,7 +199,7 @@ func (r *ConsultationRepository) GetAdvocate(ctx context.Context) (consultations
 
 func scanAdvocate(row pgx.Row) (consultations.Advocate, error) {
 	var a consultations.Advocate
-	err := row.Scan(&a.ID, &a.FullName, &a.TelegramUsername, &a.TelegramChatID)
+	err := row.Scan(&a.ID, &a.FullName, &a.TelegramUsername, &a.TelegramChatID, &a.IsActive)
 	return a, err
 }
 
