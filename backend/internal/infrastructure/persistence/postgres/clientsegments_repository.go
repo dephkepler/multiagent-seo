@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"multiagent-seo/internal/domain/clientsegments"
@@ -38,7 +39,8 @@ func (r *ClientSegmentsRepository) ListActivity(ctx context.Context) ([]clientse
 				cl.last_seen_at,
 				coalesce(co.last_at, cl.first_seen_at),
 				coalesce(ca.last_at, cl.first_seen_at)
-			)
+			),
+			cl.segment_override
 		FROM clients cl
 		LEFT JOIN (
 			SELECT
@@ -77,6 +79,7 @@ func (r *ClientSegmentsRepository) ListActivity(ctx context.Context) ([]clientse
 			&a.CompletedCount, &a.ScheduledCount, &a.LostCount, &a.ConsultCount,
 			&a.CaseCount, &a.CaseFee, &a.CasePaid,
 			&a.LastActivity,
+			&a.SegmentOverride,
 		); err != nil {
 			return nil, fmt.Errorf("list activity: scan: %w", err)
 		}
@@ -86,4 +89,18 @@ func (r *ClientSegmentsRepository) ListActivity(ctx context.Context) ([]clientse
 		return nil, fmt.Errorf("list activity: %w", err)
 	}
 	return out, nil
+}
+
+// SetSegmentOverride is the write half of the override — see the
+// clientsegments package doc for why it exists.
+func (r *ClientSegmentsRepository) SetSegmentOverride(ctx context.Context, clientID string, segment *string) error {
+	const q = `UPDATE clients SET segment_override = @segment WHERE id = @id`
+	tag, err := r.db.Exec(ctx, q, pgx.NamedArgs{"segment": segment, "id": clientID})
+	if err != nil {
+		return fmt.Errorf("set segment override %q: %w", clientID, err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("set segment override %q: %w", clientID, clientsegments.ErrNotFound)
+	}
+	return nil
 }

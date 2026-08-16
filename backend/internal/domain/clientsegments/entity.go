@@ -1,11 +1,27 @@
 // Package clientsegments answers "where is this client in the funnel" —
 // обращение → консультація → дело — straight from leads/consultations/cases.
-// Nothing is stored or assigned by hand: Derive is a pure function over
-// facts already sitting in those tables, so a client's segment can never
-// drift out of sync with reality the way a manually-maintained tag would.
+// By default nothing is stored or assigned by hand: Derive is a pure
+// function over facts already sitting in those tables, so a client's
+// segment can't drift out of sync with reality the way a manually-
+// maintained tag would. The one deliberate exception is SegmentOverride —
+// staff can pin a segment by hand for the cases the data genuinely can't
+// capture (a client who moved to another advocate outside this system
+// entirely — see ABL 024); Derive still runs underneath, the override just
+// wins at the end, and ClientSegment.Overridden says so.
 package clientsegments
 
-import "time"
+import (
+	"errors"
+	"time"
+)
+
+// ErrInvalidSegment is returned when a manual override names a segment
+// outside the known Segment* set (see IsSegment).
+var ErrInvalidSegment = errors.New("clientsegments: invalid segment")
+
+// ErrNotFound is returned when an override targets a client id that
+// doesn't exist.
+var ErrNotFound = errors.New("clientsegments: client not found")
 
 // Segment values, one per client — a straight-line funnel, checked in
 // Derive in the order a client actually moves through it (a case beats a
@@ -30,9 +46,21 @@ const (
 // больше уже похоже на паттерн, а не на случайность.
 const NoShowRiskThreshold = 2
 
+// IsSegment reports whether s is one of the known Segment* values — used to
+// validate a manual override before it ever reaches the database.
+func IsSegment(s string) bool {
+	switch s {
+	case SegmentLead, SegmentBooked, SegmentConsulted, SegmentClient, SegmentRepeat, SegmentLost:
+		return true
+	default:
+		return false
+	}
+}
+
 // Activity is the raw per-client facts the repository reads straight off
-// leads/consultations/cases. Kept separate from ClientSegment so Derive's
-// classification rules are plain Go, testable without a database.
+// leads/consultations/cases, plus whatever manual override is on file for
+// them. Kept separate from ClientSegment so Derive's classification rules
+// are plain Go, testable without a database.
 type Activity struct {
 	ClientID       string
 	Name           string
@@ -45,6 +73,10 @@ type Activity struct {
 	CaseFee        float64
 	CasePaid       float64
 	LastActivity   time.Time
+	// SegmentOverride is nil when staff hasn't pinned a segment for this
+	// client — Derive computes one as usual. Non-nil wins over the
+	// computed value; see the package doc.
+	SegmentOverride *string
 }
 
 type ClientSegment struct {
@@ -52,6 +84,7 @@ type ClientSegment struct {
 	Name         string
 	Phone        string
 	Segment      string
+	Overridden   bool // true when Segment came from SegmentOverride, not the funnel rules below
 	Tags         []string
 	LastActivity time.Time
 	CaseCount    int
@@ -93,6 +126,13 @@ func Derive(a Activity) ClientSegment {
 	}
 	if a.LostCount >= NoShowRiskThreshold {
 		cs.Tags = append(cs.Tags, TagNoShowRisk)
+	}
+
+	// Override wins last, after tags — tags stay tied to the real numbers
+	// even when staff has pinned the segment itself by hand.
+	if a.SegmentOverride != nil {
+		cs.Segment = *a.SegmentOverride
+		cs.Overridden = true
 	}
 	return cs
 }

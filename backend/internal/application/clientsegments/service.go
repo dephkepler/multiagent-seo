@@ -29,3 +29,17 @@ func (s *Service) List(ctx context.Context) ([]domain.ClientSegment, error) {
 	}
 	return out, nil
 }
+
+// SetOverride pins clientID's segment by hand, or clears the override (and
+// falls back to Derive) when segment is nil. Validated here, not just left
+// to the DB check constraint, so a bad value fails with a clear domain
+// error instead of a raw Postgres constraint message reaching the client.
+func (s *Service) SetOverride(ctx context.Context, clientID string, segment *string) error {
+	if segment != nil && !domain.IsSegment(*segment) {
+		return fmt.Errorf("clientsegments: set override: %w: %q", domain.ErrInvalidSegment, *segment)
+	}
+	if err := s.repo.SetSegmentOverride(ctx, clientID, segment); err != nil {
+		return fmt.Errorf("clientsegments: set override: %w", err)
+	}
+	return nil
+}

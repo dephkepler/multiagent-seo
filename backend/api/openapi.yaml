@@ -599,6 +599,34 @@ paths:
                 items:
                   $ref: "#/components/schemas/ClientSegment"
 
+  /clients/{id}/segment:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    patch:
+      operationId: setClientSegmentOverride
+      security:
+        - bearerAuth: [ ]
+      tags: [ Clients ]
+      summary: Pin a client's segment by hand, or pass null to clear the override and fall back to the calculated value
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetClientSegmentOverrideRequest"
+      responses:
+        "204":
+          description: Override saved (or cleared)
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
 components:
   securitySchemes:
     bearerAuth:
@@ -1292,9 +1320,14 @@ components:
           type: integer
           format: int64
 
+    Segment:
+      type: string
+      description: A client's position in the обращение → консультація → дело funnel — see backend clientsegments.Derive
+      enum: [ lead, booked, consulted, client, repeat, lost ]
+
     ClientSegment:
       type: object
-      required: [ client_id, name, phone, segment, tags, last_activity, case_count, case_fee, case_paid ]
+      required: [ client_id, name, phone, segment, overridden, tags, last_activity, case_count, case_fee, case_paid ]
       properties:
         client_id:
           type: string
@@ -1303,8 +1336,10 @@ components:
         phone:
           type: string
         segment:
-          type: string
-          enum: [ lead, booked, consulted, client, repeat, lost ]
+          $ref: "#/components/schemas/Segment"
+        overridden:
+          type: boolean
+          description: True when segment was pinned by hand via PATCH /clients/{id}/segment, not calculated
         tags:
           type: array
           items:
@@ -1319,3 +1354,13 @@ components:
           type: number
         case_paid:
           type: number
+
+    SetClientSegmentOverrideRequest:
+      type: object
+      required: [ segment_override ]
+      properties:
+        segment_override:
+          allOf:
+            - $ref: "#/components/schemas/Segment"
+          nullable: true
+          description: Null clears the override and falls back to the calculated segment
