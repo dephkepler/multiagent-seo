@@ -14,6 +14,7 @@ const links = [
   { href: '/linkbuilding/place-backlinks', label: 'Place backlinks' },
   { href: '/emailscrape', label: 'Email scrape' },
   { href: '/leads', label: 'Leads' },
+  { href: '/clients', label: 'Clients' },
 ]
 
 export function Nav() {
