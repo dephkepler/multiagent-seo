@@ -1,7 +1,8 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
 import { api } from '@/lib/api'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -14,6 +15,7 @@ interface ClientSegment {
   name: string
   phone: string
   segment: Segment
+  overridden: boolean
   tags: string[]
   last_activity: string
   case_count: number
@@ -49,6 +51,8 @@ const TAG_COLOR: Record<string, string> = {
   no_show_risk: 'border border-orange-200 bg-orange-50 text-orange-700',
 }
 
+const PAGE_SIZE = 25
+
 function fmtMoney(n: number): string {
   return Math.round(n).toLocaleString('ru-RU') + ' ₴'
 }
@@ -58,12 +62,21 @@ function fmtDate(iso: string): string {
 }
 
 export default function ClientsPage() {
+  const qc = useQueryClient()
   const [query, setQuery] = useState('')
   const [segmentFilter, setSegmentFilter] = useState<Segment | 'all'>('all')
+  const [page, setPage] = useState(1)
 
   const clients = useQuery({
     queryKey: ['client-segments'],
     queryFn: () => api<ClientSegment[]>('/clients'),
+  })
+
+  const setOverride = useMutation({
+    mutationFn: ({ id, segment }: { id: string; segment: Segment | null }) =>
+      api(`/clients/${id}/segment`, { method: 'PATCH', body: JSON.stringify({ segment_override: segment }) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['client-segments'] }),
+    onError: (e: Error) => toast.error(e.message),
   })
 
   const counts = useMemo(() => {
@@ -80,6 +93,19 @@ export default function ClientsPage() {
       .sort((a, b) => new Date(b.last_activity).getTime() - new Date(a.last_activity).getTime())
   }, [clients.data, query, segmentFilter])
 
+  const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
+  const pageSafe = Math.min(page, pageCount)
+  const pageItems = filtered.slice((pageSafe - 1) * PAGE_SIZE, pageSafe * PAGE_SIZE)
+
+  function resetToFirstPage<T>(setter: (v: T) => void) {
+    return (v: T) => {
+      setter(v)
+      setPage(1)
+    }
+  }
+  const onQueryChange = resetToFirstPage(setQuery)
+  const onSegmentFilterChange = resetToFirstPage(setSegmentFilter)
+
   return (
     <div className='space-y-6'>
       <Card>
@@ -91,14 +117,14 @@ export default function ClientsPage() {
         </div>
 
         <div className='mb-4 flex flex-wrap gap-2'>
-          <SegmentPill active={segmentFilter === 'all'} onClick={() => setSegmentFilter('all')}>
+          <SegmentPill active={segmentFilter === 'all'} onClick={() => onSegmentFilterChange('all')}>
             Все ({clients.data?.length ?? 0})
           </SegmentPill>
           {SEGMENT_ORDER.map((s) => (
             <SegmentPill
               key={s}
               active={segmentFilter === s}
-              onClick={() => setSegmentFilter(s)}
+              onClick={() => onSegmentFilterChange(s)}
               colorClass={SEGMENT_COLOR[s]}
             >
               {SEGMENT_LABEL[s]} ({counts[s] || 0})
@@ -106,12 +132,18 @@ export default function ClientsPage() {
           ))}
         </div>
 
-        <Input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder='Поиск по имени или телефону…'
-          className='mb-4 max-w-sm'
-        />
+        <div className='mb-4 flex items-center justify-between gap-4'>
+          <Input
+            value={query}
+            onChange={(e) => onQueryChange(e.target.value)}
+            placeholder='Поиск по имени или телефону…'
+            className='max-w-sm'
+          />
+          <span className='shrink-0 text-xs text-gray-400'>
+            Сегмент обычно считается сам — выберите вручную в таблице, чтобы закрепить свой (например клиент ушёл к
+            другому адвокату)
+          </span>
+        </div>
 
         <div className='overflow-x-auto'>
           <table className='w-full text-sm'>
@@ -127,23 +159,48 @@ export default function ClientsPage() {
               </tr>
             </thead>
             <tbody>
-              {filtered.length === 0 && (
+              {pageItems.length === 0 && (
                 <tr>
                   <td colSpan={7} className='py-6 text-center text-gray-400'>
                     {clients.isLoading ? 'Загрузка…' : clients.isError ? 'Не удалось загрузить' : 'Никого не найдено'}
                   </td>
                 </tr>
               )}
-              {filtered.map((c) => {
+              {pageItems.map((c) => {
                 const debt = c.case_fee - c.case_paid
                 return (
                   <tr key={c.client_id} className='border-t border-gray-100'>
                     <td className='py-2 pr-4 font-medium'>{c.name || '—'}</td>
                     <td className='py-2 pr-4 text-gray-500'>{c.phone || '—'}</td>
                     <td className='py-2 pr-4'>
-                      <span className={cx('rounded px-2 py-0.5 text-xs font-medium', SEGMENT_COLOR[c.segment])}>
-                        {SEGMENT_LABEL[c.segment] || c.segment}
-                      </span>
+                      <div className='flex items-center gap-1.5'>
+                        <select
+                          value={c.segment}
+                          disabled={setOverride.isPending}
+                          onChange={(e) => setOverride.mutate({ id: c.client_id, segment: e.target.value as Segment })}
+                          className={cx(
+                            'cursor-pointer rounded px-1.5 py-0.5 text-xs font-medium outline-none disabled:cursor-wait',
+                            SEGMENT_COLOR[c.segment]
+                          )}
+                        >
+                          {SEGMENT_ORDER.map((s) => (
+                            <option key={s} value={s}>
+                              {SEGMENT_LABEL[s]}
+                            </option>
+                          ))}
+                        </select>
+                        {c.overridden && (
+                          <button
+                            type='button'
+                            title='Выбрано вручную — нажмите, чтобы вернуть автоматический расчёт'
+                            disabled={setOverride.isPending}
+                            onClick={() => setOverride.mutate({ id: c.client_id, segment: null })}
+                            className='shrink-0 text-[10px] whitespace-nowrap text-gray-400 underline hover:text-gray-600'
+                          >
+                            вручную · сброс
+                          </button>
+                        )}
+                      </div>
                     </td>
                     <td className='py-2 pr-4'>
                       <div className='flex flex-wrap gap-1'>
@@ -165,6 +222,35 @@ export default function ClientsPage() {
             </tbody>
           </table>
         </div>
+
+        {filtered.length > 0 && (
+          <div className='mt-4 flex items-center justify-between text-xs text-gray-500'>
+            <span>
+              {(pageSafe - 1) * PAGE_SIZE + 1}–{Math.min(pageSafe * PAGE_SIZE, filtered.length)} из {filtered.length}
+            </span>
+            <div className='flex items-center gap-2'>
+              <button
+                type='button'
+                disabled={pageSafe <= 1}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                className='rounded-md border border-gray-200 px-2 py-1 disabled:cursor-not-allowed disabled:opacity-40'
+              >
+                ← Назад
+              </button>
+              <span>
+                Стр. {pageSafe} из {pageCount}
+              </span>
+              <button
+                type='button'
+                disabled={pageSafe >= pageCount}
+                onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
+                className='rounded-md border border-gray-200 px-2 py-1 disabled:cursor-not-allowed disabled:opacity-40'
+              >
+                Вперёд →
+              </button>
+            </div>
+          </div>
+        )}
       </Card>
     </div>
   )
