@@ -135,6 +135,7 @@ func NewAdminBot(
 		tgbotapi.BotCommand{Command: "request", Description: "Забронювати консультацію"},
 	))
 	staffCommands := []tgbotapi.BotCommand{
+		{Command: "menu", Description: "Показати кнопки замість команд"},
 		{Command: "invoice", Description: "Згенерувати рахунок на оплату"},
 		{Command: "consult", Description: "Згенерувати підтвердження запису на консультацію"},
 		{Command: "book", Description: "Забронювати консультацію за Client ID"},
@@ -219,9 +220,15 @@ func (b *AdminBot) handle(ctx context.Context, update tgbotapi.Update) {
 
 	// /start comes from whoever tapped the deep-link — client or advocate,
 	// never in allowedUsers for a real tap — so this has to run before the
-	// admin gate below.
+	// admin gate below. Staff get their own menu instead of the client
+	// "leave a request" prompt — checked first, since a bare /start from
+	// staff would otherwise fall into handleStart's client-facing branch.
 	if strings.HasPrefix(text, "/start") {
 		payload := strings.TrimSpace(strings.TrimPrefix(text, "/start"))
+		if payload == "" && b.allowedUsers[msg.From.ID] {
+			b.sendStaffMenu(ctx, msg.Chat.ID)
+			return
+		}
 		b.handleStart(ctx, msg.Chat.ID, payload, telegramName(msg.From))
 		return
 	}
@@ -242,7 +249,18 @@ func (b *AdminBot) handle(ctx context.Context, update tgbotapi.Update) {
 		return
 	}
 
+	// A tapped menu button carries its label as plain text — swap it for
+	// the equivalent command so every case below (and the flows it starts)
+	// runs unchanged, whether staff typed the command or tapped a button.
+	if cmd, ok := staffMenuCommands[text]; ok {
+		text = cmd
+	}
+
 	switch {
+	case text == "/menu":
+		b.sendStaffMenu(ctx, chatID)
+		return
+
 	case strings.HasPrefix(text, "/invoice"):
 		arg := strings.TrimSpace(strings.TrimPrefix(text, "/invoice"))
 		if amount, err := parseAmount(arg); err == nil {
@@ -462,6 +480,56 @@ func (b *AdminBot) handleStart(ctx context.Context, chatID int64, payload, name 
 }
 
 const requestButtonLabel = "📅 Забронювати консультацію"
+
+// Staff reply-keyboard buttons — one per command, so staff tap instead of
+// typing/remembering slash-commands. Label text must never collide with
+// requestButtonLabel above: that one is checked before the staff gate in
+// handle(), so an identical label would misfire into the client flow.
+const (
+	btnInvoice     = "🧾 Рахунок"
+	btnConsult     = "📋 Підтвердження запису"
+	btnBook        = "📌 Записати клієнта"
+	btnAdvocateAdd = "👤 Додати адвоката"
+	btnAdvocates   = "👥 Список адвокатів"
+	btnCase        = "📁 Завести справу"
+	btnPay         = "💰 Оплата по справі"
+	btnCaseClose   = "✅ Закрити справу"
+	btnCreateGroup = "👨‍👩‍👧 Створити групу"
+)
+
+// staffMenuCommands maps a tapped button's label to the equivalent bare
+// command — handle() substitutes it before the existing switch, so every
+// button reuses that command's logic unchanged (same prompts, same flows).
+var staffMenuCommands = map[string]string{
+	btnInvoice:     "/invoice",
+	btnConsult:     "/consult",
+	btnBook:        "/book",
+	btnAdvocateAdd: "/advocate",
+	btnAdvocates:   "/advocates",
+	btnCase:        "/case",
+	btnPay:         "/pay",
+	btnCaseClose:   "/caseclose",
+	btnCreateGroup: "/creategroup",
+}
+
+func staffMenuKeyboard() tgbotapi.ReplyKeyboardMarkup {
+	kb := tgbotapi.NewReplyKeyboard(
+		tgbotapi.NewKeyboardButtonRow(tgbotapi.NewKeyboardButton(btnInvoice), tgbotapi.NewKeyboardButton(btnConsult)),
+		tgbotapi.NewKeyboardButtonRow(tgbotapi.NewKeyboardButton(btnBook), tgbotapi.NewKeyboardButton(btnCreateGroup)),
+		tgbotapi.NewKeyboardButtonRow(tgbotapi.NewKeyboardButton(btnCase), tgbotapi.NewKeyboardButton(btnPay), tgbotapi.NewKeyboardButton(btnCaseClose)),
+		tgbotapi.NewKeyboardButtonRow(tgbotapi.NewKeyboardButton(btnAdvocateAdd), tgbotapi.NewKeyboardButton(btnAdvocates)),
+	)
+	kb.ResizeKeyboard = true
+	return kb
+}
+
+func (b *AdminBot) sendStaffMenu(ctx context.Context, chatID int64) {
+	msg := tgbotapi.NewMessage(chatID, "Меню:")
+	msg.ReplyMarkup = staffMenuKeyboard()
+	if _, err := b.bot.Send(msg); err != nil {
+		b.log.ErrorContext(ctx, "telegram: send staff menu failed", "err", err)
+	}
+}
 
 func (b *AdminBot) sendRequestPrompt(ctx context.Context, chatID int64) {
 	msg := tgbotapi.NewMessage(chatID, "Вітаємо! Натисніть кнопку нижче, щоб залишити заявку на консультацію.")
