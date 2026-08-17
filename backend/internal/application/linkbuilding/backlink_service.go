@@ -222,6 +222,7 @@ func (s *BacklinkService) placeAll(ctx context.Context, log *slog.Logger, runID,
 	pending := make([]domain.PlacementResult, 0, placeWriteChunk)
 	processed := 0
 	succeeded := 0
+	dbSaveFailures := 0
 
 	flush := func() bool {
 		if len(pending) == 0 {
@@ -261,7 +262,9 @@ func (s *BacklinkService) placeAll(ctx context.Context, log *slog.Logger, runID,
 		if res.OK {
 			succeeded++
 		}
-		s.savePlacement(ctx, log, runID, sheet, targetURL, res)
+		if err := s.savePlacement(ctx, log, runID, sheet, targetURL, res); err != nil {
+			dbSaveFailures++
+		}
 		s.saveProfile(ctx, log, c.BaseURL, caps, res.Outcome)
 		log.InfoContext(ctx, "donor placement", "row", c.Row, "url", c.BaseURL, "ok", res.OK, "link_check", res.LinkCheck, "status", res.Status)
 
@@ -280,13 +283,18 @@ func (s *BacklinkService) placeAll(ctx context.Context, log *slog.Logger, runID,
 		// "done" log so the run is not reported as complete with results unpersisted.
 		return
 	}
-	log.InfoContext(ctx, "backlink placement done", "processed", processed, "succeeded", succeeded)
+	log.InfoContext(ctx, "backlink placement done", "processed", processed, "succeeded", succeeded, "db_save_failures", dbSaveFailures)
 }
 
-func (s *BacklinkService) savePlacement(ctx context.Context, log *slog.Logger, runID, sheet, targetURL string, res domain.PlacementResult) {
+// savePlacement persists the per-donor placement record to Postgres. This is
+// separate from the batched Sheets write in flush() above — a failure here
+// means the placement won't show up in ListPlacements/ListPlaced even though
+// the sheet and the site itself may be fine, so the caller counts failures
+// instead of losing the signal silently.
+func (s *BacklinkService) savePlacement(ctx context.Context, log *slog.Logger, runID, sheet, targetURL string, res domain.PlacementResult) error {
 	saveCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
-	if err := s.store.Save(saveCtx, domain.Placement{
+	err := s.store.Save(saveCtx, domain.Placement{
 		RunID:     runID,
 		Sheet:     sheet,
 		DonorURL:  res.DonorURL,
@@ -298,9 +306,11 @@ func (s *BacklinkService) savePlacement(ctx context.Context, log *slog.Logger, r
 		EditURL:   res.EditURL,
 		Anchor:    res.Anchor,
 		LinkCheck: res.LinkCheck,
-	}); err != nil {
-		log.WarnContext(ctx, "save placement record failed", "url", res.DonorURL, "err", err)
+	})
+	if err != nil {
+		log.ErrorContext(ctx, "save placement record failed", "url", res.DonorURL, "err", err)
 	}
+	return err
 }
 
 func (s *BacklinkService) verifyLink(ctx context.Context, log *slog.Logger, pageURL, targetURL string) string {
