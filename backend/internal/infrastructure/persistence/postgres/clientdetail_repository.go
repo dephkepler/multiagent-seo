@@ -26,9 +26,11 @@ func NewClientDetailRepository(db *pgxpool.Pool) *ClientDetailRepository {
 func (r *ClientDetailRepository) Get(ctx context.Context, clientID string) (clientdetail.Detail, error) {
 	var d clientdetail.Detail
 
-	const clientQ = `SELECT id, name, phone, first_seen_at, last_seen_at FROM clients WHERE id = @id`
+	const clientQ = `SELECT id, name, last_name, first_name, patronymic, phone, first_seen_at, last_seen_at
+		FROM clients WHERE id = @id`
 	err := r.db.QueryRow(ctx, clientQ, pgx.NamedArgs{"id": clientID}).Scan(
-		&d.Client.ID, &d.Client.Name, &d.Client.Phone, &d.Client.FirstSeenAt, &d.Client.LastSeenAt,
+		&d.Client.ID, &d.Client.Name, &d.Client.LastName, &d.Client.FirstName, &d.Client.Patronymic,
+		&d.Client.Phone, &d.Client.FirstSeenAt, &d.Client.LastSeenAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return clientdetail.Detail{}, clientdetail.ErrNotFound

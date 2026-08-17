@@ -21,8 +21,13 @@ var ErrNotFound = errors.New("clientdetail: client not found")
 var ErrEmptyNote = errors.New("clientdetail: note text is empty")
 
 type Client struct {
-	ID          string
-	Name        string
+	ID   string
+	Name string // full display name — see consultations.ComposeName
+	// LastName/FirstName/Patronymic are the editable parts behind Name —
+	// separate fields on the client card, not free text.
+	LastName    string
+	FirstName   string
+	Patronymic  string
 	Phone       string
 	FirstSeenAt time.Time
 	LastSeenAt  time.Time

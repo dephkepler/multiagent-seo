@@ -1,0 +1,3 @@
+ALTER TABLE clients DROP COLUMN IF EXISTS patronymic;
+ALTER TABLE clients DROP COLUMN IF EXISTS first_name;
+ALTER TABLE clients DROP COLUMN IF EXISTS last_name;

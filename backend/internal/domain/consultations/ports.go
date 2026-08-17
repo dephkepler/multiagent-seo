@@ -12,10 +12,10 @@ type Store interface {
 	// remember instead of copying a Client ID.
 	SearchClients(ctx context.Context, query string) ([]Client, error)
 	SetClientTelegram(ctx context.Context, clientID string, chatID int64, telegramName string) error
-	// UpdateClient edits a client's own contact details — name/phone typed
-	// in through the admin UI's client card, not anything the bot or a
-	// lead form fills in.
-	UpdateClient(ctx context.Context, clientID, name, phone string) error
+	// UpdateClient edits a client's own contact details — typed in through
+	// the admin UI's client card, not anything the bot or a lead form
+	// fills in.
+	UpdateClient(ctx context.Context, clientID string, edit ClientEdit) error
 	Save(ctx context.Context, c Consultation) (Consultation, error)
 	LatestConsultation(ctx context.Context, clientID string) (Consultation, error)
 	UpdateStatus(ctx context.Context, consultationID, status string) error

@@ -1,6 +1,9 @@
 package consultations
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // Status values a consultation can hold. Every consultation starts
 // Scheduled (the DB column defaults to it) — staff move it to one of the
@@ -28,6 +31,31 @@ type Client struct {
 	Phone          string
 	TelegramName   string
 	TelegramChatID int64
+}
+
+// ClientEdit is what staff can change about a client's own contact details
+// from the client card — see clientdetail.Service.UpdateClient.
+type ClientEdit struct {
+	LastName   string
+	FirstName  string
+	Patronymic string
+	Phone      string
+}
+
+// ComposeName joins name parts into one display string in Прізвище Ім'я
+// По батькові order (Ukrainian legal/business convention) — every other
+// place in the app (bot messages, search, cases) keeps reading the single
+// Client.Name it produces, so this is the one place "full name" logic
+// lives, not duplicated at each call site. Empty parts are skipped, not
+// left as gaps.
+func ComposeName(lastName, firstName, patronymic string) string {
+	parts := make([]string, 0, 3)
+	for _, p := range []string{lastName, firstName, patronymic} {
+		if p = strings.TrimSpace(p); p != "" {
+			parts = append(parts, p)
+		}
+	}
+	return strings.Join(parts, " ")
 }
 
 type ReminderTarget struct {

@@ -70,9 +70,18 @@ func (r *ConsultationRepository) SetClientTelegram(ctx context.Context, clientID
 	return nil
 }
 
-func (r *ConsultationRepository) UpdateClient(ctx context.Context, clientID, name, phone string) error {
-	const q = `UPDATE clients SET name = @name, phone = @phone WHERE id = @id`
-	tag, err := r.db.Exec(ctx, q, pgx.NamedArgs{"name": name, "phone": phone, "id": clientID})
+func (r *ConsultationRepository) UpdateClient(ctx context.Context, clientID string, edit consultations.ClientEdit) error {
+	const q = `UPDATE clients SET
+			name = @name, last_name = @last_name, first_name = @first_name, patronymic = @patronymic, phone = @phone
+		WHERE id = @id`
+	tag, err := r.db.Exec(ctx, q, pgx.NamedArgs{
+		"name":       consultations.ComposeName(edit.LastName, edit.FirstName, edit.Patronymic),
+		"last_name":  edit.LastName,
+		"first_name": edit.FirstName,
+		"patronymic": edit.Patronymic,
+		"phone":      edit.Phone,
+		"id":         clientID,
+	})
 	if err != nil {
 		return fmt.Errorf("update client %q: %w", clientID, err)
 	}

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	domain "multiagent-seo/internal/domain/clientdetail"
+	"multiagent-seo/internal/domain/consultations"
 	"multiagent-seo/internal/domain/webleads"
 )
 
@@ -13,7 +14,7 @@ import (
 // consultations.Store — a narrow local port instead of depending on the
 // whole Store interface for one call.
 type clientWriter interface {
-	UpdateClient(ctx context.Context, clientID, name, phone string) error
+	UpdateClient(ctx context.Context, clientID string, edit consultations.ClientEdit) error
 }
 
 type Service struct {
@@ -33,14 +34,16 @@ func (s *Service) Get(ctx context.Context, clientID string) (domain.Detail, erro
 	return d, nil
 }
 
-// UpdateClient edits name/phone as typed into the client card. Phone gets
-// the same normalization a lead coming in through the site already goes
-// through, so a hand-typed number matches the format everything else
+// UpdateClient edits name parts/phone as typed into the client card. Phone
+// gets the same normalization a lead coming in through the site already
+// goes through, so a hand-typed number matches the format everything else
 // (search, dedup) expects instead of drifting into its own format.
-func (s *Service) UpdateClient(ctx context.Context, clientID, name, phone string) error {
-	name = strings.TrimSpace(name)
-	phone = webleads.NormalizePhone(phone)
-	if err := s.clients.UpdateClient(ctx, clientID, name, phone); err != nil {
+func (s *Service) UpdateClient(ctx context.Context, clientID string, edit consultations.ClientEdit) error {
+	edit.LastName = strings.TrimSpace(edit.LastName)
+	edit.FirstName = strings.TrimSpace(edit.FirstName)
+	edit.Patronymic = strings.TrimSpace(edit.Patronymic)
+	edit.Phone = webleads.NormalizePhone(edit.Phone)
+	if err := s.clients.UpdateClient(ctx, clientID, edit); err != nil {
 		return fmt.Errorf("clientdetail: update client %q: %w", clientID, err)
 	}
 	return nil

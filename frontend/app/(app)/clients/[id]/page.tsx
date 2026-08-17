@@ -14,6 +14,9 @@ import { cx } from '@/lib/cx'
 interface ClientDetailInfo {
   id: string
   name: string
+  last_name: string
+  first_name: string
+  patronymic: string
   phone: string
   first_seen_at: string
   last_seen_at: string
@@ -57,6 +60,39 @@ interface ClientDetail {
   notes: ClientNote[]
 }
 
+type Segment = 'lead' | 'booked' | 'consulted' | 'client' | 'repeat' | 'lost'
+interface ClientSegment {
+  client_id: string
+  segment: Segment
+  overridden: boolean
+  tags: string[]
+}
+const SEGMENT_LABEL: Record<Segment, string> = {
+  lead: 'Заявка',
+  booked: 'Забронировал',
+  consulted: 'Проконсультирован',
+  client: 'Клиент',
+  repeat: 'Повторный',
+  lost: 'Потерян',
+}
+const SEGMENT_ORDER: Segment[] = ['lead', 'booked', 'consulted', 'client', 'repeat', 'lost']
+const SEGMENT_COLOR: Record<Segment, string> = {
+  lead: 'bg-gray-100 text-gray-700',
+  booked: 'bg-sky-100 text-sky-800',
+  consulted: 'bg-amber-100 text-amber-800',
+  client: 'bg-emerald-100 text-emerald-800',
+  repeat: 'bg-violet-100 text-violet-800',
+  lost: 'bg-rose-100 text-rose-800',
+}
+const TAG_LABEL: Record<string, string> = {
+  debtor: 'Должник',
+  no_show_risk: 'Риск неявки',
+}
+const TAG_COLOR: Record<string, string> = {
+  debtor: 'border border-rose-200 bg-rose-50 text-rose-700',
+  no_show_risk: 'border border-orange-200 bg-orange-50 text-orange-700',
+}
+
 const CONSULT_STATUS_LABEL: Record<ConsultationStatus, string> = {
   scheduled: 'Запланирована',
   completed: 'Провёл',
@@ -85,6 +121,22 @@ function fmtDate(iso: string): string {
   const d = new Date(iso)
   return Number.isNaN(d.getTime()) ? '—' : d.toLocaleDateString('ru-RU')
 }
+function daysSince(iso: string): number | null {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return null
+  return Math.max(0, Math.floor((Date.now() - d.getTime()) / 86_400_000))
+}
+
+function MetricTile({ label, value, accent }: { label: string; value: string; accent?: 'bad' | 'good' }) {
+  return (
+    <div className='rounded-md border border-gray-100 bg-gray-50/60 p-3'>
+      <div className='text-xs text-gray-500'>{label}</div>
+      <div className={cx('mt-0.5 text-lg font-semibold', accent === 'bad' ? 'text-rose-600' : accent === 'good' ? 'text-emerald-700' : 'text-gray-800')}>
+        {value}
+      </div>
+    </div>
+  )
+}
 
 export default function ClientDetailPage() {
   const params = useParams<{ id: string }>()
@@ -95,21 +147,45 @@ export default function ClientDetailPage() {
     queryKey: ['client-detail', id],
     queryFn: () => api<ClientDetail>(`/clients/${id}`),
   })
+  // Segment/tags aren't part of the client card's own data — they're the
+  // funnel classification (see clientsegments on the backend), already
+  // fetched by the list page under this same query key, so opening a card
+  // straight from there costs no extra request.
+  const segments = useQuery({
+    queryKey: ['client-segments'],
+    queryFn: () => api<ClientSegment[]>('/clients'),
+  })
+  const segment = segments.data?.find((s) => s.client_id === id)
+
+  const setOverride = useMutation({
+    mutationFn: (value: Segment | null) =>
+      api(`/clients/${id}/segment`, { method: 'PATCH', body: JSON.stringify({ segment_override: value }) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['client-segments'] }),
+    onError: (e: Error) => toast.error(e.message),
+  })
 
   // Editable draft fields, seeded from the loaded client — re-seeded
   // whenever a fresh fetch lands (loadedFor tracks which one we've already
   // synced from) without an Effect, so typing doesn't fight a re-render.
   const [loadedFor, setLoadedFor] = useState<ClientDetail | undefined>(undefined)
-  const [name, setName] = useState('')
+  const [lastName, setLastName] = useState('')
+  const [firstName, setFirstName] = useState('')
+  const [patronymic, setPatronymic] = useState('')
   const [phone, setPhone] = useState('')
   if (detail.data && detail.data !== loadedFor) {
     setLoadedFor(detail.data)
-    setName(detail.data.client.name)
+    setLastName(detail.data.client.last_name)
+    setFirstName(detail.data.client.first_name)
+    setPatronymic(detail.data.client.patronymic)
     setPhone(detail.data.client.phone)
   }
 
   const saveClient = useMutation({
-    mutationFn: () => api(`/clients/${id}`, { method: 'PATCH', body: JSON.stringify({ name, phone }) }),
+    mutationFn: () =>
+      api(`/clients/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ last_name: lastName, first_name: firstName, patronymic, phone }),
+      }),
     onSuccess: () => {
       toast.success('Сохранено')
       qc.invalidateQueries({ queryKey: ['client-detail', id] })
@@ -132,7 +208,16 @@ export default function ClientDetailPage() {
   if (detail.isError || !detail.data) return <Card>Не удалось загрузить карточку клиента.</Card>
 
   const d = detail.data
-  const dirty = name !== d.client.name || phone !== d.client.phone
+  const dirty =
+    lastName !== d.client.last_name ||
+    firstName !== d.client.first_name ||
+    patronymic !== d.client.patronymic ||
+    phone !== d.client.phone
+
+  const debtTotal = d.cases.reduce((sum, c) => sum + Math.max(c.fee - c.paid, 0), 0)
+  const casesActive = d.cases.filter((c) => c.status === 'in_progress').length
+  const consultsDone = d.consultations.filter((c) => c.status === 'completed').length
+  const idle = daysSince(d.client.last_seen_at)
 
   return (
     <div className='space-y-6'>
@@ -141,10 +226,74 @@ export default function ClientDetailPage() {
       </Link>
 
       <Card>
-        <div className='grid grid-cols-1 gap-4 md:grid-cols-[1fr_1fr_auto]'>
+        <div className='mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6'>
+          <div className='rounded-md border border-gray-100 bg-gray-50/60 p-3'>
+            <div className='text-xs text-gray-500'>Сегмент</div>
+            <div className='mt-1 flex items-center gap-1.5'>
+              {segment ? (
+                <select
+                  value={segment.segment}
+                  disabled={setOverride.isPending}
+                  onChange={(e) => setOverride.mutate(e.target.value as Segment)}
+                  className={cx('cursor-pointer rounded px-1.5 py-0.5 text-xs font-medium outline-none disabled:cursor-wait', SEGMENT_COLOR[segment.segment])}
+                >
+                  {SEGMENT_ORDER.map((s) => (
+                    <option key={s} value={s}>
+                      {SEGMENT_LABEL[s]}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <span className='text-sm text-gray-400'>—</span>
+              )}
+            </div>
+            {segment?.overridden && (
+              <button
+                type='button'
+                disabled={setOverride.isPending}
+                onClick={() => setOverride.mutate(null)}
+                className='mt-1 text-[10px] whitespace-nowrap text-gray-400 underline hover:text-gray-600'
+              >
+                вручную · сброс
+              </button>
+            )}
+          </div>
+          <div className='rounded-md border border-gray-100 bg-gray-50/60 p-3'>
+            <div className='mb-1 text-xs text-gray-500'>Теги</div>
+            <div className='flex flex-wrap gap-1'>
+              {(segment?.tags.length ?? 0) === 0 ? (
+                <span className='text-sm text-gray-400'>—</span>
+              ) : (
+                segment!.tags.map((t) => (
+                  <span key={t} className={cx('rounded px-1.5 py-0.5 text-[11px] font-medium', TAG_COLOR[t] || 'bg-gray-100 text-gray-600')}>
+                    {TAG_LABEL[t] || t}
+                  </span>
+                ))
+              )}
+            </div>
+          </div>
+          <MetricTile label='Принесено денег' value={fmtMoney(d.revenue_total)} accent='good' />
+          <MetricTile label='Долг' value={debtTotal > 0 ? fmtMoney(debtTotal) : '—'} accent={debtTotal > 0 ? 'bad' : undefined} />
+          <MetricTile label='Дел' value={`${d.cases.length}${casesActive ? ` (${casesActive} в работе)` : ''}`} />
+          <MetricTile label='Консультаций' value={`${d.consultations.length}${consultsDone ? ` (${consultsDone} провёл)` : ''}`} />
+        </div>
+        <p className='mb-4 text-xs text-gray-400'>
+          Первое обращение: {fmtDate(d.client.first_seen_at)} · Последняя активность: {fmtDate(d.client.last_seen_at)}
+          {idle !== null && (idle === 0 ? ' (сегодня)' : ` (${idle} дн. назад)`)}
+        </p>
+
+        <div className='grid grid-cols-1 gap-4 md:grid-cols-[1fr_1fr_1fr_1fr_auto]'>
+          <div>
+            <Label>Фамилия</Label>
+            <Input value={lastName} onChange={(e) => setLastName(e.target.value)} placeholder='Фамілія' />
+          </div>
           <div>
             <Label>Имя</Label>
-            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder='Имя Фамилия' />
+            <Input value={firstName} onChange={(e) => setFirstName(e.target.value)} placeholder="Ім'я" />
+          </div>
+          <div>
+            <Label>Отчество</Label>
+            <Input value={patronymic} onChange={(e) => setPatronymic(e.target.value)} placeholder='По батькові' />
           </div>
           <div>
             <Label>Телефон</Label>
@@ -155,11 +304,6 @@ export default function ClientDetailPage() {
               {saveClient.isPending ? 'Сохранение…' : 'Сохранить'}
             </Button>
           </div>
-        </div>
-        <div className='mt-4 flex flex-wrap gap-x-8 gap-y-1 text-xs text-gray-500'>
-          <span>Первое обращение: {fmtDate(d.client.first_seen_at)}</span>
-          <span>Последняя активность: {fmtDate(d.client.last_seen_at)}</span>
-          <span className='font-medium text-emerald-700'>Принесено денег: {fmtMoney(d.revenue_total)}</span>
         </div>
       </Card>
 

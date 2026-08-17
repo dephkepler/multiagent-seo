@@ -1264,7 +1264,7 @@ components:
 
     LeadStats:
       type: object
-      required: [ range, totals, trend, by_page, by_creator, by_status, by_category ]
+      required: [ range, totals, trend, by_page, by_creator, by_status, by_category, by_advocate ]
       properties:
         range:
           type: object
@@ -1334,6 +1334,10 @@ components:
           items:
             $ref: "#/components/schemas/LeadStatsCount"
         by_category:
+          type: array
+          items:
+            $ref: "#/components/schemas/LeadStatsCategoryRevenue"
+        by_advocate:
           type: array
           items:
             $ref: "#/components/schemas/LeadStatsCategoryRevenue"
@@ -1442,11 +1446,18 @@ components:
 
     ClientDetailInfo:
       type: object
-      required: [ id, name, phone, first_seen_at, last_seen_at ]
+      required: [ id, name, last_name, first_name, patronymic, phone, first_seen_at, last_seen_at ]
       properties:
         id:
           type: string
         name:
+          type: string
+          description: Full display name, composed from last_name/first_name/patronymic — read-only, edit the parts instead
+        last_name:
+          type: string
+        first_name:
+          type: string
+        patronymic:
           type: string
         phone:
           type: string
@@ -1551,9 +1562,13 @@ components:
 
     UpdateClientRequest:
       type: object
-      required: [ name, phone ]
+      required: [ last_name, first_name, patronymic, phone ]
       properties:
-        name:
+        last_name:
+          type: string
+        first_name:
+          type: string
+        patronymic:
           type: string
         phone:
           type: string

@@ -8,6 +8,7 @@ import (
 	openapi_types "github.com/oapi-codegen/runtime/types"
 
 	domain "multiagent-seo/internal/domain/clientdetail"
+	"multiagent-seo/internal/domain/consultations"
 	"multiagent-seo/internal/infrastructure/http/middleware"
 	"multiagent-seo/internal/infrastructure/http/problem"
 	"multiagent-seo/internal/infrastructure/http/response"
@@ -17,7 +18,7 @@ import (
 
 type clientDetailService interface {
 	Get(ctx context.Context, clientID string) (domain.Detail, error)
-	UpdateClient(ctx context.Context, clientID, name, phone string) error
+	UpdateClient(ctx context.Context, clientID string, edit consultations.ClientEdit) error
 	AddNote(ctx context.Context, clientID, text, createdBy string) (domain.Note, error)
 }
 
@@ -58,7 +59,13 @@ func (h *ClientDetailHandler) UpdateClient(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	if err := h.svc.UpdateClient(r.Context(), id.String(), body.Name, body.Phone); err != nil {
+	edit := consultations.ClientEdit{
+		LastName:   body.LastName,
+		FirstName:  body.FirstName,
+		Patronymic: body.Patronymic,
+		Phone:      body.Phone,
+	}
+	if err := h.svc.UpdateClient(r.Context(), id.String(), edit); err != nil {
 		h.writeError(r.Context(), w, "update_client", err)
 		return
 	}
@@ -142,6 +149,9 @@ func toAPIClientDetail(d domain.Detail) oapigen.ClientDetail {
 		Client: oapigen.ClientDetailInfo{
 			Id:          d.Client.ID,
 			Name:        d.Client.Name,
+			LastName:    d.Client.LastName,
+			FirstName:   d.Client.FirstName,
+			Patronymic:  d.Client.Patronymic,
 			Phone:       d.Client.Phone,
 			FirstSeenAt: d.Client.FirstSeenAt,
 			LastSeenAt:  d.Client.LastSeenAt,
