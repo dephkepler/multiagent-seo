@@ -22,6 +22,7 @@ interface ClientSegment {
   case_count: number
   case_fee: number
   case_paid: number
+  ltv: number
 }
 
 const SEGMENT_LABEL: Record<Segment, string> = {
@@ -46,10 +47,14 @@ const SEGMENT_COLOR: Record<Segment, string> = {
 const TAG_LABEL: Record<string, string> = {
   debtor: 'Должник',
   no_show_risk: 'Риск неявки',
+  high_value: 'Ценный клиент',
+  dormant: 'Без контакта 90+ дней',
 }
 const TAG_COLOR: Record<string, string> = {
   debtor: 'border border-rose-200 bg-rose-50 text-rose-700',
   no_show_risk: 'border border-orange-200 bg-orange-50 text-orange-700',
+  high_value: 'border border-emerald-200 bg-emerald-50 text-emerald-700',
+  dormant: 'border border-gray-200 bg-gray-50 text-gray-500',
 }
 
 const PAGE_SIZE = 25
@@ -62,11 +67,14 @@ function fmtDate(iso: string): string {
   return Number.isNaN(d.getTime()) ? '—' : d.toLocaleDateString('ru-RU')
 }
 
+type SortKey = 'activity' | 'ltv'
+
 export default function ClientsPage() {
   const qc = useQueryClient()
   const [query, setQuery] = useState('')
   const [segmentFilter, setSegmentFilter] = useState<Segment | 'all'>('all')
   const [page, setPage] = useState(1)
+  const [sortKey, setSortKey] = useState<SortKey>('activity')
 
   const clients = useQuery({
     queryKey: ['client-segments'],
@@ -91,8 +99,10 @@ export default function ClientsPage() {
     return (clients.data || [])
       .filter((c) => segmentFilter === 'all' || c.segment === segmentFilter)
       .filter((c) => !q || c.name.toLowerCase().includes(q) || c.phone.includes(q))
-      .sort((a, b) => new Date(b.last_activity).getTime() - new Date(a.last_activity).getTime())
-  }, [clients.data, query, segmentFilter])
+      .sort((a, b) =>
+        sortKey === 'ltv' ? b.ltv - a.ltv : new Date(b.last_activity).getTime() - new Date(a.last_activity).getTime()
+      )
+  }, [clients.data, query, segmentFilter, sortKey])
 
   const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
   const pageSafe = Math.min(page, pageCount)
@@ -106,6 +116,7 @@ export default function ClientsPage() {
   }
   const onQueryChange = resetToFirstPage(setQuery)
   const onSegmentFilterChange = resetToFirstPage(setSegmentFilter)
+  const onSortKeyChange = resetToFirstPage(setSortKey)
 
   return (
     <div className='space-y-6'>
@@ -156,13 +167,19 @@ export default function ClientsPage() {
                 <th className='py-2 pr-4'>Теги</th>
                 <th className='py-2 pr-4'>Дел</th>
                 <th className='py-2 pr-4'>Долг</th>
-                <th className='py-2'>Последняя активность</th>
+                <SortableHeader label='LTV' active={sortKey === 'ltv'} onClick={() => onSortKeyChange('ltv')} />
+                <SortableHeader
+                  label='Последняя активность'
+                  active={sortKey === 'activity'}
+                  onClick={() => onSortKeyChange('activity')}
+                  last
+                />
               </tr>
             </thead>
             <tbody>
               {pageItems.length === 0 && (
                 <tr>
-                  <td colSpan={7} className='py-6 text-center text-gray-400'>
+                  <td colSpan={8} className='py-6 text-center text-gray-400'>
                     {clients.isLoading ? 'Загрузка…' : clients.isError ? 'Не удалось загрузить' : 'Никого не найдено'}
                   </td>
                 </tr>
@@ -220,6 +237,9 @@ export default function ClientsPage() {
                     <td className={cx('py-2 pr-4', debt > 0 ? 'font-medium text-rose-600' : 'text-gray-400')}>
                       {debt > 0 ? fmtMoney(debt) : '—'}
                     </td>
+                    <td className={cx('py-2 pr-4 tabular-nums', c.ltv > 0 ? 'font-medium text-emerald-700' : 'text-gray-400')}>
+                      {c.ltv > 0 ? fmtMoney(c.ltv) : '—'}
+                    </td>
                     <td className='py-2 text-gray-500'>{fmtDate(c.last_activity)}</td>
                   </tr>
                 )
@@ -258,6 +278,34 @@ export default function ClientsPage() {
         )}
       </Card>
     </div>
+  )
+}
+
+// SortableHeader is a plain <th> that doubles as a sort toggle — clicking
+// the currently-inactive one switches to it (always descending, both
+// columns only make sense high-to-low: newest activity, biggest LTV).
+function SortableHeader({
+  label,
+  active,
+  onClick,
+  last,
+}: {
+  label: string
+  active: boolean
+  onClick: () => void
+  last?: boolean
+}) {
+  return (
+    <th className={cx('py-2', !last && 'pr-4')}>
+      <button
+        type='button'
+        onClick={onClick}
+        className={cx('flex items-center gap-1 hover:text-gray-700', active && 'text-gray-700')}
+      >
+        {label}
+        {active && <span aria-hidden>↓</span>}
+      </button>
+    </th>
   )
 }
 

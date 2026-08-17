@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"multiagent-seo/internal/domain/clientdetail"
+	"multiagent-seo/internal/domain/consultations"
 )
 
 type ClientDetailRepository struct {
@@ -96,6 +97,16 @@ func (r *ClientDetailRepository) Get(ctx context.Context, clientID string) (clie
 	}
 	for _, c := range d.Cases {
 		d.RevenueTotal += c.Paid
+	}
+	// Consultation revenue is the other half of a client's lifetime value —
+	// a client who never signed a case but paid for consultations still
+	// brought in real money. Same price>0/completed filter as leadstats, so
+	// this figure and the admin dashboard's "Заработано" agree on what
+	// counts.
+	for _, c := range d.Consultations {
+		if c.Price > 0 && c.Status == consultations.StatusCompleted {
+			d.RevenueTotal += c.Price
+		}
 	}
 
 	const notesQ = `SELECT id, text, created_by, created_at FROM client_notes

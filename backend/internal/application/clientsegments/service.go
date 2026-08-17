@@ -3,6 +3,7 @@ package clientsegments
 import (
 	"context"
 	"fmt"
+	"time"
 
 	domain "multiagent-seo/internal/domain/clientsegments"
 )
@@ -23,9 +24,10 @@ func (s *Service) List(ctx context.Context) ([]domain.ClientSegment, error) {
 	if err != nil {
 		return nil, fmt.Errorf("clientsegments: list activity: %w", err)
 	}
+	now := time.Now()
 	out := make([]domain.ClientSegment, len(activity))
 	for i, a := range activity {
-		out[i] = domain.Derive(a)
+		out[i] = domain.Derive(a, now)
 	}
 	return out, nil
 }

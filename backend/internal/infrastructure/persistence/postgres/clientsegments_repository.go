@@ -31,6 +31,7 @@ func (r *ClientSegmentsRepository) ListActivity(ctx context.Context) ([]clientse
 			coalesce(co.scheduled_n, 0),
 			coalesce(co.lost_n, 0),
 			coalesce(co.total_n, 0),
+			coalesce(co.revenue, 0),
 			coalesce(ca.case_n, 0),
 			coalesce(ca.fee_sum, 0),
 			coalesce(ca.paid_sum, 0),
@@ -49,6 +50,7 @@ func (r *ClientSegmentsRepository) ListActivity(ctx context.Context) ([]clientse
 				count(*) FILTER (WHERE status = 'scheduled') AS scheduled_n,
 				count(*) FILTER (WHERE status IN ('cancelled', 'no_show')) AS lost_n,
 				count(*) AS total_n,
+				coalesce(sum(price) FILTER (WHERE price > 0 AND status = 'completed'), 0) AS revenue,
 				max(created_at) AS last_at
 			FROM consultations
 			GROUP BY client_id
@@ -77,6 +79,7 @@ func (r *ClientSegmentsRepository) ListActivity(ctx context.Context) ([]clientse
 		if err := rows.Scan(
 			&a.ClientID, &a.Name, &a.Phone,
 			&a.CompletedCount, &a.ScheduledCount, &a.LostCount, &a.ConsultCount,
+			&a.ConsultRevenue,
 			&a.CaseCount, &a.CaseFee, &a.CasePaid,
 			&a.LastActivity,
 			&a.SegmentOverride,

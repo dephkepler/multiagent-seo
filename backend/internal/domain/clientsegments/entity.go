@@ -40,11 +40,29 @@ const (
 const (
 	TagDebtor     = "debtor"       // есть дело с paid_amount < fee
 	TagNoShowRisk = "no_show_risk" // NoShowRiskThreshold+ отменённых/неявок подряд
+	TagHighValue  = "high_value"   // LTV >= HighValueThreshold
+	TagDormant    = "dormant"      // ни одного касания за DormantThreshold
 )
 
 // NoShowRiskThreshold — один сорвавшийся визит бывает у кого угодно, два и
 // больше уже похоже на паттерн, а не на случайность.
 const NoShowRiskThreshold = 2
+
+// HighValueThreshold — граница по факту в проде, не круглое число с потолка:
+// на срезе от 2026-08-17 (658 клиентов, 76 с LTV > 0) здесь настоящий разрыв
+// в хвосте распределения — 8 клиентов ≥ 5000₴ (это же p90 среди платящих),
+// следующий вниз уже 2550₴. Пересчитать при повторном ревью порога — запрос
+// см. в чате.
+const HighValueThreshold = 5000
+
+// DormantThreshold — три месяца без единого касания в живом деле или заявке.
+// Меньше — нормальный разрыв между визитами, не сигнал; дольше — момент для
+// повторного контакта уже упущен. На срезе 2026-08-17 почти вся база старше
+// этого порога (единоразовый импорт исторических лидов 2024–2025, живая
+// работа началась только в этом месяце) — тег в моменте не избирательный, но
+// корректно описывает, что база холодная, и станет полезным фильтром по мере
+// накопления свежей активности.
+const DormantThreshold = 90 * 24 * time.Hour
 
 // IsSegment reports whether s is one of the known Segment* values — used to
 // validate a manual override before it ever reaches the database.
@@ -69,6 +87,7 @@ type Activity struct {
 	ScheduledCount int
 	LostCount      int // cancelled + no_show
 	ConsultCount   int
+	ConsultRevenue float64 // completed, priced consultations — same filter as leadstats' "Заработано"
 	CaseCount      int
 	CaseFee        float64
 	CasePaid       float64
@@ -90,10 +109,19 @@ type ClientSegment struct {
 	CaseCount    int
 	CaseFee      float64
 	CasePaid     float64
+	// LTV is lifetime value — money actually collected, all-time: completed
+	// consultations plus case payments. Same "earned, not booked" shape as
+	// clientdetail.Detail.RevenueTotal (kept in sync with it deliberately —
+	// the client-list ranking and the single-client card must agree on what
+	// a client is worth).
+	LTV float64
 }
 
 // Derive classifies one client's funnel position from their raw activity.
-func Derive(a Activity) ClientSegment {
+// now is the reference point for DormantThreshold — passed in rather than
+// read from the clock here so the classification stays a pure, testable
+// function of its inputs.
+func Derive(a Activity, now time.Time) ClientSegment {
 	cs := ClientSegment{
 		ClientID:     a.ClientID,
 		Name:         a.Name,
@@ -102,6 +130,7 @@ func Derive(a Activity) ClientSegment {
 		CaseCount:    a.CaseCount,
 		CaseFee:      a.CaseFee,
 		CasePaid:     a.CasePaid,
+		LTV:          a.ConsultRevenue + a.CasePaid,
 	}
 
 	switch {
@@ -126,6 +155,12 @@ func Derive(a Activity) ClientSegment {
 	}
 	if a.LostCount >= NoShowRiskThreshold {
 		cs.Tags = append(cs.Tags, TagNoShowRisk)
+	}
+	if cs.LTV >= HighValueThreshold {
+		cs.Tags = append(cs.Tags, TagHighValue)
+	}
+	if now.Sub(a.LastActivity) >= DormantThreshold {
+		cs.Tags = append(cs.Tags, TagDormant)
 	}
 
 	// Override wins last, after tags — tags stay tied to the real numbers

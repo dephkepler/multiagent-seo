@@ -102,5 +102,6 @@ func toAPIClientSegment(s domain.ClientSegment) oapigen.ClientSegment {
 		CaseCount:    int64(s.CaseCount),
 		CaseFee:      float32(s.CaseFee),
 		CasePaid:     float32(s.CasePaid),
+		Ltv:          float32(s.LTV),
 	}
 }

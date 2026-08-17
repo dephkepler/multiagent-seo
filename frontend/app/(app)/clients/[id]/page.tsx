@@ -98,10 +98,14 @@ const SEGMENT_COLOR: Record<Segment, string> = {
 const TAG_LABEL: Record<string, string> = {
   debtor: 'Должник',
   no_show_risk: 'Риск неявки',
+  high_value: 'Ценный клиент',
+  dormant: 'Без контакта 90+ дней',
 }
 const TAG_COLOR: Record<string, string> = {
   debtor: 'border border-rose-200 bg-rose-50 text-rose-700',
   no_show_risk: 'border border-orange-200 bg-orange-50 text-orange-700',
+  high_value: 'border border-emerald-200 bg-emerald-50 text-emerald-700',
+  dormant: 'border border-gray-200 bg-gray-50 text-gray-500',
 }
 
 const GENDER_LABEL: Record<Gender, string> = { '': 'Не вказано', male: 'Чоловіча', female: 'Жіноча' }

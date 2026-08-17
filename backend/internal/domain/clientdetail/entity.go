@@ -90,9 +90,11 @@ type Note struct {
 // Detail is one client's full card.
 type Detail struct {
 	Client Client
-	// RevenueTotal is money actually collected — sum of Case.Paid, not
-	// contracted fees. Same "earned, not booked" rule as the leads
-	// dashboard (see leadstats): a signed case isn't cash until it's paid.
+	// RevenueTotal is this client's lifetime value — money actually
+	// collected, not booked/contracted: sum of Case.Paid (not the fee) plus
+	// completed, priced consultations. Same "earned, not booked" rule as
+	// the leads dashboard (see leadstats): a signed case isn't cash until
+	// it's paid, and a cancelled consultation never was.
 	RevenueTotal  float64
 	Leads         []Lead
 	Consultations []Consultation

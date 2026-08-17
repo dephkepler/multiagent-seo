@@ -1406,7 +1406,7 @@ components:
 
     ClientSegment:
       type: object
-      required: [ client_id, name, phone, segment, overridden, tags, last_activity, case_count, case_fee, case_paid ]
+      required: [ client_id, name, phone, segment, overridden, tags, last_activity, case_count, case_fee, case_paid, ltv ]
       properties:
         client_id:
           type: string
@@ -1433,6 +1433,12 @@ components:
           type: number
         case_paid:
           type: number
+        ltv:
+          type: number
+          description: >-
+            Lifetime value — completed consultations plus case payments
+            actually received, all-time. Not case_fee (that's contracted,
+            not collected) — kept in sync with ClientDetail.revenue_total.
 
     SetClientSegmentOverrideRequest:
       type: object
