@@ -70,6 +70,18 @@ func (r *ConsultationRepository) SetClientTelegram(ctx context.Context, clientID
 	return nil
 }
 
+func (r *ConsultationRepository) UpdateClient(ctx context.Context, clientID, name, phone string) error {
+	const q = `UPDATE clients SET name = @name, phone = @phone WHERE id = @id`
+	tag, err := r.db.Exec(ctx, q, pgx.NamedArgs{"name": name, "phone": phone, "id": clientID})
+	if err != nil {
+		return fmt.Errorf("update client %q: %w", clientID, err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("update client: no client with id %q", clientID)
+	}
+	return nil
+}
+
 func (r *ConsultationRepository) Save(ctx context.Context, c consultations.Consultation) (consultations.Consultation, error) {
 	if c.Status == "" {
 		c.Status = consultations.StatusScheduled

@@ -1,0 +1,155 @@
+package handlers
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+
+	openapi_types "github.com/oapi-codegen/runtime/types"
+
+	domain "multiagent-seo/internal/domain/clientdetail"
+	"multiagent-seo/internal/infrastructure/http/middleware"
+	"multiagent-seo/internal/infrastructure/http/problem"
+	"multiagent-seo/internal/infrastructure/http/response"
+	"multiagent-seo/internal/oapigen"
+	"multiagent-seo/pkg/logger"
+)
+
+type clientDetailService interface {
+	Get(ctx context.Context, clientID string) (domain.Detail, error)
+	UpdateClient(ctx context.Context, clientID, name, phone string) error
+	AddNote(ctx context.Context, clientID, text, createdBy string) (domain.Note, error)
+}
+
+type ClientDetailHandler struct {
+	svc clientDetailService
+}
+
+func NewClientDetailHandler(svc clientDetailService) *ClientDetailHandler {
+	return &ClientDetailHandler{svc: svc}
+}
+
+func (h *ClientDetailHandler) GetClientDetail(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
+	if isNil(h.svc) {
+		problem.Write(w, http.StatusServiceUnavailable, "client detail unavailable")
+		return
+	}
+
+	d, err := h.svc.Get(r.Context(), id.String())
+	if err != nil {
+		h.writeError(r.Context(), w, "get_client_detail", err)
+		return
+	}
+	response.WriteJSON(r.Context(), w, http.StatusOK, toAPIClientDetail(d))
+}
+
+func (h *ClientDetailHandler) UpdateClient(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
+	if isNil(h.svc) {
+		problem.Write(w, http.StatusServiceUnavailable, "client detail unavailable")
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
+	var body oapigen.UpdateClientRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		log := logger.New(r.Context(), "handlers.clientdetail")
+		log.Debug().Err(err).Msg("decode update client body")
+		problem.Write(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if err := h.svc.UpdateClient(r.Context(), id.String(), body.Name, body.Phone); err != nil {
+		h.writeError(r.Context(), w, "update_client", err)
+		return
+	}
+	response.NoContent(w)
+}
+
+func (h *ClientDetailHandler) AddClientNote(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
+	if isNil(h.svc) {
+		problem.Write(w, http.StatusServiceUnavailable, "client detail unavailable")
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
+	var body oapigen.AddClientNoteRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		log := logger.New(r.Context(), "handlers.clientdetail")
+		log.Debug().Err(err).Msg("decode add note body")
+		problem.Write(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	// Whoever is logged in to the admin panel — the only identity a
+	// web-typed note has, unlike bot-side records which carry a Telegram id.
+	createdBy, _ := middleware.UserIDFromContext(r.Context())
+
+	n, err := h.svc.AddNote(r.Context(), id.String(), body.Text, createdBy)
+	if err != nil {
+		h.writeError(r.Context(), w, "add_client_note", err)
+		return
+	}
+	response.WriteJSON(r.Context(), w, http.StatusCreated, oapigen.ClientNote{
+		Id:        n.ID,
+		Text:      n.Text,
+		CreatedBy: n.CreatedBy,
+		CreatedAt: n.CreatedAt,
+	})
+}
+
+var clientDetailErrMap = newErrMap("handlers.clientdetail",
+	E(domain.ErrNotFound, http.StatusNotFound, "client not found"),
+	EMsg(domain.ErrEmptyNote, http.StatusBadRequest),
+)
+
+func (h *ClientDetailHandler) writeError(ctx context.Context, w http.ResponseWriter, op string, err error) {
+	clientDetailErrMap.Handle(ctx, w, op, err)
+}
+
+func toAPIClientDetail(d domain.Detail) oapigen.ClientDetail {
+	leads := make([]oapigen.ClientLead, len(d.Leads))
+	for i, l := range d.Leads {
+		leads[i] = oapigen.ClientLead{Id: l.ID, ReceivedAt: l.ReceivedAt, Message: l.Message, Page: l.Page}
+	}
+	consultations := make([]oapigen.ClientConsultation, len(d.Consultations))
+	for i, c := range d.Consultations {
+		consultations[i] = oapigen.ClientConsultation{
+			Id:          c.ID,
+			ScheduledAt: c.ScheduledAt,
+			Price:       float32(c.Price),
+			Status:      oapigen.ClientConsultationStatus(c.Status),
+			CaseNote:    c.CaseNote,
+		}
+	}
+	cases := make([]oapigen.ClientCase, len(d.Cases))
+	for i, c := range d.Cases {
+		cases[i] = oapigen.ClientCase{
+			Id:          c.ID,
+			Description: c.Description,
+			Category:    c.Category,
+			Status:      oapigen.ClientCaseStatus(c.Status),
+			Fee:         float32(c.Fee),
+			Paid:        float32(c.Paid),
+			CreatedAt:   c.CreatedAt,
+		}
+	}
+	notes := make([]oapigen.ClientNote, len(d.Notes))
+	for i, n := range d.Notes {
+		notes[i] = oapigen.ClientNote{Id: n.ID, Text: n.Text, CreatedBy: n.CreatedBy, CreatedAt: n.CreatedAt}
+	}
+
+	return oapigen.ClientDetail{
+		Client: oapigen.ClientDetailInfo{
+			Id:          d.Client.ID,
+			Name:        d.Client.Name,
+			Phone:       d.Client.Phone,
+			FirstSeenAt: d.Client.FirstSeenAt,
+			LastSeenAt:  d.Client.LastSeenAt,
+		},
+		RevenueTotal:  float32(d.RevenueTotal),
+		Leads:         leads,
+		Consultations: consultations,
+		Cases:         cases,
+		Notes:         notes,
+	}
+}

@@ -1,6 +1,7 @@
 'use client'
 
 import { useMemo, useState } from 'react'
+import Link from 'next/link'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
@@ -170,7 +171,11 @@ export default function ClientsPage() {
                 const debt = c.case_fee - c.case_paid
                 return (
                   <tr key={c.client_id} className='border-t border-gray-100'>
-                    <td className='py-2 pr-4 font-medium'>{c.name || '—'}</td>
+                    <td className='py-2 pr-4 font-medium'>
+                      <Link href={`/clients/${c.client_id}`} className='text-emerald-700 hover:underline'>
+                        {c.name || '—'}
+                      </Link>
+                    </td>
                     <td className='py-2 pr-4 text-gray-500'>{c.phone || '—'}</td>
                     <td className='py-2 pr-4'>
                       <div className='flex items-center gap-1.5'>

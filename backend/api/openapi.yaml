@@ -627,6 +627,81 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+  /clients/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      operationId: getClientDetail
+      security:
+        - bearerAuth: [ ]
+      tags: [ Clients ]
+      summary: One client's full card — leads, consultations, cases, manual notes, money actually collected
+      responses:
+        "200":
+          description: Client card
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClientDetail"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      operationId: updateClient
+      security:
+        - bearerAuth: [ ]
+      tags: [ Clients ]
+      summary: Edit a client's own name/phone from the client card
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateClientRequest"
+      responses:
+        "204":
+          description: Saved
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /clients/{id}/notes:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      operationId: addClientNote
+      security:
+        - bearerAuth: [ ]
+      tags: [ Clients ]
+      summary: Add a manual call/contact log entry to a client's card — free text staff types in after a call, there's no phone system integration
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddClientNoteRequest"
+      responses:
+        "201":
+          description: Note added
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClientNote"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
 components:
   securitySchemes:
     bearerAuth:
@@ -1364,3 +1439,128 @@ components:
             - $ref: "#/components/schemas/Segment"
           nullable: true
           description: Null clears the override and falls back to the calculated segment
+
+    ClientDetailInfo:
+      type: object
+      required: [ id, name, phone, first_seen_at, last_seen_at ]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        phone:
+          type: string
+        first_seen_at:
+          type: string
+          format: date-time
+        last_seen_at:
+          type: string
+          format: date-time
+
+    ClientLead:
+      type: object
+      required: [ id, received_at, message, page ]
+      properties:
+        id:
+          type: string
+        received_at:
+          type: string
+          format: date-time
+        message:
+          type: string
+        page:
+          type: string
+
+    ClientConsultation:
+      type: object
+      required: [ id, scheduled_at, price, status, case_note ]
+      properties:
+        id:
+          type: string
+        scheduled_at:
+          type: string
+          format: date-time
+        price:
+          type: number
+        status:
+          type: string
+          enum: [ scheduled, completed, cancelled, no_show ]
+        case_note:
+          type: string
+
+    ClientCase:
+      type: object
+      required: [ id, description, category, status, fee, paid, created_at ]
+      properties:
+        id:
+          type: string
+        description:
+          type: string
+        category:
+          type: string
+        status:
+          type: string
+          enum: [ in_progress, completed, cancelled ]
+        fee:
+          type: number
+        paid:
+          type: number
+        created_at:
+          type: string
+          format: date-time
+
+    ClientNote:
+      type: object
+      required: [ id, text, created_by, created_at ]
+      properties:
+        id:
+          type: string
+        text:
+          type: string
+        created_by:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    ClientDetail:
+      type: object
+      required: [ client, revenue_total, leads, consultations, cases, notes ]
+      properties:
+        client:
+          $ref: "#/components/schemas/ClientDetailInfo"
+        revenue_total:
+          type: number
+          description: Sum of paid amounts across all cases — money actually collected, not contracted
+        leads:
+          type: array
+          items:
+            $ref: "#/components/schemas/ClientLead"
+        consultations:
+          type: array
+          items:
+            $ref: "#/components/schemas/ClientConsultation"
+        cases:
+          type: array
+          items:
+            $ref: "#/components/schemas/ClientCase"
+        notes:
+          type: array
+          items:
+            $ref: "#/components/schemas/ClientNote"
+
+    UpdateClientRequest:
+      type: object
+      required: [ name, phone ]
+      properties:
+        name:
+          type: string
+        phone:
+          type: string
+
+    AddClientNoteRequest:
+      type: object
+      required: [ text ]
+      properties:
+        text:
+          type: string

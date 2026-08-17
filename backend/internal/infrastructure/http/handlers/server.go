@@ -10,6 +10,7 @@ type Server struct {
 	*EmailScrapeHandler
 	*LeadStatsHandler
 	*ClientSegmentsHandler
+	*ClientDetailHandler
 }
 
 func NewServer(
@@ -22,6 +23,7 @@ func NewServer(
 	emailScrape *EmailScrapeHandler,
 	leadStats *LeadStatsHandler,
 	clientSegments *ClientSegmentsHandler,
+	clientDetail *ClientDetailHandler,
 ) *Server {
 	return &Server{
 		HealthHandler:         health,
@@ -33,5 +35,6 @@ func NewServer(
 		EmailScrapeHandler:    emailScrape,
 		LeadStatsHandler:      leadStats,
 		ClientSegmentsHandler: clientSegments,
+		ClientDetailHandler:   clientDetail,
 	}
 }
