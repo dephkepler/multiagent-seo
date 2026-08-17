@@ -13,10 +13,13 @@ import (
 
 type ConsultationRepository struct {
 	db *pgxpool.Pool
+	// encryptionKey encrypts sensitive ClientEdit fields (address/
+	// birthdate/tax id) at rest via pgcrypto — see UpdateClient.
+	encryptionKey string
 }
 
-func NewConsultationRepository(db *pgxpool.Pool) *ConsultationRepository {
-	return &ConsultationRepository{db: db}
+func NewConsultationRepository(db *pgxpool.Pool, encryptionKey string) *ConsultationRepository {
+	return &ConsultationRepository{db: db, encryptionKey: encryptionKey}
 }
 
 func (r *ConsultationRepository) FindClient(ctx context.Context, clientID string) (consultations.Client, error) {
@@ -70,17 +73,36 @@ func (r *ConsultationRepository) SetClientTelegram(ctx context.Context, clientID
 	return nil
 }
 
+// UpdateClient writes every field the client card can edit. Address/
+// Birthdate/TaxID go in encrypted (pgp_sym_encrypt, keyed by
+// r.encryptionKey) — an empty value stores NULL rather than encrypting an
+// empty string, so "not recorded" stays distinguishable from "recorded as
+// blank".
 func (r *ConsultationRepository) UpdateClient(ctx context.Context, clientID string, edit consultations.ClientEdit) error {
 	const q = `UPDATE clients SET
-			name = @name, last_name = @last_name, first_name = @first_name, patronymic = @patronymic, phone = @phone
+			name = @name, last_name = @last_name, first_name = @first_name, patronymic = @patronymic,
+			phone = @phone, gender = @gender, email = @email,
+			client_type = @client_type, company_name = @company_name, company_code = @company_code,
+			address_enc = CASE WHEN @address = '' THEN NULL ELSE pgp_sym_encrypt(@address, @enc_key) END,
+			birthdate_enc = CASE WHEN @birthdate = '' THEN NULL ELSE pgp_sym_encrypt(@birthdate, @enc_key) END,
+			tax_id_enc = CASE WHEN @tax_id = '' THEN NULL ELSE pgp_sym_encrypt(@tax_id, @enc_key) END
 		WHERE id = @id`
 	tag, err := r.db.Exec(ctx, q, pgx.NamedArgs{
-		"name":       consultations.ComposeName(edit.LastName, edit.FirstName, edit.Patronymic),
-		"last_name":  edit.LastName,
-		"first_name": edit.FirstName,
-		"patronymic": edit.Patronymic,
-		"phone":      edit.Phone,
-		"id":         clientID,
+		"name":         consultations.ComposeName(edit.LastName, edit.FirstName, edit.Patronymic),
+		"last_name":    edit.LastName,
+		"first_name":   edit.FirstName,
+		"patronymic":   edit.Patronymic,
+		"phone":        edit.Phone,
+		"gender":       edit.Gender,
+		"email":        edit.Email,
+		"client_type":  edit.ClientType,
+		"company_name": edit.CompanyName,
+		"company_code": edit.CompanyCode,
+		"address":      edit.Address,
+		"birthdate":    edit.Birthdate,
+		"tax_id":       edit.TaxID,
+		"enc_key":      r.encryptionKey,
+		"id":           clientID,
 	})
 	if err != nil {
 		return fmt.Errorf("update client %q: %w", clientID, err)

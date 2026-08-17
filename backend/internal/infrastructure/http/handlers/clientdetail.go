@@ -60,10 +60,18 @@ func (h *ClientDetailHandler) UpdateClient(w http.ResponseWriter, r *http.Reques
 	}
 
 	edit := consultations.ClientEdit{
-		LastName:   body.LastName,
-		FirstName:  body.FirstName,
-		Patronymic: body.Patronymic,
-		Phone:      body.Phone,
+		LastName:    body.LastName,
+		FirstName:   body.FirstName,
+		Patronymic:  body.Patronymic,
+		Phone:       body.Phone,
+		Gender:      string(body.Gender),
+		Email:       body.Email,
+		ClientType:  string(body.ClientType),
+		CompanyName: body.CompanyName,
+		CompanyCode: body.CompanyCode,
+		Address:     body.Address,
+		Birthdate:   body.Birthdate,
+		TaxID:       body.TaxId,
 	}
 	if err := h.svc.UpdateClient(r.Context(), id.String(), edit); err != nil {
 		h.writeError(r.Context(), w, "update_client", err)
@@ -107,6 +115,8 @@ func (h *ClientDetailHandler) AddClientNote(w http.ResponseWriter, r *http.Reque
 var clientDetailErrMap = newErrMap("handlers.clientdetail",
 	E(domain.ErrNotFound, http.StatusNotFound, "client not found"),
 	EMsg(domain.ErrEmptyNote, http.StatusBadRequest),
+	EMsg(domain.ErrInvalidGender, http.StatusBadRequest),
+	EMsg(domain.ErrInvalidClientType, http.StatusBadRequest),
 )
 
 func (h *ClientDetailHandler) writeError(ctx context.Context, w http.ResponseWriter, op string, err error) {
@@ -152,7 +162,15 @@ func toAPIClientDetail(d domain.Detail) oapigen.ClientDetail {
 			LastName:    d.Client.LastName,
 			FirstName:   d.Client.FirstName,
 			Patronymic:  d.Client.Patronymic,
+			Gender:      oapigen.ClientDetailInfoGender(d.Client.Gender),
 			Phone:       d.Client.Phone,
+			Email:       d.Client.Email,
+			ClientType:  oapigen.ClientDetailInfoClientType(d.Client.ClientType),
+			CompanyName: d.Client.CompanyName,
+			CompanyCode: d.Client.CompanyCode,
+			Address:     d.Client.Address,
+			Birthdate:   d.Client.Birthdate,
+			TaxId:       d.Client.TaxID,
 			FirstSeenAt: d.Client.FirstSeenAt,
 			LastSeenAt:  d.Client.LastSeenAt,
 		},

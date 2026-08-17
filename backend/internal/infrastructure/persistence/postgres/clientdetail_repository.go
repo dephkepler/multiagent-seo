@@ -13,10 +13,14 @@ import (
 
 type ClientDetailRepository struct {
 	db *pgxpool.Pool
+	// encryptionKey decrypts address/birthdate/tax id via pgcrypto — see
+	// Get. Must match ConsultationRepository.UpdateClient's key, since
+	// that's what encrypted them.
+	encryptionKey string
 }
 
-func NewClientDetailRepository(db *pgxpool.Pool) *ClientDetailRepository {
-	return &ClientDetailRepository{db: db}
+func NewClientDetailRepository(db *pgxpool.Pool, encryptionKey string) *ClientDetailRepository {
+	return &ClientDetailRepository{db: db, encryptionKey: encryptionKey}
 }
 
 // Get reads the client row plus its full history in four separate
@@ -26,11 +30,19 @@ func NewClientDetailRepository(db *pgxpool.Pool) *ClientDetailRepository {
 func (r *ClientDetailRepository) Get(ctx context.Context, clientID string) (clientdetail.Detail, error) {
 	var d clientdetail.Detail
 
-	const clientQ = `SELECT id, name, last_name, first_name, patronymic, phone, first_seen_at, last_seen_at
+	const clientQ = `SELECT id, name, last_name, first_name, patronymic, gender, phone, email,
+			client_type, company_name, company_code,
+			coalesce(pgp_sym_decrypt(address_enc, @enc_key), ''),
+			coalesce(pgp_sym_decrypt(birthdate_enc, @enc_key), ''),
+			coalesce(pgp_sym_decrypt(tax_id_enc, @enc_key), ''),
+			first_seen_at, last_seen_at
 		FROM clients WHERE id = @id`
-	err := r.db.QueryRow(ctx, clientQ, pgx.NamedArgs{"id": clientID}).Scan(
+	err := r.db.QueryRow(ctx, clientQ, pgx.NamedArgs{"id": clientID, "enc_key": r.encryptionKey}).Scan(
 		&d.Client.ID, &d.Client.Name, &d.Client.LastName, &d.Client.FirstName, &d.Client.Patronymic,
-		&d.Client.Phone, &d.Client.FirstSeenAt, &d.Client.LastSeenAt,
+		&d.Client.Gender, &d.Client.Phone, &d.Client.Email,
+		&d.Client.ClientType, &d.Client.CompanyName, &d.Client.CompanyCode,
+		&d.Client.Address, &d.Client.Birthdate, &d.Client.TaxID,
+		&d.Client.FirstSeenAt, &d.Client.LastSeenAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return clientdetail.Detail{}, clientdetail.ErrNotFound

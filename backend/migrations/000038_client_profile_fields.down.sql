@@ -1,0 +1,10 @@
+ALTER TABLE clients DROP COLUMN IF EXISTS tax_id_enc;
+ALTER TABLE clients DROP COLUMN IF EXISTS birthdate_enc;
+ALTER TABLE clients DROP COLUMN IF EXISTS address_enc;
+ALTER TABLE clients DROP COLUMN IF EXISTS company_code;
+ALTER TABLE clients DROP COLUMN IF EXISTS company_name;
+ALTER TABLE clients DROP CONSTRAINT IF EXISTS clients_client_type_check;
+ALTER TABLE clients DROP COLUMN IF EXISTS client_type;
+ALTER TABLE clients DROP COLUMN IF EXISTS email;
+ALTER TABLE clients DROP CONSTRAINT IF EXISTS clients_gender_check;
+ALTER TABLE clients DROP COLUMN IF EXISTS gender;

@@ -8,16 +8,27 @@ import { toast } from 'sonner'
 import { api } from '@/lib/api'
 import { Card } from '@/components/ui/card'
 import { Input, Label } from '@/components/ui/input'
+import { Select } from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
 import { cx } from '@/lib/cx'
 
+type Gender = '' | 'male' | 'female'
+type ClientType = 'individual' | 'legal_entity'
 interface ClientDetailInfo {
   id: string
   name: string
   last_name: string
   first_name: string
   patronymic: string
+  gender: Gender
   phone: string
+  email: string
+  client_type: ClientType
+  company_name: string
+  company_code: string
+  address: string
+  birthdate: string
+  tax_id: string
   first_seen_at: string
   last_seen_at: string
 }
@@ -93,6 +104,9 @@ const TAG_COLOR: Record<string, string> = {
   no_show_risk: 'border border-orange-200 bg-orange-50 text-orange-700',
 }
 
+const GENDER_LABEL: Record<Gender, string> = { '': 'Не вказано', male: 'Чоловіча', female: 'Жіноча' }
+const CLIENT_TYPE_LABEL: Record<ClientType, string> = { individual: 'Фізична особа', legal_entity: 'Юридична особа' }
+
 const CONSULT_STATUS_LABEL: Record<ConsultationStatus, string> = {
   scheduled: 'Запланирована',
   completed: 'Провёл',
@@ -125,6 +139,40 @@ function daysSince(iso: string): number | null {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return null
   return Math.max(0, Math.floor((Date.now() - d.getTime()) / 86_400_000))
+}
+
+interface ClientForm {
+  lastName: string
+  firstName: string
+  patronymic: string
+  phone: string
+  gender: Gender
+  email: string
+  clientType: ClientType
+  companyName: string
+  companyCode: string
+  address: string
+  birthdate: string
+  taxId: string
+}
+function toForm(c: ClientDetailInfo): ClientForm {
+  return {
+    lastName: c.last_name,
+    firstName: c.first_name,
+    patronymic: c.patronymic,
+    phone: c.phone,
+    gender: c.gender,
+    email: c.email,
+    clientType: c.client_type,
+    companyName: c.company_name,
+    companyCode: c.company_code,
+    address: c.address,
+    birthdate: c.birthdate,
+    taxId: c.tax_id,
+  }
+}
+function formsEqual(a: ClientForm, b: ClientForm): boolean {
+  return (Object.keys(a) as (keyof ClientForm)[]).every((k) => a[k] === b[k])
 }
 
 function MetricTile({ label, value, accent }: { label: string; value: string; accent?: 'bad' | 'good' }) {
@@ -164,28 +212,43 @@ export default function ClientDetailPage() {
     onError: (e: Error) => toast.error(e.message),
   })
 
-  // Editable draft fields, seeded from the loaded client — re-seeded
-  // whenever a fresh fetch lands (loadedFor tracks which one we've already
-  // synced from) without an Effect, so typing doesn't fight a re-render.
+  // Editable draft, seeded from the loaded client — re-seeded whenever a
+  // fresh fetch lands (loadedFor tracks which one we've already synced
+  // from) without an Effect, so typing doesn't fight a re-render.
   const [loadedFor, setLoadedFor] = useState<ClientDetail | undefined>(undefined)
-  const [lastName, setLastName] = useState('')
-  const [firstName, setFirstName] = useState('')
-  const [patronymic, setPatronymic] = useState('')
-  const [phone, setPhone] = useState('')
+  const [form, setForm] = useState<ClientForm | null>(null)
   if (detail.data && detail.data !== loadedFor) {
     setLoadedFor(detail.data)
-    setLastName(detail.data.client.last_name)
-    setFirstName(detail.data.client.first_name)
-    setPatronymic(detail.data.client.patronymic)
-    setPhone(detail.data.client.phone)
+    setForm(toForm(detail.data.client))
+  }
+  function set<K extends keyof ClientForm>(k: K, v: ClientForm[K]) {
+    setForm((f) => (f ? { ...f, [k]: v } : f))
   }
 
   const saveClient = useMutation({
-    mutationFn: () =>
-      api(`/clients/${id}`, {
+    mutationFn: () => {
+      if (!form) return Promise.resolve()
+      return api(`/clients/${id}`, {
         method: 'PATCH',
-        body: JSON.stringify({ last_name: lastName, first_name: firstName, patronymic, phone }),
-      }),
+        body: JSON.stringify({
+          last_name: form.lastName,
+          first_name: form.firstName,
+          patronymic: form.patronymic,
+          phone: form.phone,
+          gender: form.gender,
+          email: form.email,
+          client_type: form.clientType,
+          // Company fields only mean something for a legal entity — clear
+          // them on save if the type was switched back, so a stale name
+          // doesn't linger attached to an individual.
+          company_name: form.clientType === 'legal_entity' ? form.companyName : '',
+          company_code: form.clientType === 'legal_entity' ? form.companyCode : '',
+          address: form.address,
+          birthdate: form.birthdate,
+          tax_id: form.taxId,
+        }),
+      })
+    },
     onSuccess: () => {
       toast.success('Сохранено')
       qc.invalidateQueries({ queryKey: ['client-detail', id] })
@@ -206,13 +269,10 @@ export default function ClientDetailPage() {
 
   if (detail.isLoading) return <Card>Загрузка…</Card>
   if (detail.isError || !detail.data) return <Card>Не удалось загрузить карточку клиента.</Card>
+  if (!form) return <Card>Загрузка…</Card>
 
   const d = detail.data
-  const dirty =
-    lastName !== d.client.last_name ||
-    firstName !== d.client.first_name ||
-    patronymic !== d.client.patronymic ||
-    phone !== d.client.phone
+  const dirty = !formsEqual(form, toForm(d.client))
 
   const debtTotal = d.cases.reduce((sum, c) => sum + Math.max(c.fee - c.paid, 0), 0)
   const casesActive = d.cases.filter((c) => c.status === 'in_progress').length
@@ -282,28 +342,98 @@ export default function ClientDetailPage() {
           {idle !== null && (idle === 0 ? ' (сегодня)' : ` (${idle} дн. назад)`)}
         </p>
 
-        <div className='grid grid-cols-1 gap-4 md:grid-cols-[1fr_1fr_1fr_1fr_auto]'>
+        {/* Личные данные */}
+        <div className='mb-2 text-xs font-semibold tracking-wide text-gray-400 uppercase'>Личные данные</div>
+        <div className='grid grid-cols-1 gap-4 md:grid-cols-3'>
           <div>
             <Label>Фамилия</Label>
-            <Input value={lastName} onChange={(e) => setLastName(e.target.value)} placeholder='Фамілія' />
+            <Input value={form.lastName} onChange={(e) => set('lastName', e.target.value)} placeholder='Фамілія' />
           </div>
           <div>
             <Label>Имя</Label>
-            <Input value={firstName} onChange={(e) => setFirstName(e.target.value)} placeholder="Ім'я" />
+            <Input value={form.firstName} onChange={(e) => set('firstName', e.target.value)} placeholder="Ім'я" />
           </div>
           <div>
             <Label>Отчество</Label>
-            <Input value={patronymic} onChange={(e) => setPatronymic(e.target.value)} placeholder='По батькові' />
+            <Input value={form.patronymic} onChange={(e) => set('patronymic', e.target.value)} placeholder='По батькові' />
+          </div>
+          <div>
+            <Label>Пол</Label>
+            <Select value={form.gender} onChange={(e) => set('gender', e.target.value as Gender)}>
+              {(Object.keys(GENDER_LABEL) as Gender[]).map((g) => (
+                <option key={g} value={g}>
+                  {GENDER_LABEL[g]}
+                </option>
+              ))}
+            </Select>
           </div>
           <div>
             <Label>Телефон</Label>
-            <Input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder='+380...' />
+            <Input value={form.phone} onChange={(e) => set('phone', e.target.value)} placeholder='+380...' />
           </div>
-          <div className='flex items-end'>
-            <Button disabled={!dirty || saveClient.isPending} onClick={() => saveClient.mutate()}>
-              {saveClient.isPending ? 'Сохранение…' : 'Сохранить'}
-            </Button>
+          <div>
+            <Label>Email</Label>
+            <Input type='email' value={form.email} onChange={(e) => set('email', e.target.value)} placeholder='client@example.com' />
           </div>
+        </div>
+
+        {/* Тип клиента */}
+        <div className='mt-5 border-t border-gray-100 pt-4'>
+          <div className='mb-2 text-xs font-semibold tracking-wide text-gray-400 uppercase'>Тип клиента</div>
+          <div className='grid grid-cols-1 gap-4 md:grid-cols-3'>
+            <div>
+              <Label>Физ./юр. лицо</Label>
+              <Select value={form.clientType} onChange={(e) => set('clientType', e.target.value as ClientType)}>
+                {(Object.keys(CLIENT_TYPE_LABEL) as ClientType[]).map((t) => (
+                  <option key={t} value={t}>
+                    {CLIENT_TYPE_LABEL[t]}
+                  </option>
+                ))}
+              </Select>
+            </div>
+            {form.clientType === 'legal_entity' && (
+              <>
+                <div>
+                  <Label>Название компании</Label>
+                  <Input value={form.companyName} onChange={(e) => set('companyName', e.target.value)} placeholder='ТОВ «...»' />
+                </div>
+                <div>
+                  <Label>ЄДРПОУ</Label>
+                  <Input value={form.companyCode} onChange={(e) => set('companyCode', e.target.value)} placeholder='12345678' />
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* Чувствительные данные — для документов, шифруются в базе */}
+        <div className='mt-5 border-t border-gray-100 pt-4'>
+          <div className='mb-2 flex items-center gap-1.5 text-xs font-semibold tracking-wide text-gray-400 uppercase'>
+            <span>🔒</span> Чувствительные данные
+          </div>
+          <p className='mb-3 text-xs text-gray-400'>
+            Для позовних заяв/клопотань — не для аналитики. Хранятся в базе зашифрованными, не в открытом виде.
+          </p>
+          <div className='grid grid-cols-1 gap-4 md:grid-cols-3'>
+            <div>
+              <Label>Адреса реєстрації</Label>
+              <Input value={form.address} onChange={(e) => set('address', e.target.value)} placeholder='м. Київ, вул. ...' />
+            </div>
+            <div>
+              <Label>Дата народження</Label>
+              <Input type='date' value={form.birthdate} onChange={(e) => set('birthdate', e.target.value)} />
+            </div>
+            <div>
+              <Label>РНОКПП / ІПН</Label>
+              <Input value={form.taxId} onChange={(e) => set('taxId', e.target.value)} placeholder='1234567890' />
+            </div>
+          </div>
+        </div>
+
+        <div className='mt-5 flex justify-end border-t border-gray-100 pt-4'>
+          <Button disabled={!dirty || saveClient.isPending} onClick={() => saveClient.mutate()}>
+            {saveClient.isPending ? 'Сохранение…' : 'Сохранить'}
+          </Button>
         </div>
       </Card>
 

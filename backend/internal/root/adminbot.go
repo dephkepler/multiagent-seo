@@ -23,7 +23,7 @@ func buildAdminBot(ctx context.Context, cfg config.Config, log *slog.Logger, poo
 		return nil
 	}
 
-	consultationRepo := postgres.NewConsultationRepository(pool)
+	consultationRepo := postgres.NewConsultationRepository(pool, cfg.Clients.EncryptionKey)
 	caseRepo := postgres.NewCaseRepository(pool)
 
 	var sheetSink consultations.SheetWriter = noopConsultationSink{}

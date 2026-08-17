@@ -163,6 +163,13 @@ type WordPressConfig struct {
 	HTTPTimeout   time.Duration `env:"WP_HTTP_TIMEOUT" envDefault:"30s"`
 }
 
+// ClientsConfig holds the key that encrypts sensitive client-card fields
+// (address/birthdate/tax id) at rest — separate from WordPress.EncryptionKey
+// so compromising one key doesn't expose the other's data.
+type ClientsConfig struct {
+	EncryptionKey string `env:"CLIENTS_ENCRYPTION_KEY" envDefault:"dev-insecure-change-me" validate:"required"`
+}
+
 type MODXConfig struct {
 	DBHost     string `env:"MODX_DB_HOST"`
 	DBPort     string `env:"MODX_DB_PORT" envDefault:"3306"`
@@ -201,6 +208,7 @@ type Config struct {
 	GA4          GA4Config
 	Reminder     ReminderConfig
 	MODX         MODXConfig
+	Clients      ClientsConfig `validate:"required"`
 }
 
 type PromptConfig struct {
@@ -243,6 +251,9 @@ func Load() (Config, error) {
 		}
 		if cfg.JWT.Secret == devEncryptionKey {
 			return cfg, fmt.Errorf("JWT_SECRET must be overridden outside the local environment")
+		}
+		if cfg.Clients.EncryptionKey == devEncryptionKey {
+			return cfg, fmt.Errorf("CLIENTS_ENCRYPTION_KEY must be overridden outside the local environment")
 		}
 	}
 

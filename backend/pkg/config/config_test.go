@@ -65,6 +65,7 @@ func TestLoad_RejectsDevSecretsOutsideLocal(t *testing.T) {
 
 	t.Setenv("CF_WP_ENCRYPTION_KEY", "a-real-prod-secret")
 	t.Setenv("CF_JWT_SECRET", "a-real-jwt-secret")
+	t.Setenv("CF_CLIENTS_ENCRYPTION_KEY", "a-real-clients-secret")
 	if _, err := Load(); err != nil {
 		t.Fatalf("real secrets in non-local env should pass: %v", err)
 	}

@@ -34,15 +34,34 @@ func (s *Service) Get(ctx context.Context, clientID string) (domain.Detail, erro
 	return d, nil
 }
 
-// UpdateClient edits name parts/phone as typed into the client card. Phone
+// UpdateClient edits everything staff can change on the client card. Phone
 // gets the same normalization a lead coming in through the site already
 // goes through, so a hand-typed number matches the format everything else
 // (search, dedup) expects instead of drifting into its own format.
+// Address/Birthdate/TaxID are passed through as plain text — the
+// repository is what encrypts them at rest.
 func (s *Service) UpdateClient(ctx context.Context, clientID string, edit consultations.ClientEdit) error {
 	edit.LastName = strings.TrimSpace(edit.LastName)
 	edit.FirstName = strings.TrimSpace(edit.FirstName)
 	edit.Patronymic = strings.TrimSpace(edit.Patronymic)
 	edit.Phone = webleads.NormalizePhone(edit.Phone)
+	edit.Email = strings.TrimSpace(edit.Email)
+	edit.CompanyName = strings.TrimSpace(edit.CompanyName)
+	edit.CompanyCode = strings.TrimSpace(edit.CompanyCode)
+	edit.Address = strings.TrimSpace(edit.Address)
+	edit.Birthdate = strings.TrimSpace(edit.Birthdate)
+	edit.TaxID = strings.TrimSpace(edit.TaxID)
+
+	if !consultations.IsGender(edit.Gender) {
+		return fmt.Errorf("clientdetail: update client: %w: %q", domain.ErrInvalidGender, edit.Gender)
+	}
+	if edit.ClientType == "" {
+		edit.ClientType = consultations.ClientTypeIndividual
+	}
+	if !consultations.IsClientType(edit.ClientType) {
+		return fmt.Errorf("clientdetail: update client: %w: %q", domain.ErrInvalidClientType, edit.ClientType)
+	}
+
 	if err := s.clients.UpdateClient(ctx, clientID, edit); err != nil {
 		return fmt.Errorf("clientdetail: update client %q: %w", clientID, err)
 	}

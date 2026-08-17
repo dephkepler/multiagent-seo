@@ -1446,7 +1446,7 @@ components:
 
     ClientDetailInfo:
       type: object
-      required: [ id, name, last_name, first_name, patronymic, phone, first_seen_at, last_seen_at ]
+      required: [ id, name, last_name, first_name, patronymic, gender, phone, email, client_type, company_name, company_code, address, birthdate, tax_id, first_seen_at, last_seen_at ]
       properties:
         id:
           type: string
@@ -1459,8 +1459,32 @@ components:
           type: string
         patronymic:
           type: string
+        gender:
+          type: string
+          enum: [ "", male, female ]
+          description: Empty means not recorded — never guessed from a name
         phone:
           type: string
+        email:
+          type: string
+        client_type:
+          type: string
+          enum: [ individual, legal_entity ]
+        company_name:
+          type: string
+          description: Only meaningful when client_type is legal_entity
+        company_code:
+          type: string
+          description: ЄДРПОУ — only meaningful when client_type is legal_entity
+        address:
+          type: string
+          description: Sensitive — encrypted at rest, decrypted for this response only
+        birthdate:
+          type: string
+          description: "Sensitive — encrypted at rest. YYYY-MM-DD, or empty when not recorded"
+        tax_id:
+          type: string
+          description: РНОКПП/ІПН — sensitive, encrypted at rest
         first_seen_at:
           type: string
           format: date-time
@@ -1562,7 +1586,7 @@ components:
 
     UpdateClientRequest:
       type: object
-      required: [ last_name, first_name, patronymic, phone ]
+      required: [ last_name, first_name, patronymic, phone, gender, email, client_type, company_name, company_code, address, birthdate, tax_id ]
       properties:
         last_name:
           type: string
@@ -1571,6 +1595,25 @@ components:
         patronymic:
           type: string
         phone:
+          type: string
+        gender:
+          type: string
+          enum: [ "", male, female ]
+        email:
+          type: string
+        client_type:
+          type: string
+          enum: [ individual, legal_entity ]
+        company_name:
+          type: string
+        company_code:
+          type: string
+        address:
+          type: string
+        birthdate:
+          type: string
+          description: "YYYY-MM-DD, or empty to clear"
+        tax_id:
           type: string
 
     AddClientNoteRequest:

@@ -20,15 +20,34 @@ var ErrNotFound = errors.New("clientdetail: client not found")
 // anything into isn't worth a row.
 var ErrEmptyNote = errors.New("clientdetail: note text is empty")
 
+// ErrInvalidGender/ErrInvalidClientType guard UpdateClient — checked before
+// the DB's own CHECK constraint so a bad value fails with a clear domain
+// error instead of a raw Postgres constraint message reaching the client.
+var ErrInvalidGender = errors.New("clientdetail: invalid gender")
+var ErrInvalidClientType = errors.New("clientdetail: invalid client type")
+
 type Client struct {
 	ID   string
 	Name string // full display name — see consultations.ComposeName
 	// LastName/FirstName/Patronymic are the editable parts behind Name —
 	// separate fields on the client card, not free text.
-	LastName    string
-	FirstName   string
-	Patronymic  string
-	Phone       string
+	LastName   string
+	FirstName  string
+	Patronymic string
+	Gender     string // "", consultations.GenderMale, or consultations.GenderFemale
+	Phone      string
+	Email      string
+	ClientType string // consultations.ClientTypeIndividual or ClientTypeLegalEntity
+	// CompanyName/CompanyCode are only meaningful when ClientType is
+	// legal_entity — left empty otherwise, not hidden/omitted.
+	CompanyName string
+	CompanyCode string
+	// Address/Birthdate/TaxID are sensitive — already decrypted by the
+	// repository by the time they reach here (see clientdetail_repository.go).
+	// Birthdate is "YYYY-MM-DD" or "" when not recorded.
+	Address     string
+	Birthdate   string
+	TaxID       string
 	FirstSeenAt time.Time
 	LastSeenAt  time.Time
 }

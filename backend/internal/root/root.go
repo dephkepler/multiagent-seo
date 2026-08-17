@@ -74,7 +74,10 @@ func Run(ctx context.Context, cfg config.Config) error {
 	}
 	leadStatsSvc := appleadstats.NewService(postgres.NewLeadStatsRepository(pool), trafficSource, slogLog)
 	clientSegmentsSvc := appclientsegments.NewService(postgres.NewClientSegmentsRepository(pool))
-	clientDetailSvc := appclientdetail.NewService(postgres.NewClientDetailRepository(pool), postgres.NewConsultationRepository(pool))
+	clientDetailSvc := appclientdetail.NewService(
+		postgres.NewClientDetailRepository(pool, cfg.Clients.EncryptionKey),
+		postgres.NewConsultationRepository(pool, cfg.Clients.EncryptionKey),
+	)
 
 	healthSvc := apphealth.NewService(domainhealth.NewService(healthRepo))
 	server := handlers.NewServer(
