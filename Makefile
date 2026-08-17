@@ -1,8 +1,23 @@
-# Prod deploy helpers — run from the repo root on the prod host.
+# Prod deploy helpers — run from the repo root on the prod host (132.243.194.137,
+# /opt/multiagent-seo — see doc/abalisbotlead/vps-deploy.md, the only verified
+# real runbook; there is no separate "8cell.tech" host, that was a dead lead).
 # Run `make` (or `make help`) to list every command.
-# COMPOSE always layers in compose.prod.yaml so the external DB volume is never
-# missed; forgetting it mounts an empty volume and the DB looks wiped.
-COMPOSE := docker compose -f devops/compose.yaml -f devops/compose.prod.yaml --env-file backend/.env
+#
+# devops/compose.prod.yaml exists in the repo (pins postgres_data to an
+# external `contentflow_postgres_data` volume) but the documented real deploy
+# has NEVER used it — the VPS was set up from a fresh `git clone` straight
+# into plain compose.yaml, no legacy volume to migrate. NOT included here on
+# purpose: layering it in would make compose demand an external volume that
+# doesn't exist on the real host and fail the deploy. Confirm with the user
+# before ever adding it back.
+COMPOSE := docker compose -f devops/compose.yaml --env-file backend/.env
+
+# Mutating targets (dev / deploy / rebuild / restart / down) are lock-protected
+# so two concurrent runs (e.g. two agents, or a stray background one) fail
+# fast instead of fighting over ports/containers and looking hung — see
+# scripts/with-lock.sh. Read-only targets (ps/logs/help) stay unlocked, they
+# must always be checkable even while a deploy is in progress.
+LOCK := scripts/with-lock.sh
 
 .DEFAULT_GOAL := help
 .PHONY: help dev deploy rebuild-backend rebuild-frontend ps logs logs-frontend restart down
@@ -11,20 +26,20 @@ help: ## list these commands
 	@grep -E '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*## "}{printf "  make %-18s %s\n", $$1, $$2}'
 
 dev: ## local dev: backend (:8080) + frontend (:3000) together, Ctrl-C stops both
-	npx --yes concurrently --kill-others --names "back,front" --prefix-colors "cyan,magenta" \
+	LOCK_NAME=local-dev $(LOCK) npx --yes concurrently --kill-others --names "back,front" --prefix-colors "cyan,magenta" \
 		"cd backend && make dev" \
 		"cd frontend && npm run dev"
 
 deploy: ## rebuild backend+frontend, restart, then follow backend logs
-	$(COMPOSE) up --build -d
+	LOCK_NAME=prod-deploy $(LOCK) $(COMPOSE) up --build -d
 	$(COMPOSE) logs -f app
 
 rebuild-backend: ## rebuild only the backend, then follow its logs
-	$(COMPOSE) up --build -d app
+	LOCK_NAME=prod-deploy $(LOCK) $(COMPOSE) up --build -d app
 	$(COMPOSE) logs -f app
 
 rebuild-frontend: ## rebuild only the frontend, then follow its logs
-	$(COMPOSE) up --build -d frontend
+	LOCK_NAME=prod-deploy $(LOCK) $(COMPOSE) up --build -d frontend
 	$(COMPOSE) logs -f frontend
 
 ps: ## show container status
@@ -37,7 +52,7 @@ logs-frontend: ## follow frontend logs
 	$(COMPOSE) logs -f frontend
 
 restart: ## restart containers without rebuilding
-	$(COMPOSE) restart
+	LOCK_NAME=prod-deploy $(LOCK) $(COMPOSE) restart
 
 down: ## stop the whole stack
-	$(COMPOSE) down
+	LOCK_NAME=prod-deploy $(LOCK) $(COMPOSE) down

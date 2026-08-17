@@ -16,11 +16,22 @@ export CF_DB_NAME ?= $(POSTGRES_DB)
 
 COMPOSE := docker compose -f ../devops/compose.yaml --env-file .env
 
+# Mutating targets are lock-protected (../scripts/with-lock.sh) so two
+# concurrent runs (two agents, a stray background one, ...) fail fast instead
+# of one's kill-stale pkilling the other's air process mid-run and both
+# fighting over :8080 — see that script for why it's mkdir-based, not flock.
+LOCK := ../scripts/with-lock.sh
+
 # ── Local dev: app runs on the host (air hot-reload) against the compose Postgres ──
 dev: db run-dev
 
-run-dev: kill-stale
-	$(GOCMD) tool air
+# kill-stale runs INSIDE the lock (inlined, not a prerequisite target — a
+# prerequisite would run before the lock check, and recipes containing
+# $(MAKE) run for real even under `make -n`) so a second concurrent
+# `make dev` is rejected before it gets a chance to pkill the first one's
+# still-starting air process.
+run-dev:
+	LOCK_NAME=backend-dev $(LOCK) sh -c 'pkill -f "[t]mp/main" 2>/dev/null; pkill -f "[b]in/server" 2>/dev/null; $(GOCMD) tool air'
 
 # Kill a stale dev backend from a previous run so air can bind the port.
 # Bracket trick ([t]mp) keeps pkill from matching its own command line.
@@ -52,13 +63,13 @@ db:
 	@echo "waiting for postgres..." && sleep 2
 
 up: creds
-	$(COMPOSE) up --build -d
+	LOCK_NAME=backend-dev $(LOCK) $(COMPOSE) up --build -d
 
 down:
-	$(COMPOSE) down
+	LOCK_NAME=backend-dev $(LOCK) $(COMPOSE) down
 
 stop:
-	$(COMPOSE) down
+	LOCK_NAME=backend-dev $(LOCK) $(COMPOSE) down
 
 logs:
 	$(COMPOSE) logs -f app
