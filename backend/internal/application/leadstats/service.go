@@ -39,9 +39,9 @@ func (s *Service) GetStats(ctx context.Context, from, to time.Time, groupBy stri
 	if err != nil {
 		return domain.Stats{}, fmt.Errorf("leadstats: trend: %w", err)
 	}
-	byPage, err := s.repo.ByPage(ctx, from, toInclusive)
+	bySource, err := s.repo.BySource(ctx, from, toInclusive)
 	if err != nil {
-		return domain.Stats{}, fmt.Errorf("leadstats: by page: %w", err)
+		return domain.Stats{}, fmt.Errorf("leadstats: by source: %w", err)
 	}
 	byCreator, err := s.repo.ByCreator(ctx, from, toInclusive)
 	if err != nil {
@@ -55,6 +55,22 @@ func (s *Service) GetStats(ctx context.Context, from, to time.Time, groupBy stri
 	if err != nil {
 		return domain.Stats{}, fmt.Errorf("leadstats: by category: %w", err)
 	}
+	byAdvocate, err := s.repo.ByCaseAdvocate(ctx, from, toInclusive)
+	if err != nil {
+		return domain.Stats{}, fmt.Errorf("leadstats: by advocate: %w", err)
+	}
+	// Funnel's cohort window is "first lead in range" — unlike everything
+	// above, it deliberately does NOT get toInclusive's widening reapplied
+	// to its own internal lookups (consultations/cases have no date bound
+	// at all, by design, see the domain doc).
+	funnel, err := s.repo.Funnel(ctx, from, toInclusive)
+	if err != nil {
+		return domain.Stats{}, fmt.Errorf("leadstats: funnel: %w", err)
+	}
+	byWeekday, err := s.repo.ByWeekday(ctx, from, toInclusive)
+	if err != nil {
+		return domain.Stats{}, fmt.Errorf("leadstats: by weekday: %w", err)
+	}
 
 	s.mergeTraffic(ctx, from, toInclusive, groupBy, &totals, trend)
 
@@ -64,10 +80,13 @@ func (s *Service) GetStats(ctx context.Context, from, to time.Time, groupBy stri
 		GroupBy:    groupBy,
 		Totals:     totals,
 		Trend:      trend,
-		ByPage:     byPage,
+		BySource:   bySource,
 		ByCreator:  byCreator,
 		ByStatus:   byStatus,
 		ByCategory: byCategory,
+		ByAdvocate: byAdvocate,
+		Funnel:     funnel,
+		ByWeekday:  byWeekday,
 	}, nil
 }
 

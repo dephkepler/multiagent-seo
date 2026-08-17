@@ -58,11 +58,24 @@ type TrafficBucket struct {
 	OrganicSessions int64
 }
 
-// Count is a generic "this key, this many" row — used for the by-page
-// breakdown (and by-status, which has no revenue dimension of its own).
+// Count is a generic "this key, this many" row — used for by-status, which
+// has no revenue dimension of its own.
 type Count struct {
 	Key   string
 	Count int64
+}
+
+// SourceValue answers "which source brings valuable leads, not just many
+// leads" — same first-touch cohort principle as Funnel: each client is
+// attributed to the page of their FIRST-ever lead, then followed to revenue
+// with no date bound of its own, regardless of when the cohort window ends.
+type SourceValue struct {
+	Key           string // leads.page of the client's first lead ("" — no page, e.g. an email lead)
+	Leads         int64  // distinct clients whose first lead fell in the period, attributed to this source
+	ConsultedEver int64
+	CasedEver     int64
+	RevenueEarned float64 // consultation revenue (completed, priced), all-time
+	CasePaid      float64 // case payments received, all-time
 }
 
 // CreatorRevenue is who-booked-it broken down by both load and money — a
@@ -85,14 +98,43 @@ type CategoryRevenue struct {
 	Paid       float64
 }
 
+// Funnel is a proper cohort conversion, not a period ratio — the naive
+// "consultations this period / leads this period" mixes different leads in
+// numerator and denominator (a lead from day 25 usually converts weeks
+// later, outside a short window). Instead: take every client whose first
+// lead fell in [From, To] (the cohort), then check — with no upper bound on
+// when — whether they ever got a consultation, and ever got a case. This is
+// how cohort retention/conversion is measured in any real CRM (HubSpot,
+// Amplitude, ...), not something invented for this project.
+type Funnel struct {
+	CohortLeads   int64 // distinct clients whose first lead fell in the period
+	ConsultedEver int64 // of those, how many have ANY consultation, any time
+	CasedEver     int64 // of those, how many have ANY case, any time
+
+	// Time-to-convert — only over clients who actually converted, so a slow
+	// trickle of eventual conversions doesn't get diluted by the ones who
+	// never will. 0 when nobody in the cohort converted yet.
+	AvgDaysToConsult float64
+	AvgDaysToCase    float64
+}
+
 type Stats struct {
 	From       time.Time
 	To         time.Time
 	GroupBy    string
 	Totals     Totals
 	Trend      []Bucket
-	ByPage     []Count
+	BySource   []SourceValue
 	ByCreator  []CreatorRevenue
 	ByStatus   []Count
 	ByCategory []CategoryRevenue
+	ByAdvocate []CategoryRevenue // case revenue by advocate_name — see Repository.ByCaseAdvocate
+	Funnel     Funnel
+	// ByWeekday is leads grouped by ISO day-of-week ("1" Monday .. "7"
+	// Sunday) — deliberately no by-hour counterpart: 772 of ~800 historical
+	// leads all carry received_at's clock time as a flat 12:00 (the 55k
+	// import only had a date column, no time, and defaulted it), so an
+	// hour breakdown would mostly be showing that artifact back. The date
+	// itself is real even for imported rows, so weekday is fine.
+	ByWeekday []Count
 }

@@ -131,12 +131,62 @@ func (r *LeadStatsRepository) Trend(ctx context.Context, from, to time.Time, gro
 	return out, nil
 }
 
-func (r *LeadStatsRepository) ByPage(ctx context.Context, from, to time.Time) ([]leadstats.Count, error) {
+// BySource attributes each client to the page of their FIRST-ever lead
+// (first-touch — DISTINCT ON ... ORDER BY received_at), restricted to
+// clients whose first lead fell in [from, to], then follows those same
+// clients to consultation/case revenue with no date bound of its own — same
+// cohort shape as Funnel, just keyed by source instead of summed overall.
+func (r *LeadStatsRepository) BySource(ctx context.Context, from, to time.Time) ([]leadstats.SourceValue, error) {
 	const q = `
-		SELECT page, count(*) FROM leads
-		WHERE received_at BETWEEN @from AND @to
-		GROUP BY page ORDER BY count(*) DESC`
-	return r.queryCounts(ctx, q, from, to)
+		WITH cohort AS (
+			SELECT DISTINCT ON (client_id) client_id, page, received_at
+			FROM leads
+			WHERE client_id IS NOT NULL
+			ORDER BY client_id, received_at ASC
+		),
+		cohort_in_range AS (
+			SELECT client_id, page FROM cohort WHERE received_at BETWEEN @from AND @to
+		),
+		consult_agg AS (
+			SELECT client_id,
+				coalesce(sum(price) FILTER (WHERE price > 0 AND status = 'completed'), 0) AS revenue
+			FROM consultations GROUP BY client_id
+		),
+		case_agg AS (
+			SELECT client_id, coalesce(sum(paid_amount), 0) AS paid
+			FROM cases GROUP BY client_id
+		)
+		SELECT
+			cir.page,
+			count(*),
+			count(ca.client_id),
+			count(cs.client_id),
+			coalesce(sum(ca.revenue), 0),
+			coalesce(sum(cs.paid), 0)
+		FROM cohort_in_range cir
+		LEFT JOIN consult_agg ca ON ca.client_id = cir.client_id
+		LEFT JOIN case_agg cs ON cs.client_id = cir.client_id
+		GROUP BY cir.page
+		ORDER BY (coalesce(sum(ca.revenue), 0) + coalesce(sum(cs.paid), 0)) DESC`
+
+	rows, err := r.db.Query(ctx, q, pgx.NamedArgs{"from": from, "to": to})
+	if err != nil {
+		return nil, fmt.Errorf("by source: %w", err)
+	}
+	defer rows.Close()
+
+	var out []leadstats.SourceValue
+	for rows.Next() {
+		var s leadstats.SourceValue
+		if err := rows.Scan(&s.Key, &s.Leads, &s.ConsultedEver, &s.CasedEver, &s.RevenueEarned, &s.CasePaid); err != nil {
+			return nil, fmt.Errorf("by source: scan: %w", err)
+		}
+		out = append(out, s)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("by source: %w", err)
+	}
+	return out, nil
 }
 
 // ByCreator ranks staff by earned revenue, not booking volume — a plain
@@ -211,6 +261,94 @@ func (r *LeadStatsRepository) ByCaseCategory(ctx context.Context, from, to time.
 		return nil, fmt.Errorf("by case category: %w", err)
 	}
 	return out, nil
+}
+
+// ByCaseAdvocate answers "who actually closes real money" — unlike
+// ByCreator (consultation bookings), this is case revenue, grouped by
+// advocate_name so it covers both historical free-text cases and ones
+// created through the roster picker (see ABL 017/advocates roster).
+func (r *LeadStatsRepository) ByCaseAdvocate(ctx context.Context, from, to time.Time) ([]leadstats.CategoryRevenue, error) {
+	const q = `
+		SELECT advocate_name, count(*), coalesce(sum(fee), 0), coalesce(sum(paid_amount), 0)
+		FROM cases
+		WHERE created_at BETWEEN @from AND @to
+		GROUP BY advocate_name ORDER BY 4 DESC, count(*) DESC`
+
+	rows, err := r.db.Query(ctx, q, pgx.NamedArgs{"from": from, "to": to})
+	if err != nil {
+		return nil, fmt.Errorf("by case advocate: %w", err)
+	}
+	defer rows.Close()
+
+	var out []leadstats.CategoryRevenue
+	for rows.Next() {
+		var c leadstats.CategoryRevenue
+		if err := rows.Scan(&c.Key, &c.Cases, &c.Contracted, &c.Paid); err != nil {
+			return nil, fmt.Errorf("by case advocate: scan: %w", err)
+		}
+		out = append(out, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("by case advocate: %w", err)
+	}
+	return out, nil
+}
+
+// Funnel is a cohort conversion, deliberately not reusing Totals' leads/
+// consultations/cases counts — those are each filtered by their own date
+// column independently, which is exactly the period-ratio problem the
+// domain doc warns about. Here the cohort (clients whose first lead fell in
+// range) is fixed once in the CTE, and every later stage checks that same
+// client set with no date bound of its own.
+func (r *LeadStatsRepository) Funnel(ctx context.Context, from, to time.Time) (leadstats.Funnel, error) {
+	const q = `
+		WITH cohort AS (
+			SELECT client_id, min(received_at) AS first_lead_at
+			FROM leads
+			WHERE client_id IS NOT NULL
+			GROUP BY client_id
+			HAVING min(received_at) BETWEEN @from AND @to
+		),
+		first_consult AS (
+			SELECT client_id, min(created_at) AS first_consult_at
+			FROM consultations
+			GROUP BY client_id
+		),
+		first_case AS (
+			SELECT client_id, min(created_at) AS first_case_at
+			FROM cases
+			GROUP BY client_id
+		)
+		SELECT
+			count(*),
+			count(fc.client_id),
+			count(fk.client_id),
+			coalesce(avg(extract(epoch FROM (fc.first_consult_at - cohort.first_lead_at)) / 86400)
+				FILTER (WHERE fc.client_id IS NOT NULL AND fc.first_consult_at >= cohort.first_lead_at), 0),
+			coalesce(avg(extract(epoch FROM (fk.first_case_at - fc.first_consult_at)) / 86400)
+				FILTER (WHERE fk.client_id IS NOT NULL AND fc.client_id IS NOT NULL AND fk.first_case_at >= fc.first_consult_at), 0)
+		FROM cohort
+		LEFT JOIN first_consult fc ON fc.client_id = cohort.client_id
+		LEFT JOIN first_case fk ON fk.client_id = cohort.client_id`
+
+	var f leadstats.Funnel
+	if err := r.db.QueryRow(ctx, q, pgx.NamedArgs{"from": from, "to": to}).Scan(
+		&f.CohortLeads, &f.ConsultedEver, &f.CasedEver,
+		&f.AvgDaysToConsult, &f.AvgDaysToCase,
+	); err != nil {
+		return f, fmt.Errorf("funnel: %w", err)
+	}
+	return f, nil
+}
+
+// ByWeekday groups leads by ISO day-of-week (1 Monday .. 7 Sunday) — see
+// the Stats.ByWeekday doc comment for why there's no by-hour counterpart.
+func (r *LeadStatsRepository) ByWeekday(ctx context.Context, from, to time.Time) ([]leadstats.Count, error) {
+	const q = `
+		SELECT extract(isodow FROM received_at)::text, count(*)
+		FROM leads WHERE received_at BETWEEN @from AND @to
+		GROUP BY 1 ORDER BY 1`
+	return r.queryCounts(ctx, q, from, to)
 }
 
 func (r *LeadStatsRepository) queryCounts(ctx context.Context, q string, from, to time.Time) ([]leadstats.Count, error) {

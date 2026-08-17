@@ -90,7 +90,17 @@ func toOapiLeadStats(s domainlead.Stats) oapigen.LeadStats {
 			OrganicSessions: b.OrganicSessions,
 		}
 	}
-	out.ByPage = toOapiCounts(s.ByPage)
+	out.BySource = make([]oapigen.LeadStatsSourceValue, len(s.BySource))
+	for i, src := range s.BySource {
+		out.BySource[i] = oapigen.LeadStatsSourceValue{
+			Key:           src.Key,
+			Leads:         src.Leads,
+			ConsultedEver: src.ConsultedEver,
+			CasedEver:     src.CasedEver,
+			RevenueEarned: float32(src.RevenueEarned),
+			CasePaid:      float32(src.CasePaid),
+		}
+	}
 	out.ByStatus = toOapiCounts(s.ByStatus)
 
 	out.ByCreator = make([]oapigen.LeadStatsCreatorRevenue, len(s.ByCreator))
@@ -102,9 +112,27 @@ func toOapiLeadStats(s domainlead.Stats) oapigen.LeadStats {
 		}
 	}
 
-	out.ByCategory = make([]oapigen.LeadStatsCategoryRevenue, len(s.ByCategory))
-	for i, c := range s.ByCategory {
-		out.ByCategory[i] = oapigen.LeadStatsCategoryRevenue{
+	out.ByCategory = toOapiCategoryRevenue(s.ByCategory)
+	out.ByAdvocate = toOapiCategoryRevenue(s.ByAdvocate)
+
+	out.Funnel = oapigen.LeadStatsFunnel{
+		CohortLeads:      s.Funnel.CohortLeads,
+		ConsultedEver:    s.Funnel.ConsultedEver,
+		CasedEver:        s.Funnel.CasedEver,
+		AvgDaysToConsult: float32(s.Funnel.AvgDaysToConsult),
+		AvgDaysToCase:    float32(s.Funnel.AvgDaysToCase),
+	}
+	out.ByWeekday = toOapiCounts(s.ByWeekday)
+	return out
+}
+
+// toOapiCategoryRevenue serves both ByCategory (practice area) and
+// ByAdvocate (who closed the case) — same Key/Cases/Contracted/Paid shape
+// on both the domain and oapigen side, just grouped by a different column.
+func toOapiCategoryRevenue(cs []domainlead.CategoryRevenue) []oapigen.LeadStatsCategoryRevenue {
+	out := make([]oapigen.LeadStatsCategoryRevenue, len(cs))
+	for i, c := range cs {
+		out[i] = oapigen.LeadStatsCategoryRevenue{
 			Key:        c.Key,
 			Cases:      c.Cases,
 			Contracted: float32(c.Contracted),

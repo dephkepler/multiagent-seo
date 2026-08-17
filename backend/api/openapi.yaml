@@ -1264,7 +1264,7 @@ components:
 
     LeadStats:
       type: object
-      required: [ range, totals, trend, by_page, by_creator, by_status, by_category, by_advocate ]
+      required: [ range, totals, trend, by_source, by_creator, by_status, by_category, by_advocate, funnel, by_weekday ]
       properties:
         range:
           type: object
@@ -1321,10 +1321,10 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/LeadStatsBucket"
-        by_page:
+        by_source:
           type: array
           items:
-            $ref: "#/components/schemas/LeadStatsCount"
+            $ref: "#/components/schemas/LeadStatsSourceValue"
         by_creator:
           type: array
           items:
@@ -1341,6 +1341,36 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/LeadStatsCategoryRevenue"
+        funnel:
+          $ref: "#/components/schemas/LeadStatsFunnel"
+        by_weekday:
+          type: array
+          description: Leads by ISO day-of-week — key "1" (Monday) .. "7" (Sunday)
+          items:
+            $ref: "#/components/schemas/LeadStatsCount"
+
+    LeadStatsFunnel:
+      type: object
+      description: >-
+        Cohort conversion, not a period ratio — cohort_leads is every client
+        whose first-ever lead fell in the requested range; consulted_ever/
+        cased_ever count them regardless of when the consultation/case
+        happened, even long after the range ends.
+      required: [ cohort_leads, consulted_ever, cased_ever, avg_days_to_consult, avg_days_to_case ]
+      properties:
+        cohort_leads:
+          type: integer
+          format: int64
+        consulted_ever:
+          type: integer
+          format: int64
+        cased_ever:
+          type: integer
+          format: int64
+        avg_days_to_consult:
+          type: number
+        avg_days_to_case:
+          type: number
 
     LeadStatsBucket:
       type: object
@@ -1398,6 +1428,31 @@ components:
         count:
           type: integer
           format: int64
+
+    LeadStatsSourceValue:
+      type: object
+      description: >-
+        First-touch cohort attribution, not a raw lead count — key is
+        leads.page of the client's first-ever lead ("" when the lead came
+        without one, e.g. email); consulted_ever/cased_ever/revenue are
+        followed with no date bound, same as LeadStatsFunnel.
+      required: [ key, leads, consulted_ever, cased_ever, revenue_earned, case_paid ]
+      properties:
+        key:
+          type: string
+        leads:
+          type: integer
+          format: int64
+        consulted_ever:
+          type: integer
+          format: int64
+        cased_ever:
+          type: integer
+          format: int64
+        revenue_earned:
+          type: number
+        case_paid:
+          type: number
 
     Segment:
       type: string
