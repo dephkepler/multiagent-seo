@@ -26,7 +26,7 @@ func NewClientSegmentsRepository(db *pgxpool.Pool) *ClientSegmentsRepository {
 func (r *ClientSegmentsRepository) ListActivity(ctx context.Context) ([]clientsegments.Activity, error) {
 	const q = `
 		SELECT
-			cl.id, cl.name, cl.phone,
+			cl.id, cl.name, coalesce(cl.phone, ''),
 			coalesce(co.completed_n, 0),
 			coalesce(co.scheduled_n, 0),
 			coalesce(co.lost_n, 0),

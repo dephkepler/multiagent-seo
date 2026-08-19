@@ -31,7 +31,7 @@ func NewClientDetailRepository(db *pgxpool.Pool, encryptionKey string) *ClientDe
 func (r *ClientDetailRepository) Get(ctx context.Context, clientID string) (clientdetail.Detail, error) {
 	var d clientdetail.Detail
 
-	const clientQ = `SELECT id, name, last_name, first_name, patronymic, gender, phone, email,
+	const clientQ = `SELECT id, name, last_name, first_name, patronymic, gender, coalesce(phone, ''), email,
 			client_type, company_name, company_code,
 			coalesce(pgp_sym_decrypt(address_enc, @enc_key), ''),
 			coalesce(pgp_sym_decrypt(birthdate_enc, @enc_key), ''),

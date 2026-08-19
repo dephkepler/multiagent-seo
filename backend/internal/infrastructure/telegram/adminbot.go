@@ -491,14 +491,14 @@ func (b *AdminBot) handle(ctx context.Context, update tgbotapi.Update) {
 	case "case_client_id":
 		b.startCase(ctx, chatID, userID, text)
 
-	case "book_new_phone", "case_new_phone":
-		client, err := b.store.UpsertClient(ctx, fl.newClient.name, domainleads.NormalizePhone(text))
-		if err != nil {
-			b.send(ctx, chatID, "Не вдалося створити клієнта, спробуйте ще раз.")
-			b.log.ErrorContext(ctx, "telegram: create client failed", "err", err)
-			return
-		}
-		b.continueWithClient(ctx, chatID, userID, client, fl.newClient.mode)
+	case "new_client_phone":
+		b.finishNewClient(ctx, chatID, userID, fl, domainleads.NormalizePhone(text), "", "")
+
+	case "new_client_email":
+		b.finishNewClient(ctx, chatID, userID, fl, "", text, "")
+
+	case "new_client_telegram":
+		b.finishNewClient(ctx, chatID, userID, fl, "", "", text)
 
 	case "case_fee":
 		amount, err := parseAmount(text)
@@ -1044,8 +1044,8 @@ func (b *AdminBot) resolveClientOrCreate(ctx context.Context, chatID, userID int
 		return
 	}
 	if len(matches) == 0 {
-		b.flows[userID] = &flow{step: string(mode) + "_new_phone", newClient: newClientDraft{name: query, mode: mode}}
-		b.send(ctx, chatID, fmt.Sprintf("Клієнта не знайдено. Створити нового на ім'я «%s»? Введіть телефон:", query))
+		b.flows[userID] = &flow{step: "new_client_contact", newClient: newClientDraft{name: query, mode: mode}}
+		b.sendNewClientContactPicker(ctx, chatID, query)
 		return
 	}
 
@@ -1067,6 +1067,71 @@ func (b *AdminBot) resolveClientOrCreate(ctx context.Context, chatID, userID int
 	if _, err := b.bot.Send(msg); err != nil {
 		b.log.ErrorContext(ctx, "telegram: send client picker failed", "err", err)
 	}
+}
+
+// sendNewClientContactPicker asks what contact info staff actually has for
+// this old client — phone used to be the only option resolveClientOrCreate
+// accepted, but an old client's record might only carry an email or
+// Telegram handle, or nothing at all yet, and none of that should block
+// getting them into the system.
+func (b *AdminBot) sendNewClientContactPicker(ctx context.Context, chatID int64, name string) {
+	msg := tgbotapi.NewMessage(chatID, fmt.Sprintf("Клієнта не знайдено. Створити нового на ім'я «%s»? Що є з контактів?", name))
+	msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("📞 Телефон", "newclient:phone"),
+			tgbotapi.NewInlineKeyboardButtonData("✉️ Email", "newclient:email"),
+		),
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("💬 Telegram", "newclient:telegram"),
+			tgbotapi.NewInlineKeyboardButtonData("⏭ Нічого немає", "newclient:skip"),
+		),
+	)
+	if _, err := b.bot.Send(msg); err != nil {
+		b.log.ErrorContext(ctx, "telegram: send new client contact picker failed", "err", err)
+	}
+}
+
+// pickNewClientContact handles sendNewClientContactPicker's tap — either
+// moves on to a follow-up text prompt for the chosen contact type, or (for
+// "skip") creates the client immediately with none.
+func (b *AdminBot) pickNewClientContact(ctx context.Context, cb *tgbotapi.CallbackQuery, kind string) {
+	fl := b.flows[cb.From.ID]
+	if fl == nil || fl.step != "new_client_contact" {
+		b.answerCallback(ctx, cb.ID, "Сесія застаріла, почніть заново")
+		return
+	}
+	b.answerCallback(ctx, cb.ID, "")
+
+	switch kind {
+	case "phone":
+		fl.step = "new_client_phone"
+		b.editCallbackMessage(ctx, cb, "Введіть телефон:")
+	case "email":
+		fl.step = "new_client_email"
+		b.editCallbackMessage(ctx, cb, "Введіть email:")
+	case "telegram":
+		fl.step = "new_client_telegram"
+		b.editCallbackMessage(ctx, cb, "Введіть Telegram (@username або ім'я):")
+	case "skip":
+		if cb.Message == nil {
+			return
+		}
+		b.editCallbackMessage(ctx, cb, "Клієнта створюю без контактів…")
+		b.finishNewClient(ctx, cb.Message.Chat.ID, cb.From.ID, fl, "", "", "")
+	}
+}
+
+// finishNewClient is resolveClientOrCreate's "create new" path — reached
+// either straight from pickNewClientContact ("skip") or after staff typed
+// whichever contact it asked for.
+func (b *AdminBot) finishNewClient(ctx context.Context, chatID, userID int64, fl *flow, phone, email, telegramName string) {
+	client, err := b.store.CreateClient(ctx, fl.newClient.name, phone, email, telegramName)
+	if err != nil {
+		b.send(ctx, chatID, "Не вдалося створити клієнта, спробуйте ще раз.")
+		b.log.ErrorContext(ctx, "telegram: create client failed", "err", err)
+		return
+	}
+	b.continueWithClient(ctx, chatID, userID, client, fl.newClient.mode)
 }
 
 // continueWithClient starts whichever flow mode called for once a Client
@@ -1266,6 +1331,8 @@ func (b *AdminBot) handleCallback(ctx context.Context, cb *tgbotapi.CallbackQuer
 		b.pickClientForFlow(ctx, cb, clientLookupMode(mode), clientID)
 	case "bookstatus":
 		b.pickBookingStatus(ctx, cb, rest)
+	case "newclient":
+		b.pickNewClientContact(ctx, cb, rest)
 	default:
 		b.answerCallback(ctx, cb.ID, "")
 	}

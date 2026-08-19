@@ -23,7 +23,7 @@ func NewConsultationRepository(db *pgxpool.Pool, encryptionKey string) *Consulta
 }
 
 func (r *ConsultationRepository) FindClient(ctx context.Context, clientID string) (consultations.Client, error) {
-	const q = `SELECT id, name, phone, coalesce(telegram_name, '') FROM clients WHERE id = @id`
+	const q = `SELECT id, name, coalesce(phone, ''), coalesce(telegram_name, '') FROM clients WHERE id = @id`
 	var c consultations.Client
 	err := r.db.QueryRow(ctx, q, pgx.NamedArgs{"id": clientID}).Scan(&c.ID, &c.Name, &c.Phone, &c.TelegramName)
 	if err != nil {
@@ -33,7 +33,7 @@ func (r *ConsultationRepository) FindClient(ctx context.Context, clientID string
 }
 
 func (r *ConsultationRepository) SearchClients(ctx context.Context, query string) ([]consultations.Client, error) {
-	const q = `SELECT id, name, phone, coalesce(telegram_name, '')
+	const q = `SELECT id, name, coalesce(phone, ''), coalesce(telegram_name, '')
 		FROM clients
 		WHERE name ILIKE '%' || @query || '%'
 			OR telegram_name ILIKE '%' || @query || '%'
@@ -61,19 +61,39 @@ func (r *ConsultationRepository) SearchClients(ctx context.Context, query string
 	return out, nil
 }
 
-func (r *ConsultationRepository) UpsertClient(ctx context.Context, name, phone string) (consultations.Client, error) {
-	const q = `INSERT INTO clients (phone, name)
-		VALUES (@phone, @name)
-		ON CONFLICT (phone) DO UPDATE SET
-			last_seen_at = now(),
-			name = CASE WHEN @name = '' THEN clients.name ELSE @name END
-		RETURNING id, name, phone, coalesce(telegram_name, '')`
+// CreateClient finds-or-creates a client. With a phone, it's the natural
+// identity key — same idempotent upsert-by-phone as webleads.ResolveClient,
+// so re-entering the same phone twice reuses one row. Without one (an old
+// client whose only contact on file is an email/Telegram handle, or
+// nothing at all yet), there's no reliable key to match an existing row
+// against, so this always inserts a fresh client — the partial unique
+// index on phone (see migration 000040) only applies to non-empty phones,
+// so any number of "no phone" clients can coexist without colliding.
+func (r *ConsultationRepository) CreateClient(ctx context.Context, name, phone, email, telegramName string) (consultations.Client, error) {
+	if phone != "" {
+		const q = `INSERT INTO clients (phone, name)
+			VALUES (@phone, @name)
+			ON CONFLICT (phone) DO UPDATE SET
+				last_seen_at = now(),
+				name = CASE WHEN @name = '' THEN clients.name ELSE @name END
+			RETURNING id, name, coalesce(phone, ''), coalesce(telegram_name, '')`
+		var c consultations.Client
+		err := r.db.QueryRow(ctx, q, pgx.NamedArgs{"phone": phone, "name": name}).
+			Scan(&c.ID, &c.Name, &c.Phone, &c.TelegramName)
+		if err != nil {
+			return consultations.Client{}, fmt.Errorf("create client %q: %w", name, err)
+		}
+		return c, nil
+	}
 
+	const q = `INSERT INTO clients (name, email, telegram_name)
+		VALUES (@name, @email, @telegram_name)
+		RETURNING id, name, coalesce(phone, ''), coalesce(telegram_name, '')`
 	var c consultations.Client
-	err := r.db.QueryRow(ctx, q, pgx.NamedArgs{"phone": phone, "name": name}).
+	err := r.db.QueryRow(ctx, q, pgx.NamedArgs{"name": name, "email": email, "telegram_name": telegramName}).
 		Scan(&c.ID, &c.Name, &c.Phone, &c.TelegramName)
 	if err != nil {
-		return consultations.Client{}, fmt.Errorf("upsert client %q: %w", phone, err)
+		return consultations.Client{}, fmt.Errorf("create client %q: %w", name, err)
 	}
 	return c, nil
 }
@@ -277,7 +297,7 @@ func scanAdvocate(row pgx.Row) (consultations.Advocate, error) {
 
 func (r *ConsultationRepository) DueClientReminders(ctx context.Context, before time.Duration) ([]consultations.ReminderTarget, error) {
 	const q = `SELECT c.id, c.client_id, c.scheduled_at, c.price, c.case_note, c.created_by,
-			cl.id, cl.name, cl.phone, coalesce(cl.telegram_name, ''), coalesce(cl.telegram_chat_id, 0)
+			cl.id, cl.name, coalesce(cl.phone, ''), coalesce(cl.telegram_name, ''), coalesce(cl.telegram_chat_id, 0)
 		FROM consultations c
 		JOIN clients cl ON cl.id = c.client_id
 		WHERE c.client_reminder_sent_at IS NULL
@@ -290,7 +310,7 @@ func (r *ConsultationRepository) DueClientReminders(ctx context.Context, before 
 
 func (r *ConsultationRepository) DueAdvocateReminders(ctx context.Context, before time.Duration) ([]consultations.ReminderTarget, error) {
 	const q = `SELECT c.id, c.client_id, c.scheduled_at, c.price, c.case_note, c.created_by,
-			cl.id, cl.name, cl.phone, coalesce(cl.telegram_name, ''), coalesce(cl.telegram_chat_id, 0)
+			cl.id, cl.name, coalesce(cl.phone, ''), coalesce(cl.telegram_name, ''), coalesce(cl.telegram_chat_id, 0)
 		FROM consultations c
 		JOIN clients cl ON cl.id = c.client_id
 		WHERE c.reminder_sent_at IS NULL
