@@ -12,10 +12,13 @@ import (
 const envPrefix = "CF_"
 
 type ServerConfig struct {
-	Port                     string        `env:"APP_PORT" envDefault:"8080" validate:"required"`
-	Host                     string        `env:"APP_HOST" envDefault:"localhost" validate:"required"`
-	BasePath                 string        `env:"APP_BASE_PATH" envDefault:"/"`
-	CORSAllowedOrigins       []string      `env:"APP_CORS_ALLOWED_ORIGINS" envDefault:"http://localhost:3000" envSeparator:","`
+	Port               string   `env:"APP_PORT" envDefault:"8080" validate:"required"`
+	Host               string   `env:"APP_HOST" envDefault:"localhost" validate:"required"`
+	BasePath           string   `env:"APP_BASE_PATH" envDefault:"/"`
+	CORSAllowedOrigins []string `env:"APP_CORS_ALLOWED_ORIGINS" envDefault:"http://localhost:3000" envSeparator:","`
+	// AdminURL is the frontend's own public address — used to build links
+	// straight to a record's page (e.g. a client card) in bot messages.
+	AdminURL                 string        `env:"APP_ADMIN_URL" envDefault:"http://localhost:3000"`
 	ReadTimeout              time.Duration `env:"APP_READ_TIMEOUT" envDefault:"10s"`
 	WriteTimeout             time.Duration `env:"APP_WRITE_TIMEOUT" envDefault:"5m"`
 	ShutdownWaitTimeout      time.Duration `env:"APP_SHUTDOWN_WAIT_TIMEOUT" envDefault:"30s"`
