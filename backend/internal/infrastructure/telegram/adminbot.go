@@ -566,12 +566,17 @@ var staffMenuCommands = map[string]string{
 	btnIntakeLink:  "/intakelink",
 }
 
+// Two buttons per row — three squeezed Ukrainian labels onto one row on a
+// phone screen (the only place this menu is ever seen), truncating the
+// longer ones.
 func staffMenuKeyboard() tgbotapi.ReplyKeyboardMarkup {
 	kb := tgbotapi.NewReplyKeyboard(
-		tgbotapi.NewKeyboardButtonRow(tgbotapi.NewKeyboardButton(btnClientInfo), tgbotapi.NewKeyboardButton(btnInvoice), tgbotapi.NewKeyboardButton(btnConsult)),
-		tgbotapi.NewKeyboardButtonRow(tgbotapi.NewKeyboardButton(btnBook), tgbotapi.NewKeyboardButton(btnCreateGroup), tgbotapi.NewKeyboardButton(btnIntakeLink)),
-		tgbotapi.NewKeyboardButtonRow(tgbotapi.NewKeyboardButton(btnCase), tgbotapi.NewKeyboardButton(btnPay), tgbotapi.NewKeyboardButton(btnCaseClose)),
-		tgbotapi.NewKeyboardButtonRow(tgbotapi.NewKeyboardButton(btnAdvocateAdd), tgbotapi.NewKeyboardButton(btnAdvocates)),
+		tgbotapi.NewKeyboardButtonRow(tgbotapi.NewKeyboardButton(btnClientInfo), tgbotapi.NewKeyboardButton(btnInvoice)),
+		tgbotapi.NewKeyboardButtonRow(tgbotapi.NewKeyboardButton(btnConsult), tgbotapi.NewKeyboardButton(btnBook)),
+		tgbotapi.NewKeyboardButtonRow(tgbotapi.NewKeyboardButton(btnCreateGroup), tgbotapi.NewKeyboardButton(btnIntakeLink)),
+		tgbotapi.NewKeyboardButtonRow(tgbotapi.NewKeyboardButton(btnCase), tgbotapi.NewKeyboardButton(btnPay)),
+		tgbotapi.NewKeyboardButtonRow(tgbotapi.NewKeyboardButton(btnCaseClose), tgbotapi.NewKeyboardButton(btnAdvocateAdd)),
+		tgbotapi.NewKeyboardButtonRow(tgbotapi.NewKeyboardButton(btnAdvocates)),
 	)
 	kb.ResizeKeyboard = true
 	return kb
