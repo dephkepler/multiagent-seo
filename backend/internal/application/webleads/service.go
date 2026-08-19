@@ -37,7 +37,7 @@ func (s *Service) ProcessNewLeads(ctx context.Context) {
 	for _, m := range messages {
 		lead := domain.Parse(m.MessageID, m.From, m.Subject, m.Body, m.Date)
 
-		if err := s.SubmitLead(ctx, lead); err != nil {
+		if _, err := s.SubmitLead(ctx, lead); err != nil {
 			s.log.ErrorContext(ctx, "webleads: telegram send failed, will retry next poll",
 				"message_id", lead.MessageID,
 				"err", err,
@@ -62,10 +62,14 @@ func (s *Service) ProcessNewLeads(ctx context.Context) {
 
 // SubmitLead resolves the client, notifies Telegram, and persists the lead —
 // shared by the mail poller and any other lead source (e.g. the Telegram
-// self-booking flow). A notify failure is returned so a caller with retry
-// semantics (mail polling) can act on it; DB/sheet failures are logged only,
-// since Telegram already has the lead and retrying would duplicate it.
-func (s *Service) SubmitLead(ctx context.Context, lead domain.Lead) error {
+// self-booking flow). Returns the resolved client id (empty if resolution
+// failed or the lead has no phone) so a caller that needs to attach more
+// than Lead carries — e.g. an email collected in the same conversation —
+// can follow up against that same client row instead of resolving it again.
+// A notify failure is returned so a caller with retry semantics (mail
+// polling) can act on it; DB/sheet failures are logged only, since Telegram
+// already has the lead and retrying would duplicate it.
+func (s *Service) SubmitLead(ctx context.Context, lead domain.Lead) (string, error) {
 	if lead.Phone != "" {
 		if clientID, err := s.store.ResolveClient(ctx, lead.Phone, lead.Name); err != nil {
 			s.log.WarnContext(ctx, "webleads: resolve client failed, sending without a client id",
@@ -78,7 +82,7 @@ func (s *Service) SubmitLead(ctx context.Context, lead domain.Lead) error {
 	}
 
 	if err := s.notifier.SendMessage(ctx, domain.FormatTelegram(lead)); err != nil {
-		return fmt.Errorf("webleads: telegram send: %w", err)
+		return "", fmt.Errorf("webleads: telegram send: %w", err)
 	}
 
 	if err := s.store.Save(ctx, lead); err != nil {
@@ -86,14 +90,14 @@ func (s *Service) SubmitLead(ctx context.Context, lead domain.Lead) error {
 			"message_id", lead.MessageID,
 			"err", err,
 		)
-		return nil
+		return lead.ClientID, nil
 	}
 	if err := s.sheet.AppendRow(ctx, lead); err != nil {
 		s.log.ErrorContext(ctx, "webleads: append to sheet failed, will retry later",
 			"message_id", lead.MessageID,
 			"err", err,
 		)
-		return nil
+		return lead.ClientID, nil
 	}
 	if err := s.store.MarkSheetSynced(ctx, lead.MessageID); err != nil {
 		s.log.ErrorContext(ctx, "webleads: mark sheet synced failed",
@@ -101,5 +105,5 @@ func (s *Service) SubmitLead(ctx context.Context, lead domain.Lead) error {
 			"err", err,
 		)
 	}
-	return nil
+	return lead.ClientID, nil
 }

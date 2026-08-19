@@ -12,6 +12,12 @@ type Store interface {
 	// remember instead of copying a Client ID.
 	SearchClients(ctx context.Context, query string) ([]Client, error)
 	SetClientTelegram(ctx context.Context, clientID string, chatID int64, telegramName string) error
+	// SetClientEmail sets a single field — unlike UpdateClient, which
+	// overwrites the whole card. The self-service intake flow only ever
+	// learns an email (name/phone go through webleads.ResolveClient
+	// instead); calling UpdateClient with everything else blank would wipe
+	// the name/phone that call just set.
+	SetClientEmail(ctx context.Context, clientID, email string) error
 	// UpdateClient edits a client's own contact details — typed in through
 	// the admin UI's client card, not anything the bot or a lead form
 	// fills in.

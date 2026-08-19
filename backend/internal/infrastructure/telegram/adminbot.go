@@ -20,9 +20,11 @@ import (
 
 // LeadSubmitter hands a self-service request off to the same pipeline that
 // processes email leads (webleads.Service), so it lands in the same DB
-// table, sheet, and leads chat.
+// table, sheet, and leads chat. Returns the resolved client id so a caller
+// that collected more than Lead carries (e.g. an email) can follow up
+// against that same client row.
 type LeadSubmitter interface {
-	SubmitLead(ctx context.Context, lead domainleads.Lead) error
+	SubmitLead(ctx context.Context, lead domainleads.Lead) (string, error)
 }
 
 // GroupCreator makes a Telegram group chat and invites usernames into it.
@@ -93,15 +95,28 @@ type bookDraft struct {
 type requestDraft struct {
 	name             string
 	phone            string
+	email            string
+	category         string
 	date             string
 	time             string
 	telegramUsername string
+	// wantsBooking is true only for the "📅 Забронювати консультацію"
+	// entry point — it's what makes continueRequestFlow ask for date/time.
+	// The plain intake entry point (see intakeStartPayload) collects the
+	// same contact fields but isn't tied to a specific slot.
+	wantsBooking bool
 }
 
 // advocateStartPrefix marks a /start payload as "an advocate tapped their
 // personal link", followed by their advocates.id — needed once there's more
 // than one advocate, so SetAdvocateTelegram knows which row to update.
 const advocateStartPrefix = "advocate_"
+
+// intakeStartPayload is the fixed (not per-client) link staff hands anyone
+// they've already talked to elsewhere — SMS, phone, walk-in — to collect
+// the same primary-info questions the self-booking flow asks, without
+// booking a specific slot. See startIntakeFlow.
+const intakeStartPayload = "intake"
 
 func NewAdminBot(
 	token string,
@@ -148,6 +163,7 @@ func NewAdminBot(
 		{Command: "caseclose", Description: "Позначити справу виконаною: /caseclose <Case ID>"},
 		{Command: "creategroup", Description: "Створити групу з клієнтом і адвокатом"},
 		{Command: "client", Description: "Знайти клієнта (ім'я/телефон/telegram)"},
+		{Command: "intakelink", Description: "Посилання на анкету для нового клієнта"},
 	}
 	for _, id := range allowedUserIDs {
 		_, _ = bot.Request(tgbotapi.NewSetMyCommandsWithScope(tgbotapi.NewBotCommandScopeChat(id), staffCommands...))
@@ -233,7 +249,7 @@ func (b *AdminBot) handle(ctx context.Context, update tgbotapi.Update) {
 			b.sendStaffMenu(ctx, msg.Chat.ID)
 			return
 		}
-		b.handleStart(ctx, msg.Chat.ID, payload, telegramName(msg.From))
+		b.handleStart(ctx, msg.Chat.ID, payload, msg.From)
 		return
 	}
 	userID, chatID := msg.From.ID, msg.Chat.ID
@@ -347,6 +363,10 @@ func (b *AdminBot) handle(ctx context.Context, update tgbotapi.Update) {
 		}
 		b.searchClientInfo(ctx, chatID, query)
 		return
+
+	case text == "/intakelink":
+		b.sendIntakeLink(ctx, chatID)
+		return
 	}
 
 	fl := b.flows[userID]
@@ -450,14 +470,15 @@ func (b *AdminBot) handle(ctx context.Context, update tgbotapi.Update) {
 }
 
 // handleStart links whoever tapped t.me/<bot>?start=<payload> to that
-// person, so future notifications can reach them directly. payload is
-// either the reserved advocateStartPayload or a Client ID; a bare /start
-// (no payload) offers the self-booking button instead.
-func (b *AdminBot) handleStart(ctx context.Context, chatID int64, payload, name string) {
+// person, so future notifications can reach them directly. payload is one
+// of: empty (bare /start — offers the self-booking button), the reserved
+// advocateStartPrefix, intakeStartPayload, or a Client ID.
+func (b *AdminBot) handleStart(ctx context.Context, chatID int64, payload string, user *tgbotapi.User) {
 	if payload == "" {
 		b.sendRequestPrompt(ctx, chatID)
 		return
 	}
+	name := telegramName(user)
 
 	if advocateID, ok := strings.CutPrefix(payload, advocateStartPrefix); ok {
 		if err := b.store.SetAdvocateTelegram(ctx, advocateID, chatID, name); err != nil {
@@ -469,9 +490,20 @@ func (b *AdminBot) handleStart(ctx context.Context, chatID int64, payload, name 
 	}
 
 	// Private-chat ID equals the tapping user's ID, so this catches staff
-	// opening a client link themselves instead of forwarding it.
+	// opening a client/intake link themselves instead of forwarding it —
+	// checked before both branches below (advocate links are exempt: an
+	// advocate tapping their own link is the intended flow, not a mistake).
 	if b.allowedUsers[chatID] {
 		b.send(ctx, chatID, "Це посилання для клієнта — перешліть його, не переходьте самі.")
+		return
+	}
+
+	// intakeStartPayload is the one link staff sends to anyone they've
+	// already talked to outside Telegram — not per-client (nothing about
+	// this person is on file yet), so it's a fixed payload, not a prefix
+	// with an id like advocateStartPrefix/a Client ID below.
+	if payload == intakeStartPayload {
+		b.startIntakeFlow(ctx, chatID, user)
 		return
 	}
 
@@ -514,6 +546,7 @@ const (
 	btnCaseClose   = "✅ Закрити справу"
 	btnCreateGroup = "👨‍👩‍👧 Створити групу"
 	btnClientInfo  = "🔎 Картка клієнта"
+	btnIntakeLink  = "📋 Анкета для клієнта"
 )
 
 // staffMenuCommands maps a tapped button's label to the equivalent bare
@@ -530,12 +563,13 @@ var staffMenuCommands = map[string]string{
 	btnCaseClose:   "/caseclose",
 	btnCreateGroup: "/creategroup",
 	btnClientInfo:  "/client",
+	btnIntakeLink:  "/intakelink",
 }
 
 func staffMenuKeyboard() tgbotapi.ReplyKeyboardMarkup {
 	kb := tgbotapi.NewReplyKeyboard(
 		tgbotapi.NewKeyboardButtonRow(tgbotapi.NewKeyboardButton(btnClientInfo), tgbotapi.NewKeyboardButton(btnInvoice), tgbotapi.NewKeyboardButton(btnConsult)),
-		tgbotapi.NewKeyboardButtonRow(tgbotapi.NewKeyboardButton(btnBook), tgbotapi.NewKeyboardButton(btnCreateGroup)),
+		tgbotapi.NewKeyboardButtonRow(tgbotapi.NewKeyboardButton(btnBook), tgbotapi.NewKeyboardButton(btnCreateGroup), tgbotapi.NewKeyboardButton(btnIntakeLink)),
 		tgbotapi.NewKeyboardButtonRow(tgbotapi.NewKeyboardButton(btnCase), tgbotapi.NewKeyboardButton(btnPay), tgbotapi.NewKeyboardButton(btnCaseClose)),
 		tgbotapi.NewKeyboardButtonRow(tgbotapi.NewKeyboardButton(btnAdvocateAdd), tgbotapi.NewKeyboardButton(btnAdvocates)),
 	)
@@ -568,7 +602,7 @@ func (b *AdminBot) startRequestFlow(ctx context.Context, chatID, userID int64, u
 	if user != nil {
 		username = user.UserName
 	}
-	b.flows[userID] = &flow{step: "req_name", request: requestDraft{telegramUsername: username}}
+	b.flows[userID] = &flow{step: "req_name", request: requestDraft{telegramUsername: username, wantsBooking: true}}
 
 	msg := tgbotapi.NewMessage(chatID, "Введіть Ваше ПІБ:")
 	msg.ReplyMarkup = tgbotapi.NewRemoveKeyboard(false)
@@ -576,6 +610,31 @@ func (b *AdminBot) startRequestFlow(ctx context.Context, chatID, userID int64, u
 		b.log.ErrorContext(ctx, "telegram: start request flow failed", "err", err)
 	}
 }
+
+// startIntakeFlow is intakeStartPayload's entry point — same requestDraft/
+// req_* step machine startRequestFlow uses, minus the date/time steps
+// (wantsBooking stays false): this link is about collecting contact info
+// for someone staff already talked to, not booking a specific slot.
+func (b *AdminBot) startIntakeFlow(ctx context.Context, chatID int64, user *tgbotapi.User) {
+	var username string
+	userID := chatID // private-chat id equals the tapping user's id; user is the fallback below
+	if user != nil {
+		username = user.UserName
+		userID = user.ID
+	}
+	b.flows[userID] = &flow{step: "req_name", request: requestDraft{telegramUsername: username}}
+
+	msg := tgbotapi.NewMessage(chatID, "Вітаємо! Кілька коротких запитань — це допоможе адвокату швидше розібратися у Вашій справі.\n\nВведіть Ваше ПІБ:")
+	msg.ReplyMarkup = tgbotapi.NewRemoveKeyboard(false)
+	if _, err := b.bot.Send(msg); err != nil {
+		b.log.ErrorContext(ctx, "telegram: start intake flow failed", "err", err)
+	}
+}
+
+// skipLabel is the reply-keyboard button shown next to every optional
+// question in the req_* flow — client-facing, so a button beats expecting
+// them to type "-" or guess that blank text means "skip".
+const skipLabel = "Пропустити"
 
 func (b *AdminBot) continueRequestFlow(ctx context.Context, chatID, userID int64, fl *flow, text string) {
 	switch fl.step {
@@ -586,8 +645,13 @@ func (b *AdminBot) continueRequestFlow(ctx context.Context, chatID, userID int64
 
 	case "req_phone":
 		fl.request.phone = text
-		fl.step = "req_date"
-		b.send(ctx, chatID, "Введіть бажану дату консультації (наприклад 29.07.2026):")
+		if fl.request.wantsBooking {
+			fl.step = "req_date"
+			b.send(ctx, chatID, "Введіть бажану дату консультації (наприклад 29.07.2026):")
+			return
+		}
+		fl.step = "req_email"
+		b.sendEmailPrompt(ctx, chatID)
 
 	case "req_date":
 		fl.request.date = text
@@ -596,8 +660,26 @@ func (b *AdminBot) continueRequestFlow(ctx context.Context, chatID, userID int64
 
 	case "req_time":
 		fl.request.time = text
+		fl.step = "req_email"
+		b.sendEmailPrompt(ctx, chatID)
+
+	case "req_email":
+		if text != skipLabel {
+			fl.request.email = text
+		}
+		fl.step = "req_category"
+		b.sendCategoryPrompt(ctx, chatID)
+
+	case "req_category":
+		if text != skipLabel {
+			fl.request.category = text
+		}
 		fl.step = "req_question"
-		b.send(ctx, chatID, "Опишіть коротко Ваше питання:")
+		msg := tgbotapi.NewMessage(chatID, "Опишіть коротко Ваше питання:")
+		msg.ReplyMarkup = tgbotapi.NewRemoveKeyboard(false)
+		if _, err := b.bot.Send(msg); err != nil {
+			b.log.ErrorContext(ctx, "telegram: send question prompt failed", "err", err)
+		}
 
 	case "req_question":
 		delete(b.flows, userID)
@@ -605,23 +687,85 @@ func (b *AdminBot) continueRequestFlow(ctx context.Context, chatID, userID int64
 	}
 }
 
+func (b *AdminBot) sendEmailPrompt(ctx context.Context, chatID int64) {
+	msg := tgbotapi.NewMessage(chatID, "Введіть Ваш email (необов'язково):")
+	msg.ReplyMarkup = tgbotapi.NewReplyKeyboard(tgbotapi.NewKeyboardButtonRow(tgbotapi.NewKeyboardButton(skipLabel)))
+	if _, err := b.bot.Send(msg); err != nil {
+		b.log.ErrorContext(ctx, "telegram: send email prompt failed", "err", err)
+	}
+}
+
+// sendCategoryPrompt offers cases.Categories as buttons — the same
+// suggested list staff picks from in /case, so a category left here needs
+// no translation to become the one on the case once it's opened.
+func (b *AdminBot) sendCategoryPrompt(ctx context.Context, chatID int64) {
+	rows := make([][]tgbotapi.KeyboardButton, 0, len(cases.Categories)+1)
+	for _, category := range cases.Categories {
+		rows = append(rows, tgbotapi.NewKeyboardButtonRow(tgbotapi.NewKeyboardButton(category)))
+	}
+	rows = append(rows, tgbotapi.NewKeyboardButtonRow(tgbotapi.NewKeyboardButton(skipLabel)))
+
+	msg := tgbotapi.NewMessage(chatID, "Яка допомога потрібна?")
+	kb := tgbotapi.NewReplyKeyboard(rows...)
+	kb.ResizeKeyboard = true
+	msg.ReplyMarkup = kb
+	if _, err := b.bot.Send(msg); err != nil {
+		b.log.ErrorContext(ctx, "telegram: send category prompt failed", "err", err)
+	}
+}
+
+// submitRequest hands the collected contact info to the same pipeline
+// email leads use (SubmitLead — DB row, sheet, leads-chat notification),
+// then separately records email: SubmitLead's Lead has no room for it, and
+// blasting it through UpdateClient would overwrite the name/phone
+// ResolveClient just set (see SetClientEmail's doc).
 func (b *AdminBot) submitRequest(ctx context.Context, chatID int64, d requestDraft, question string) {
+	message := question
+	if d.category != "" {
+		message = fmt.Sprintf("Категорія: %s\n\n%s", d.category, message)
+	}
+	if d.wantsBooking {
+		message = fmt.Sprintf("Бажана дата: %s, час: %s\n\n%s", d.date, d.time, message)
+	}
+
 	lead := domainleads.Lead{
 		MessageID:        fmt.Sprintf("tg-%d-%d", chatID, time.Now().UnixNano()),
 		ReceivedAt:       time.Now(),
 		Name:             d.name,
 		Phone:            domainleads.NormalizePhone(d.phone),
-		Message:          fmt.Sprintf("Бажана дата: %s, час: %s\n\n%s", d.date, d.time, question),
-		Page:             "Telegram-бот",
+		Message:          message,
+		Page:             requestPage(d.wantsBooking),
 		TelegramUsername: d.telegramUsername,
 	}
 
-	if err := b.leads.SubmitLead(ctx, lead); err != nil {
-		b.log.ErrorContext(ctx, "telegram: submit self-booking request failed", "err", err)
+	clientID, err := b.leads.SubmitLead(ctx, lead)
+	if err != nil {
+		b.log.ErrorContext(ctx, "telegram: submit self-service request failed", "err", err)
 		b.send(ctx, chatID, "Не вдалося надіслати заявку, спробуйте ще раз пізніше.")
 		return
 	}
-	b.send(ctx, chatID, "Дякуємо! Заявку прийнято, найближчим часом з Вами зв'яжеться наш адвокат.")
+
+	if d.email != "" && clientID != "" {
+		if err := b.store.SetClientEmail(ctx, clientID, d.email); err != nil {
+			b.log.WarnContext(ctx, "telegram: set client email from intake failed", "err", err)
+		}
+	}
+
+	msg := tgbotapi.NewMessage(chatID, "Дякуємо! Заявку прийнято, найближчим часом з Вами зв'яжеться наш адвокат.")
+	msg.ReplyMarkup = tgbotapi.NewRemoveKeyboard(false)
+	if _, err := b.bot.Send(msg); err != nil {
+		b.log.ErrorContext(ctx, "telegram: send request confirmation failed", "err", err)
+	}
+}
+
+// requestPage distinguishes the two req_* entry points in lead-source
+// stats (by_source on the /leads dashboard) — same shape of data, worth
+// telling apart since intake leads were never "self-booked".
+func requestPage(wantsBooking bool) string {
+	if wantsBooking {
+		return "Telegram-бот"
+	}
+	return "Telegram-бот: анкета"
 }
 
 func (b *AdminBot) startCase(ctx context.Context, chatID, userID int64, clientID string) {
@@ -998,6 +1142,18 @@ func (b *AdminBot) searchForGroup(ctx context.Context, chatID int64, query strin
 // searchForGroup (name/@username/phone), but tapping a result shows the
 // client's own card (IDs to reuse in other commands) instead of feeding
 // into the group-creation flow.
+// sendIntakeLink hands staff the one static link for anyone they've
+// already talked to outside Telegram — unlike /book's link, it's not
+// per-client (nothing about this person is on file yet), so there's
+// nothing to generate: same URL every time, with ready-to-paste SMS text.
+func (b *AdminBot) sendIntakeLink(ctx context.Context, chatID int64) {
+	link := fmt.Sprintf("https://t.me/%s?start=%s", b.bot.Self.UserName, intakeStartPayload)
+	b.send(ctx, chatID, fmt.Sprintf(
+		"Посилання на анкету (не прив'язане до конкретного клієнта — одне на всіх):\n\n%s\n\nГотовий текст для смс:\n\nВітаємо! Натисніть посилання і відповідайте на кілька коротких запитань — це допоможе нашому адвокату швидше розібратися у Вашій справі.\n%s",
+		link, link,
+	))
+}
+
 func (b *AdminBot) searchClientInfo(ctx context.Context, chatID int64, query string) {
 	query = strings.TrimSpace(query)
 

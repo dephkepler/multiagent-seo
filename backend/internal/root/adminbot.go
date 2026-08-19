@@ -90,8 +90,8 @@ func (noopConsultationSink) AppendRow(context.Context, consultations.Consultatio
 
 type noopLeadSubmitter struct{}
 
-func (noopLeadSubmitter) SubmitLead(context.Context, domainleads.Lead) error {
-	return fmt.Errorf("webleads service unavailable")
+func (noopLeadSubmitter) SubmitLead(context.Context, domainleads.Lead) (string, error) {
+	return "", fmt.Errorf("webleads service unavailable")
 }
 
 type noopGroupCreator struct{}

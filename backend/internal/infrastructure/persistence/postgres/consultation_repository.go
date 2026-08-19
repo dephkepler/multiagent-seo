@@ -73,6 +73,18 @@ func (r *ConsultationRepository) SetClientTelegram(ctx context.Context, clientID
 	return nil
 }
 
+func (r *ConsultationRepository) SetClientEmail(ctx context.Context, clientID, email string) error {
+	const q = `UPDATE clients SET email = @email WHERE id = @id`
+	tag, err := r.db.Exec(ctx, q, pgx.NamedArgs{"email": email, "id": clientID})
+	if err != nil {
+		return fmt.Errorf("set client email %q: %w", clientID, err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("set client email: no client with id %q", clientID)
+	}
+	return nil
+}
+
 // UpdateClient writes every field the client card can edit. Address/
 // Birthdate/TaxID go in encrypted (pgp_sym_encrypt, keyed by
 // r.encryptionKey) — an empty value stores NULL rather than encrypting an
