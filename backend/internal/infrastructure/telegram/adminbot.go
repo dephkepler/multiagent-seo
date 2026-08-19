@@ -103,10 +103,11 @@ type consultDraft struct {
 }
 
 type bookDraft struct {
-	client consultations.Client
-	date   string
-	time   string
-	price  float64
+	client   consultations.Client
+	date     string
+	time     string
+	price    float64
+	caseNote string
 }
 
 type requestDraft struct {
@@ -479,7 +480,9 @@ func (b *AdminBot) handle(ctx context.Context, update tgbotapi.Update) {
 		b.send(ctx, chatID, "Введіть справу/коментар (наприклад: справа про мікрокредити, треба позов):")
 
 	case "book_case":
-		b.finishBooking(ctx, chatID, userID, fl.book, text)
+		fl.book.caseNote = text
+		fl.step = "book_status"
+		b.sendBookingStatusPicker(ctx, chatID)
 
 	case "advocate_name":
 		delete(b.flows, userID)
@@ -1102,7 +1105,41 @@ func (b *AdminBot) pickClientForFlow(ctx context.Context, cb *tgbotapi.CallbackQ
 	}
 }
 
-func (b *AdminBot) finishBooking(ctx context.Context, chatID, userID int64, draft bookDraft, caseNote string) {
+// sendBookingStatusPicker is /book's last step — asks whether this is a
+// future appointment (the normal case: advocate gets pinged, status
+// buttons let staff record the outcome once it's happened) or something
+// staff is backfilling after the fact for an old client — already
+// happened and already paid, so there's no advocate to notify about news
+// that isn't news, and no pending outcome left to decide.
+func (b *AdminBot) sendBookingStatusPicker(ctx context.Context, chatID int64) {
+	msg := tgbotapi.NewMessage(chatID, "Це майбутній запис чи консультація вже відбулася (заводите заднім числом)?")
+	msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("📅 Майбутня", "bookstatus:"+consultations.StatusScheduled),
+			tgbotapi.NewInlineKeyboardButtonData("✅ Вже відбулася, оплачена", "bookstatus:"+consultations.StatusCompleted),
+		),
+	)
+	if _, err := b.bot.Send(msg); err != nil {
+		b.log.ErrorContext(ctx, "telegram: send booking status picker failed", "err", err)
+	}
+}
+
+// pickBookingStatus finishes /book once staff answers sendBookingStatusPicker.
+func (b *AdminBot) pickBookingStatus(ctx context.Context, cb *tgbotapi.CallbackQuery, status string) {
+	fl := b.flows[cb.From.ID]
+	if fl == nil || fl.step != "book_status" {
+		b.answerCallback(ctx, cb.ID, "Сесія застаріла, почніть з /book")
+		return
+	}
+	b.answerCallback(ctx, cb.ID, "")
+	if cb.Message == nil {
+		return
+	}
+	b.editCallbackMessage(ctx, cb, statusLabel(status))
+	b.finishBooking(ctx, cb.Message.Chat.ID, cb.From.ID, fl.book, status)
+}
+
+func (b *AdminBot) finishBooking(ctx context.Context, chatID, userID int64, draft bookDraft, status string) {
 	delete(b.flows, userID)
 
 	scheduledAt, err := time.Parse("02.01.2006 15:04", draft.date+" "+draft.time)
@@ -1115,8 +1152,9 @@ func (b *AdminBot) finishBooking(ctx context.Context, chatID, userID int64, draf
 		ClientID:    draft.client.ID,
 		ScheduledAt: scheduledAt,
 		Price:       draft.price,
-		CaseNote:    caseNote,
+		CaseNote:    draft.caseNote,
 		CreatedBy:   strconv.FormatInt(userID, 10),
+		Status:      status,
 	})
 	if err != nil {
 		b.send(ctx, chatID, "Не вдалося зберегти консультацію, спробуйте ще раз.")
@@ -1128,18 +1166,27 @@ func (b *AdminBot) finishBooking(ctx context.Context, chatID, userID int64, draf
 		b.log.ErrorContext(ctx, "telegram: append consultation to sheet failed", "err", err)
 	}
 
-	// Sent with whatever name the lead form gave us — the advocate gets a
-	// more accurate name later via the reminder job, once/if the client
-	// taps their own link and we learn their real Telegram identity.
-	if advocate, err := b.store.GetAdvocate(ctx); err != nil || advocate.TelegramChatID == 0 {
-		b.log.WarnContext(ctx, "telegram: advocate not registered yet, booking notification skipped", "err", err)
-	} else {
-		b.sendHTML(ctx, advocate.TelegramChatID, buildConsultationCard("📅 Нова консультація заброньована", c, draft.client, consultations.Advocate{}, false))
-	}
-
 	link := fmt.Sprintf("https://t.me/%s?start=%s", b.bot.Self.UserName, draft.client.ID)
-	msg := tgbotapi.NewMessage(chatID, "Готово. Перешліть клієнту:\n\n"+link)
-	msg.ReplyMarkup = statusKeyboard(c.ID)
+
+	// Backfilled/already-completed isn't news, and there's nothing left to
+	// decide about it — skip the advocate ping and the outcome buttons
+	// that only make sense for something still ahead.
+	var msg tgbotapi.MessageConfig
+	if status == consultations.StatusScheduled {
+		// Sent with whatever name the lead form gave us — the advocate gets
+		// a more accurate name later via the reminder job, once/if the
+		// client taps their own link and we learn their real Telegram
+		// identity.
+		if advocate, err := b.store.GetAdvocate(ctx); err != nil || advocate.TelegramChatID == 0 {
+			b.log.WarnContext(ctx, "telegram: advocate not registered yet, booking notification skipped", "err", err)
+		} else {
+			b.sendHTML(ctx, advocate.TelegramChatID, buildConsultationCard("📅 Нова консультація заброньована", c, draft.client, consultations.Advocate{}, false))
+		}
+		msg = tgbotapi.NewMessage(chatID, "Готово. Перешліть клієнту:\n\n"+link)
+		msg.ReplyMarkup = statusKeyboard(c.ID)
+	} else {
+		msg = tgbotapi.NewMessage(chatID, "Додано заднім числом ("+statusLabel(status)+"). За бажанням перешліть клієнту:\n\n"+link)
+	}
 	if _, err := b.bot.Send(msg); err != nil {
 		b.log.ErrorContext(ctx, "telegram: send booking confirmation failed", "err", err)
 	}
@@ -1217,6 +1264,8 @@ func (b *AdminBot) handleCallback(ctx context.Context, cb *tgbotapi.CallbackQuer
 			return
 		}
 		b.pickClientForFlow(ctx, cb, clientLookupMode(mode), clientID)
+	case "bookstatus":
+		b.pickBookingStatus(ctx, cb, rest)
 	default:
 		b.answerCallback(ctx, cb.ID, "")
 	}
