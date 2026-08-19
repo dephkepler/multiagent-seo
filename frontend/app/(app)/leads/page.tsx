@@ -229,6 +229,15 @@ export default function LeadsPage() {
       {data && (
         <>
           <GroupHeading
+            title='Заявки за период'
+            subtitle='Сырые числа — включая повторные обращения уже существующих клиентов, не только новых (воронка ниже — только новые)'
+          />
+          <div className='grid grid-cols-2 gap-4 sm:w-1/2'>
+            <KpiTile label='Всего заявок' value={data.totals.leads.toLocaleString('ru-RU')} />
+            <KpiTile label='Уникальных обратившихся' value={data.totals.clients.toLocaleString('ru-RU')} />
+          </div>
+
+          <GroupHeading
             title='Воронка'
             subtitle={`Клиенты, первый раз обратившиеся ${fmtDate(data.range.from)} – ${fmtDate(data.range.to)} — что с ними стало с тех пор, неважно когда`}
           />
@@ -264,14 +273,11 @@ export default function LeadsPage() {
 
             <div>
               <div className='mb-2 text-xs text-gray-400'>
-                Дела (клопотання/позов/супровід) — вот тут реальные деньги бизнеса
+                Дела (клопотання/позов/супровід) — вот тут реальные деньги бизнеса. За выбранный период — сколько
+                открыто/законтрактовано/оплачено.
               </div>
-              <div className='grid grid-cols-2 gap-4 sm:grid-cols-4'>
-                <KpiTile
-                  label='Дел'
-                  value={(data.totals.cases_in_progress + data.totals.cases_completed).toLocaleString('ru-RU')}
-                  sub={`${data.totals.cases_in_progress} в работе, ${data.totals.cases_completed} выполнено`}
-                />
+              <div className='grid grid-cols-1 gap-4 sm:grid-cols-3'>
+                <KpiTile label='Завершено дел' value={data.totals.cases_completed.toLocaleString('ru-RU')} />
                 <KpiTile label='Законтрактовано' value={fmtMoney(data.totals.case_fee_contracted)} />
                 <KpiTile
                   label='Получено оплат'
@@ -279,6 +285,11 @@ export default function LeadsPage() {
                   sub='Растёт по мере частичной оплаты — это уже поступившие деньги, не сумма договора'
                   accent='good'
                 />
+              </div>
+
+              <div className='mt-4 mb-2 text-xs text-gray-400'>Сейчас, по всем делам — не зависит от периода выше</div>
+              <div className='grid grid-cols-2 gap-4'>
+                <KpiTile label='В работе' value={data.totals.cases_in_progress.toLocaleString('ru-RU')} />
                 <KpiTile label='Долг клиентов' value={fmtMoney(data.totals.case_owed)} accent={data.totals.case_owed > 0 ? 'bad' : undefined} />
               </div>
             </div>

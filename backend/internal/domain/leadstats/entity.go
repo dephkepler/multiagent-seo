@@ -25,11 +25,20 @@ type Totals struct {
 	// (contract amount) runs 1,000–15,000+ ₴, an order of magnitude above a
 	// consultation's 500–800 ₴. See doc/abalisbotlead for the numbers this
 	// was built to answer.
-	CasesInProgress   int64
-	CasesCompleted    int64
-	CaseFeeContracted float64 // sum of every case's agreed fee
-	CasePaid          float64 // sum of what's actually been received so far
-	CaseOwed          float64 // sum of (fee - paid) across cases still owing — the collections number
+	//
+	// CasesCompleted/CaseFeeContracted/CasePaid are scoped to cases opened
+	// in [From, To] — "what happened this period", same as the
+	// consultation revenue fields above. CasesInProgress/CaseOwed are NOT:
+	// they're a live snapshot across every case regardless of when it was
+	// opened, because "how many cases are active" and "who owes us money"
+	// describe the business's current state — a case opened last month and
+	// still unpaid is real debt today, and a short date range picked on
+	// this dashboard shouldn't make it disappear from the number.
+	CasesInProgress   int64   // live count, ignores [From, To]
+	CasesCompleted    int64   // opened in [From, To]
+	CaseFeeContracted float64 // sum of agreed fee, cases opened in [From, To]
+	CasePaid          float64 // sum of what's been received so far, cases opened in [From, To]
+	CaseOwed          float64 // live sum of (fee - paid) across every case still owing, ignores [From, To] — the collections number
 
 	// Site traffic (GA4) — optional, both stay 0 if CF_GA4_PROPERTY_ID isn't
 	// configured. Sessions is every visit regardless of source, Organic is
