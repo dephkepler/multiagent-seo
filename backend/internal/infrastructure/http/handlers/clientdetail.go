@@ -20,6 +20,7 @@ type clientDetailService interface {
 	Get(ctx context.Context, clientID string) (domain.Detail, error)
 	UpdateClient(ctx context.Context, clientID string, edit consultations.ClientEdit) error
 	AddNote(ctx context.Context, clientID, text, createdBy string) (domain.Note, error)
+	Delete(ctx context.Context, clientID string) error
 }
 
 type ClientDetailHandler struct {
@@ -112,11 +113,25 @@ func (h *ClientDetailHandler) AddClientNote(w http.ResponseWriter, r *http.Reque
 	})
 }
 
+func (h *ClientDetailHandler) DeleteClient(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
+	if isNil(h.svc) {
+		problem.Write(w, http.StatusServiceUnavailable, "client detail unavailable")
+		return
+	}
+
+	if err := h.svc.Delete(r.Context(), id.String()); err != nil {
+		h.writeError(r.Context(), w, "delete_client", err)
+		return
+	}
+	response.NoContent(w)
+}
+
 var clientDetailErrMap = newErrMap("handlers.clientdetail",
 	E(domain.ErrNotFound, http.StatusNotFound, "client not found"),
 	EMsg(domain.ErrEmptyNote, http.StatusBadRequest),
 	EMsg(domain.ErrInvalidGender, http.StatusBadRequest),
 	EMsg(domain.ErrInvalidClientType, http.StatusBadRequest),
+	EMsg(domain.ErrHasHistory, http.StatusConflict),
 )
 
 func (h *ClientDetailHandler) writeError(ctx context.Context, w http.ResponseWriter, op string, err error) {

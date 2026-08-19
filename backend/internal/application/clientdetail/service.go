@@ -68,6 +68,13 @@ func (s *Service) UpdateClient(ctx context.Context, clientID string, edit consul
 	return nil
 }
 
+func (s *Service) Delete(ctx context.Context, clientID string) error {
+	if err := s.repo.Delete(ctx, clientID); err != nil {
+		return fmt.Errorf("clientdetail: delete %q: %w", clientID, err)
+	}
+	return nil
+}
+
 func (s *Service) AddNote(ctx context.Context, clientID, text, createdBy string) (domain.Note, error) {
 	text = strings.TrimSpace(text)
 	if text == "" {

@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
-import { useParams } from 'next/navigation'
+import { useParams, useRouter } from 'next/navigation'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
@@ -202,6 +202,7 @@ export default function ClientDetailPage() {
   const params = useParams<{ id: string }>()
   const id = params.id
   const qc = useQueryClient()
+  const router = useRouter()
 
   const detail = useQuery({
     queryKey: ['client-detail', id],
@@ -279,6 +280,19 @@ export default function ClientDetailPage() {
     onError: (e: Error) => toast.error(e.message),
   })
 
+  // Backend refuses (409) a client with any lead/consultation/case — the
+  // error message from that response is what actually reaches the toast,
+  // so a client with real history can't be destroyed by this button.
+  const deleteClient = useMutation({
+    mutationFn: () => api(`/clients/${id}`, { method: 'DELETE' }),
+    onSuccess: () => {
+      toast.success('Клиент удалён')
+      qc.invalidateQueries({ queryKey: ['client-segments'] })
+      router.push('/clients')
+    },
+    onError: (e: Error) => toast.error(e.message),
+  })
+
   if (detail.isLoading) return <Card>Загрузка…</Card>
   if (detail.isError || !detail.data) return <Card>Не удалось загрузить карточку клиента.</Card>
   if (!form) return <Card>Загрузка…</Card>
@@ -297,7 +311,19 @@ export default function ClientDetailPage() {
         <Link href='/clients' className='text-sm text-gray-500 hover:text-gray-700'>
           ← Все клиенты
         </Link>
-        <span className='font-mono text-xs text-gray-400 select-all'>Client ID: {d.client.id}</span>
+        <div className='flex items-center gap-3'>
+          <span className='font-mono text-xs text-gray-400 select-all'>Client ID: {d.client.id}</span>
+          <button
+            type='button'
+            disabled={deleteClient.isPending}
+            onClick={() => {
+              if (window.confirm(`Удалить клиента «${d.client.name || d.client.id}»? Это необратимо.`)) deleteClient.mutate()
+            }}
+            className='text-xs text-rose-400 hover:text-rose-600 disabled:cursor-wait disabled:text-gray-300'
+          >
+            {deleteClient.isPending ? 'Удаление…' : 'Удалить клиента'}
+          </button>
+        </div>
       </div>
 
       <Card>

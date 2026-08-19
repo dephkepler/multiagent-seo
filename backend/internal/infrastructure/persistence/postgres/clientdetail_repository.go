@@ -127,6 +127,41 @@ func (r *ClientDetailRepository) Get(ctx context.Context, clientID string) (clie
 	return d, nil
 }
 
+// Delete refuses (ErrHasHistory) if the client has any lead, consultation,
+// or case — those are real business records (money, audit trail), not
+// something a stray delete click should be able to destroy. client_notes
+// don't block deletion — they're staff's own scratch log about this client,
+// worthless once the client itself is gone, so they're cleaned up here
+// rather than treated as "history".
+func (r *ClientDetailRepository) Delete(ctx context.Context, clientID string) error {
+	var leads, consults, cases int
+	const countQ = `SELECT
+		(SELECT count(*) FROM leads WHERE client_id = @id),
+		(SELECT count(*) FROM consultations WHERE client_id = @id),
+		(SELECT count(*) FROM cases WHERE client_id = @id)`
+	if err := r.db.QueryRow(ctx, countQ, pgx.NamedArgs{"id": clientID}).Scan(&leads, &consults, &cases); err != nil {
+		return fmt.Errorf("delete client %q: count history: %w", clientID, err)
+	}
+	if leads > 0 || consults > 0 || cases > 0 {
+		return clientdetail.ErrHasHistory
+	}
+
+	const notesQ = `DELETE FROM client_notes WHERE client_id = @id`
+	if _, err := r.db.Exec(ctx, notesQ, pgx.NamedArgs{"id": clientID}); err != nil {
+		return fmt.Errorf("delete client %q: notes: %w", clientID, err)
+	}
+
+	const clientQ = `DELETE FROM clients WHERE id = @id`
+	tag, err := r.db.Exec(ctx, clientQ, pgx.NamedArgs{"id": clientID})
+	if err != nil {
+		return fmt.Errorf("delete client %q: %w", clientID, err)
+	}
+	if tag.RowsAffected() == 0 {
+		return clientdetail.ErrNotFound
+	}
+	return nil
+}
+
 func (r *ClientDetailRepository) AddNote(ctx context.Context, clientID, text, createdBy string) (clientdetail.Note, error) {
 	const q = `INSERT INTO client_notes (client_id, text, created_by)
 		VALUES (@client_id, @text, @created_by)

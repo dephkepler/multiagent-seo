@@ -669,6 +669,19 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "404":
           $ref: "#/components/responses/NotFound"
+    delete:
+      operationId: deleteClient
+      security:
+        - bearerAuth: [ ]
+      tags: [ Clients ]
+      summary: Delete a client record — refused (409) if it has any leads, consultations, or cases, so real business history can't be destroyed by accident
+      responses:
+        "204":
+          description: Deleted
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
 
   /clients/{id}/notes:
     parameters:

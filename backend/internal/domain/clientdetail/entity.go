@@ -20,6 +20,12 @@ var ErrNotFound = errors.New("clientdetail: client not found")
 // anything into isn't worth a row.
 var ErrEmptyNote = errors.New("clientdetail: note text is empty")
 
+// ErrHasHistory is returned by Delete when the client has any lead,
+// consultation, or case — real business history a stray click shouldn't
+// be able to destroy. A junk/duplicate/test client with none of those can
+// still be deleted.
+var ErrHasHistory = errors.New("clientdetail: client has history, refusing to delete")
+
 // ErrInvalidGender/ErrInvalidClientType guard UpdateClient — checked before
 // the DB's own CHECK constraint so a bad value fails with a clear domain
 // error instead of a raw Postgres constraint message reaching the client.
