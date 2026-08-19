@@ -22,7 +22,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className='min-h-screen'>
       <Nav />
-      <main className='mx-auto max-w-7xl p-6'>{children}</main>
+      <main className='mx-auto max-w-7xl p-4 sm:p-6'>{children}</main>
     </div>
   )
 }

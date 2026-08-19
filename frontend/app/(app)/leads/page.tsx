@@ -165,8 +165,8 @@ export default function LeadsPage() {
         <span className='text-xs text-gray-400'>группировка: {groupBy === 'day' ? 'по дням' : 'по месяцам'}</span>
 
         {pickerOpen && (
-          <div className='absolute top-full left-0 z-20 mt-2 flex w-[420px] gap-4 rounded-lg border border-gray-200 bg-white p-4 shadow-lg'>
-            <div className='flex w-36 shrink-0 flex-col gap-1'>
+          <div className='absolute top-full left-0 z-20 mt-2 flex w-[min(420px,calc(100vw-2.5rem))] flex-col gap-4 rounded-lg border border-gray-200 bg-white p-4 shadow-lg sm:flex-row'>
+            <div className='flex flex-col gap-1 sm:w-36 sm:shrink-0'>
               {PRESETS.map((p) => (
                 <button
                   key={p.label}
@@ -180,7 +180,7 @@ export default function LeadsPage() {
                 </button>
               ))}
             </div>
-            <div className='w-px bg-gray-100' />
+            <div className='h-px bg-gray-100 sm:h-auto sm:w-px' />
             <div className='flex flex-1 flex-col gap-3'>
               <div className='text-xs font-medium text-gray-500'>Свой период</div>
               <label className='flex flex-col gap-1 text-xs text-gray-500'>
@@ -246,7 +246,7 @@ export default function LeadsPage() {
               <div className='mb-2 text-xs text-gray-400'>
                 Консультации — сумма самих консультаций (обычно 500–800 ₴ за штуку), отдельно от денег по делам
               </div>
-              <div className='grid grid-cols-3 gap-4'>
+              <div className='grid grid-cols-1 gap-4 sm:grid-cols-3'>
                 <KpiTile label='Забронировано (весь потенциал)' value={fmtMoney(data.totals.revenue_booked)} />
                 <KpiTile
                   label='Заработано (провёл)'
@@ -266,7 +266,7 @@ export default function LeadsPage() {
               <div className='mb-2 text-xs text-gray-400'>
                 Дела (клопотання/позов/супровід) — вот тут реальные деньги бизнеса
               </div>
-              <div className='grid grid-cols-4 gap-4'>
+              <div className='grid grid-cols-2 gap-4 sm:grid-cols-4'>
                 <KpiTile
                   label='Дел'
                   value={(data.totals.cases_in_progress + data.totals.cases_completed).toLocaleString('ru-RU')}
@@ -300,7 +300,7 @@ export default function LeadsPage() {
                   </Card>
                 )
               })()}
-            <div className='grid grid-cols-2 gap-4'>
+            <div className='grid grid-cols-1 gap-4 md:grid-cols-2'>
               <Card className='p-4'>
                 <div className='mb-3 text-sm font-medium'>Бронирования — кто записывает</div>
                 <p className='mb-3 text-xs text-gray-400'>
@@ -323,7 +323,7 @@ export default function LeadsPage() {
           {data.totals.site_sessions > 0 && (
             <>
               <GroupHeading title='Привлечение' subtitle='Сайт, не заявки — воронка выше начинается уже после этого шага' />
-              <div className='grid grid-cols-3 gap-4'>
+              <div className='grid grid-cols-1 gap-4 sm:grid-cols-3'>
                 <KpiTile label='Визитов на сайт' value={data.totals.site_sessions.toLocaleString('ru-RU')} />
                 <KpiTile
                   label='Из поиска (Сео)'
@@ -472,7 +472,7 @@ function FunnelRow({
   const leadToConsult = leads > 0 ? (consultations / leads) * 100 : 0
   const consultToCase = consultations > 0 ? (cases / consultations) * 100 : 0
   return (
-    <div className='flex items-stretch overflow-hidden rounded-lg border border-gray-200'>
+    <div className='flex flex-col items-stretch overflow-hidden rounded-lg border border-gray-200 sm:flex-row'>
       <FunnelStage label='Клиентов' value={leads} />
       <FunnelArrow pct={leadToConsult} days={daysToConsult} />
       <FunnelStage label='Дошли до консультации' value={consultations} />
@@ -494,7 +494,7 @@ function FunnelStage({
   accent?: 'bad'
 }) {
   return (
-    <div className={cx('flex-1 p-4', !last && 'border-r border-gray-100', accent === 'bad' && 'bg-red-50')}>
+    <div className={cx('flex-1 p-4', !last && 'border-b border-gray-100 sm:border-r sm:border-b-0', accent === 'bad' && 'bg-red-50')}>
       <div className={cx('text-xs text-gray-500', accent === 'bad' && 'text-red-700')}>{label}</div>
       <div className={cx('mt-1 text-2xl font-semibold tabular-nums', accent === 'bad' && 'text-red-700')}>
         {value.toLocaleString('ru-RU')}
@@ -507,11 +507,13 @@ function FunnelArrow({ pct, days, bad }: { pct: number; days: number; bad?: bool
   return (
     <div
       className={cx(
-        'flex shrink-0 flex-col items-center justify-center px-3 text-center whitespace-nowrap',
+        'flex shrink-0 flex-col items-center justify-center px-3 py-2 text-center whitespace-nowrap sm:py-0',
         bad ? 'text-red-600' : 'text-gray-400'
       )}
     >
-      <span className='text-sm font-medium'>{pct.toFixed(1)}% →</span>
+      <span className='text-sm font-medium'>
+        {pct.toFixed(1)}% <span className='inline-block rotate-90 sm:rotate-0'>→</span>
+      </span>
       {days > 0 && <span className='text-[11px] text-gray-400'>в среднем {fmtDays(days)}</span>}
     </div>
   )
@@ -613,17 +615,17 @@ function HBarList({
         const label = r.key === '' ? emptyLabel : r.key
         const pct = total ? ((r.count / total) * 100).toFixed(1) : '0.0'
         return (
-          <div key={label} className='flex items-center gap-3 text-sm'>
-            <div className='w-40 shrink-0 truncate text-right text-gray-600' title={label}>
+          <div key={label} className='flex flex-col gap-1 text-sm sm:flex-row sm:items-center sm:gap-3'>
+            <div className='truncate text-gray-600 sm:w-40 sm:shrink-0 sm:text-right' title={label}>
               {label}
             </div>
-            <div className='h-4 flex-1 rounded bg-gray-100'>
+            <div className='h-4 rounded bg-gray-100 sm:flex-1'>
               <div
                 className={cx('h-4 rounded', colorFor ? colorFor(label) : 'bg-emerald-500')}
                 style={{ width: `${Math.max(2, (r.count / max) * 100)}%` }}
               />
             </div>
-            <div className='w-24 shrink-0 tabular-nums text-gray-700'>
+            <div className='tabular-nums text-gray-700 sm:w-24 sm:shrink-0'>
               {r.count} · {pct}%
             </div>
           </div>
@@ -832,17 +834,17 @@ function SourceList({
         const label = r.key === '' ? '(без источника)' : r.key
         const value = valueOf(r)
         return (
-          <div key={label} className='flex items-center gap-3 text-sm'>
-            <div className='w-40 shrink-0 truncate text-right text-gray-600' title={label}>
+          <div key={label} className='flex flex-col gap-1 text-sm sm:flex-row sm:items-center sm:gap-3'>
+            <div className='truncate text-gray-600 sm:w-40 sm:shrink-0 sm:text-right' title={label}>
               {label}
             </div>
-            <div className='h-4 flex-1 rounded bg-gray-100'>
+            <div className='h-4 rounded bg-gray-100 sm:flex-1'>
               <div
                 className='h-4 rounded bg-emerald-500'
                 style={{ width: `${Math.max(value > 0 ? 2 : 0, (value / max) * 100)}%` }}
               />
             </div>
-            <div className='w-56 shrink-0 tabular-nums text-gray-700'>
+            <div className='tabular-nums text-gray-700 sm:w-56 sm:shrink-0'>
               {fmtMoney(value)} · {fmtClients(r.leads)} · {fmtCases(r.cased_ever)}
             </div>
           </div>
@@ -867,18 +869,18 @@ function CategoryList({
         const label = r.key === '' ? emptyLabel : r.key
         const paidPct = r.contracted ? Math.round((r.paid / r.contracted) * 100) : 0
         return (
-          <div key={label} className='flex items-center gap-3 text-sm'>
-            <div className='w-56 shrink-0 truncate text-right text-gray-600' title={label}>
+          <div key={label} className='flex flex-col gap-1 text-sm sm:flex-row sm:items-center sm:gap-3'>
+            <div className='truncate text-gray-600 sm:w-56 sm:shrink-0 sm:text-right' title={label}>
               {label}
             </div>
-            <div className='relative h-4 flex-1 rounded bg-gray-100'>
+            <div className='relative h-4 rounded bg-gray-100 sm:flex-1'>
               <div className='h-4 rounded bg-emerald-200' style={{ width: `${Math.max(2, (r.contracted / max) * 100)}%` }} />
               <div
                 className='absolute top-0 left-0 h-4 rounded bg-emerald-500'
                 style={{ width: `${Math.max(r.paid > 0 ? 2 : 0, (r.paid / max) * 100)}%` }}
               />
             </div>
-            <div className='w-44 shrink-0 tabular-nums text-gray-700'>
+            <div className='tabular-nums text-gray-700 sm:w-44 sm:shrink-0'>
               {fmtMoney(r.contracted)} · {fmtCases(r.cases)} · {paidPct}% оплачено
             </div>
           </div>
@@ -896,17 +898,17 @@ function CreatorList({ rows }: { rows: { key: string; bookings: number; revenue_
       {rows.slice(0, 8).map((r) => {
         const label = r.key === '' ? '(не указано)' : r.key
         return (
-          <div key={label} className='flex items-center gap-3 text-sm'>
-            <div className='w-32 shrink-0 truncate text-right text-gray-600' title={label}>
+          <div key={label} className='flex flex-col gap-1 text-sm sm:flex-row sm:items-center sm:gap-3'>
+            <div className='truncate text-gray-600 sm:w-32 sm:shrink-0 sm:text-right' title={label}>
               {label}
             </div>
-            <div className='h-4 flex-1 rounded bg-gray-100'>
+            <div className='h-4 rounded bg-gray-100 sm:flex-1'>
               <div
                 className='h-4 rounded bg-emerald-500'
                 style={{ width: `${Math.max(2, (r.revenue_earned / max) * 100)}%` }}
               />
             </div>
-            <div className='w-36 shrink-0 tabular-nums text-gray-700'>
+            <div className='tabular-nums text-gray-700 sm:w-36 sm:shrink-0'>
               {fmtMoney(r.revenue_earned)} · {r.bookings} бр.
             </div>
           </div>
