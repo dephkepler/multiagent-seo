@@ -15,6 +15,7 @@ const links = [
   { href: '/emailscrape', label: 'Email scrape' },
   { href: '/leads', label: 'Leads' },
   { href: '/clients', label: 'Clients' },
+  { href: '/vault', label: 'Vault' },
 ]
 
 export function Nav() {

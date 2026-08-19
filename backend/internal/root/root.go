@@ -16,6 +16,7 @@ import (
 	appclientsegments "multiagent-seo/internal/application/clientsegments"
 	apphealth "multiagent-seo/internal/application/health"
 	appleadstats "multiagent-seo/internal/application/leadstats"
+	appvault "multiagent-seo/internal/application/vault"
 	appwordpress "multiagent-seo/internal/application/wordpress"
 	domainauth "multiagent-seo/internal/domain/auth"
 	domainhealth "multiagent-seo/internal/domain/health"
@@ -78,6 +79,7 @@ func Run(ctx context.Context, cfg config.Config) error {
 		postgres.NewClientDetailRepository(pool, cfg.Clients.EncryptionKey),
 		postgres.NewConsultationRepository(pool, cfg.Clients.EncryptionKey),
 	)
+	vaultSvc := appvault.NewService(postgres.NewVaultRepository(pool))
 
 	healthSvc := apphealth.NewService(domainhealth.NewService(healthRepo))
 	server := handlers.NewServer(
@@ -91,6 +93,7 @@ func Run(ctx context.Context, cfg config.Config) error {
 		handlers.NewLeadStatsHandler(leadStatsSvc),
 		handlers.NewClientSegmentsHandler(clientSegmentsSvc),
 		handlers.NewClientDetailHandler(clientDetailSvc),
+		handlers.NewVaultHandler(vaultSvc),
 	)
 
 	schedule(ctx, cfg.Prompt.PromoteInterval, evolveSvc.PromotePrompts)

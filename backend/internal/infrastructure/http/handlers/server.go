@@ -11,6 +11,7 @@ type Server struct {
 	*LeadStatsHandler
 	*ClientSegmentsHandler
 	*ClientDetailHandler
+	*VaultHandler
 }
 
 func NewServer(
@@ -24,6 +25,7 @@ func NewServer(
 	leadStats *LeadStatsHandler,
 	clientSegments *ClientSegmentsHandler,
 	clientDetail *ClientDetailHandler,
+	vault *VaultHandler,
 ) *Server {
 	return &Server{
 		HealthHandler:         health,
@@ -36,5 +38,6 @@ func NewServer(
 		LeadStatsHandler:      leadStats,
 		ClientSegmentsHandler: clientSegments,
 		ClientDetailHandler:   clientDetail,
+		VaultHandler:          vault,
 	}
 }

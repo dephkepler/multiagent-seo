@@ -25,6 +25,8 @@ tags:
     description: Long-lived per-user API keys
   - name: Clients
     description: Client base with derived funnel segment (обращение → консультація → дело)
+  - name: Vault
+    description: Staff password/credential storage, plain text (no encryption yet)
 
 paths:
   /healthz:
@@ -712,6 +714,87 @@ paths:
                 $ref: "#/components/schemas/ClientNote"
         "400":
           $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /vault-entries:
+    get:
+      operationId: listVaultEntries
+      security:
+        - bearerAuth: [ ]
+      tags: [ Vault ]
+      summary: List saved password/credential entries
+      responses:
+        "200":
+          description: All entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/VaultEntry"
+    post:
+      operationId: createVaultEntry
+      security:
+        - bearerAuth: [ ]
+      tags: [ Vault ]
+      summary: Add a password/credential entry
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateVaultEntryRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VaultEntry"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /vault-entries/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    patch:
+      operationId: updateVaultEntry
+      security:
+        - bearerAuth: [ ]
+      tags: [ Vault ]
+      summary: Update a password/credential entry
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateVaultEntryRequest"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VaultEntry"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      operationId: deleteVaultEntry
+      security:
+        - bearerAuth: [ ]
+      tags: [ Vault ]
+      summary: Delete a password/credential entry
+      responses:
+        "204":
+          description: Deleted
         "404":
           $ref: "#/components/responses/NotFound"
 
@@ -1695,4 +1778,65 @@ components:
       required: [ text ]
       properties:
         text:
+          type: string
+
+    VaultEntry:
+      type: object
+      required: [ id, title, url, username, password, notes, createdBy, createdAt, updatedAt ]
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        url:
+          type: string
+        username:
+          type: string
+        password:
+          type: string
+        notes:
+          type: string
+        createdBy:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    CreateVaultEntryRequest:
+      type: object
+      required: [ title, password ]
+      properties:
+        title:
+          type: string
+          x-oapi-codegen-extra-tags:
+            validate: "required,min=1,max=200"
+        url:
+          type: string
+        username:
+          type: string
+        password:
+          type: string
+          x-oapi-codegen-extra-tags:
+            validate: "required"
+        notes:
+          type: string
+
+    UpdateVaultEntryRequest:
+      type: object
+      properties:
+        title:
+          type: string
+          x-oapi-codegen-extra-tags:
+            validate: "omitempty,min=1,max=200"
+        url:
+          type: string
+        username:
+          type: string
+        password:
+          type: string
+        notes:
           type: string
