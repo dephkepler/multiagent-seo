@@ -1561,24 +1561,27 @@ func buildClientInfoCard(client consultations.Client, latest consultations.Consu
 	}
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "🔎 Картка клієнта\n\nClient ID: <code>%s</code>\nІм'я: %s\nТелефон: %s\nTelegram: %s\n\nCRM: %s/clients/%s",
+	fmt.Fprintf(&b, "🔎 <b>Картка клієнта</b>\n\nClient ID: <code>%s</code>\nІм'я: %s\nТелефон: %s\nTelegram: %s\nCRM: %s/clients/%s",
 		client.ID, html.EscapeString(client.Name), html.EscapeString(client.Phone), html.EscapeString(telegram),
 		adminURL, client.ID,
 	)
 
-	b.WriteString("\n\nОстання консультація: ")
+	b.WriteString("\n\n<b>📅 Консультація</b>\n")
 	if hasConsultation {
-		fmt.Fprintf(&b, "\nID: <code>%s</code>, %s %s, статус: %s",
+		fmt.Fprintf(&b, "ID: <code>%s</code>\n%s %s · %s",
 			latest.ID, latest.ScheduledAt.Format("02.01.2006"), latest.ScheduledAt.Format("15:04"), statusLabel(latest.Status),
 		)
 	} else {
 		b.WriteString("ще не було")
 	}
 
-	fmt.Fprintf(&b, "\n\nСправи (%d):", len(clientCases))
+	fmt.Fprintf(&b, "\n\n<b>📁 Справи (%d)</b>", len(clientCases))
 	if len(clientCases) == 0 {
 		fmt.Fprintf(&b, "\nще нема — /case <code>%s</code>", client.ID)
 	}
+	// Each case is its own block (blank line between them) — packed onto
+	// one line, this used to run off a phone screen with everything from
+	// the category to the amount owed crammed together.
 	for _, c := range clientCases {
 		advocate := c.AdvocateName
 		if advocate == "" {
@@ -1588,7 +1591,7 @@ func buildClientInfoCard(client consultations.Client, latest consultations.Consu
 		if advocateID == "" {
 			advocateID = "—"
 		}
-		fmt.Fprintf(&b, "\n<code>%s</code> — %s, адвокат: %s (<code>%s</code>), %s/%s грн (залишок %s), статус: %s",
+		fmt.Fprintf(&b, "\n\n<code>%s</code>\n%s\nАдвокат: %s (<code>%s</code>)\n%s/%s грн · залишок %s\nСтатус: %s",
 			c.ID, html.EscapeString(c.Category), html.EscapeString(advocate), advocateID,
 			formatAmount(c.PaidAmount), formatAmount(c.Fee), formatAmount(c.Owed()), caseStatusLabel(c.Status),
 		)
