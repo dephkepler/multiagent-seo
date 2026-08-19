@@ -159,10 +159,18 @@ interface ClientForm {
   birthdate: string
   taxId: string
 }
+// Clients created through the bot/lead form only ever get the single
+// combined `name` written (see webleads.ResolveClient) — the structured
+// last_name/first_name/patronymic fields the card actually edits stay
+// blank forever unless something seeds them. Falling first_name back to
+// name when it's empty means the name is at least visible instead of a
+// blank field next to a client the CRM clearly already knows the name
+// of — and saving the card (even for an unrelated field) now writes it
+// into first_name for real, fixing the record going forward.
 function toForm(c: ClientDetailInfo): ClientForm {
   return {
     lastName: c.last_name,
-    firstName: c.first_name,
+    firstName: c.first_name || c.name,
     patronymic: c.patronymic,
     phone: c.phone,
     gender: c.gender,
@@ -285,9 +293,12 @@ export default function ClientDetailPage() {
 
   return (
     <div className='space-y-6'>
-      <Link href='/clients' className='text-sm text-gray-500 hover:text-gray-700'>
-        ← Все клиенты
-      </Link>
+      <div className='flex items-center justify-between'>
+        <Link href='/clients' className='text-sm text-gray-500 hover:text-gray-700'>
+          ← Все клиенты
+        </Link>
+        <span className='font-mono text-xs text-gray-400 select-all'>Client ID: {d.client.id}</span>
+      </div>
 
       <Card>
         <div className='mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6'>
@@ -450,6 +461,7 @@ export default function ClientDetailPage() {
             <table className='w-full text-sm'>
               <thead className='text-left text-xs uppercase text-gray-500'>
                 <tr>
+                  <th className='py-2 pr-4'>ID</th>
                   <th className='py-2 pr-4'>Дата</th>
                   <th className='py-2 pr-4'>Категория</th>
                   <th className='py-2 pr-4'>Описание</th>
@@ -461,6 +473,7 @@ export default function ClientDetailPage() {
               <tbody>
                 {d.cases.map((c) => (
                   <tr key={c.id} className='border-t border-gray-100 align-top'>
+                    <td className='py-2 pr-4 font-mono text-xs whitespace-nowrap text-gray-400 select-all'>{c.id}</td>
                     <td className='py-2 pr-4 whitespace-nowrap text-gray-500'>{fmtDate(c.created_at)}</td>
                     <td className='py-2 pr-4 text-gray-500'>{c.category || '—'}</td>
                     <td className='max-w-xs py-2 pr-4'>{c.description || '—'}</td>
@@ -490,6 +503,7 @@ export default function ClientDetailPage() {
             <table className='w-full text-sm'>
               <thead className='text-left text-xs uppercase text-gray-500'>
                 <tr>
+                  <th className='py-2 pr-4'>ID</th>
                   <th className='py-2 pr-4'>Дата</th>
                   <th className='py-2 pr-4'>Статус</th>
                   <th className='py-2 pr-4'>Сумма</th>
@@ -499,6 +513,7 @@ export default function ClientDetailPage() {
               <tbody>
                 {d.consultations.map((c) => (
                   <tr key={c.id} className='border-t border-gray-100 align-top'>
+                    <td className='py-2 pr-4 font-mono text-xs whitespace-nowrap text-gray-400 select-all'>{c.id}</td>
                     <td className='py-2 pr-4 whitespace-nowrap text-gray-500'>{fmtDateTime(c.scheduled_at)}</td>
                     <td className='py-2 pr-4 text-gray-500'>{CONSULT_STATUS_LABEL[c.status] || c.status}</td>
                     <td className='py-2 pr-4 whitespace-nowrap'>{fmtMoney(c.price)}</td>
