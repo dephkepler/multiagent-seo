@@ -12,6 +12,13 @@ type Store interface {
 	// remember instead of copying a Client ID.
 	SearchClients(ctx context.Context, query string) ([]Client, error)
 	SetClientTelegram(ctx context.Context, clientID string, chatID int64, telegramName string) error
+	// UpsertClient creates a client if none exists for this phone, or just
+	// touches last_seen_at (and fills in name only if it was blank) if one
+	// already does — same idempotent-by-phone pattern webleads.ResolveClient
+	// uses, exposed here because /book and /case need the resulting Client
+	// row immediately (not just its id) to hand a Client ID staff never had
+	// to know in the first place.
+	UpsertClient(ctx context.Context, name, phone string) (Client, error)
 	// SetClientEmail sets a single field — unlike UpdateClient, which
 	// overwrites the whole card. The self-service intake flow only ever
 	// learns an email (name/phone go through webleads.ResolveClient

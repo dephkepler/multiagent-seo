@@ -61,6 +61,23 @@ func (r *ConsultationRepository) SearchClients(ctx context.Context, query string
 	return out, nil
 }
 
+func (r *ConsultationRepository) UpsertClient(ctx context.Context, name, phone string) (consultations.Client, error) {
+	const q = `INSERT INTO clients (phone, name)
+		VALUES (@phone, @name)
+		ON CONFLICT (phone) DO UPDATE SET
+			last_seen_at = now(),
+			name = CASE WHEN @name = '' THEN clients.name ELSE @name END
+		RETURNING id, name, phone, coalesce(telegram_name, '')`
+
+	var c consultations.Client
+	err := r.db.QueryRow(ctx, q, pgx.NamedArgs{"phone": phone, "name": name}).
+		Scan(&c.ID, &c.Name, &c.Phone, &c.TelegramName)
+	if err != nil {
+		return consultations.Client{}, fmt.Errorf("upsert client %q: %w", phone, err)
+	}
+	return c, nil
+}
+
 func (r *ConsultationRepository) SetClientTelegram(ctx context.Context, clientID string, chatID int64, telegramName string) error {
 	const q = `UPDATE clients SET telegram_chat_id = @chat_id, telegram_name = @telegram_name WHERE id = @id`
 	tag, err := r.db.Exec(ctx, q, pgx.NamedArgs{"chat_id": chatID, "telegram_name": telegramName, "id": clientID})

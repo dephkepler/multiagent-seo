@@ -60,7 +60,16 @@ type flow struct {
 	request     requestDraft
 	kase        caseDraft
 	pay         payDraft
+	newClient   newClientDraft
 	creategroup creategroupDraft
+}
+
+// newClientDraft holds what resolveClientOrCreate already knows (the typed
+// name, and which flow to resume) while its "*_new_phone" step waits on a
+// phone number to actually create the row.
+type newClientDraft struct {
+	name string
+	mode clientLookupMode
 }
 
 // payDraft holds the Case ID while /pay's wizard waits on the amount —
@@ -308,7 +317,7 @@ func (b *AdminBot) handle(ctx context.Context, update tgbotapi.Update) {
 		arg := strings.TrimSpace(strings.TrimPrefix(text, "/book"))
 		if arg == "" {
 			b.flows[userID] = &flow{step: "book_client_id"}
-			b.send(ctx, chatID, "Введіть Client ID:")
+			b.send(ctx, chatID, "Введіть Client ID, ім'я або телефон клієнта (якщо не знайдеться — запропоную завести нового):")
 			return
 		}
 		b.startBooking(ctx, chatID, userID, arg)
@@ -347,7 +356,7 @@ func (b *AdminBot) handle(ctx context.Context, update tgbotapi.Update) {
 		arg := strings.TrimSpace(strings.TrimPrefix(text, "/case"))
 		if arg == "" {
 			b.flows[userID] = &flow{step: "case_client_id"}
-			b.send(ctx, chatID, "Введіть Client ID:")
+			b.send(ctx, chatID, "Введіть Client ID, ім'я або телефон клієнта (якщо не знайдеться — запропоную завести нового):")
 			return
 		}
 		b.startCase(ctx, chatID, userID, arg)
@@ -478,6 +487,15 @@ func (b *AdminBot) handle(ctx context.Context, update tgbotapi.Update) {
 
 	case "case_client_id":
 		b.startCase(ctx, chatID, userID, text)
+
+	case "book_new_phone", "case_new_phone":
+		client, err := b.store.UpsertClient(ctx, fl.newClient.name, domainleads.NormalizePhone(text))
+		if err != nil {
+			b.send(ctx, chatID, "Не вдалося створити клієнта, спробуйте ще раз.")
+			b.log.ErrorContext(ctx, "telegram: create client failed", "err", err)
+			return
+		}
+		b.continueWithClient(ctx, chatID, userID, client, fl.newClient.mode)
 
 	case "case_fee":
 		amount, err := parseAmount(text)
@@ -810,18 +828,8 @@ func requestPage(wantsBooking bool) string {
 	return "Telegram-бот: анкета"
 }
 
-func (b *AdminBot) startCase(ctx context.Context, chatID, userID int64, clientID string) {
-	client, err := b.store.FindClient(ctx, clientID)
-	if err != nil {
-		b.flows[userID] = &flow{step: "case_client_id"}
-		b.send(ctx, chatID, "Клієнта не знайдено. Введіть Client ID ще раз:")
-		return
-	}
-	b.flows[userID] = &flow{step: "case_fee", kase: caseDraft{client: client}}
-	b.send(ctx, chatID, fmt.Sprintf(
-		"Клієнт: %s (%s). Введіть суму договору в грн (наприклад 15000):",
-		client.Name, client.Phone,
-	))
+func (b *AdminBot) startCase(ctx context.Context, chatID, userID int64, query string) {
+	b.resolveClientOrCreate(ctx, chatID, userID, query, lookupForCase)
 }
 
 // sendCaseAdvocatePicker replaces the old "type the advocate's full name"
@@ -1001,18 +1009,97 @@ func (b *AdminBot) deactivateAdvocate(ctx context.Context, cb *tgbotapi.Callback
 	b.editCallbackMessage(ctx, cb, "Деактивовано ✅ (старі справи не змінились)")
 }
 
-func (b *AdminBot) startBooking(ctx context.Context, chatID, userID int64, clientID string) {
-	client, err := b.store.FindClient(ctx, clientID)
-	if err != nil {
-		b.flows[userID] = &flow{step: "book_client_id"}
-		b.send(ctx, chatID, "Клієнта не знайдено. Введіть Client ID ще раз:")
+func (b *AdminBot) startBooking(ctx context.Context, chatID, userID int64, query string) {
+	b.resolveClientOrCreate(ctx, chatID, userID, query, lookupForBooking)
+}
+
+// clientLookupMode picks what happens once resolveClientOrCreate has a
+// Client in hand — see continueWithClient.
+type clientLookupMode string
+
+const (
+	lookupForBooking clientLookupMode = "book"
+	lookupForCase    clientLookupMode = "case"
+)
+
+// resolveClientOrCreate is /book's and /case's shared first step — staff no
+// longer needs a Client ID on hand: an exact id still works (fast path, the
+// only thing this used to accept), otherwise the input is treated as a
+// name/phone search (see /client's search), and if nothing matches at all,
+// offers to create a brand-new client on the spot. That covers "old"
+// clients who predate this system and never got an id staff can quote.
+func (b *AdminBot) resolveClientOrCreate(ctx context.Context, chatID, userID int64, query string, mode clientLookupMode) {
+	if client, err := b.store.FindClient(ctx, query); err == nil {
+		b.continueWithClient(ctx, chatID, userID, client, mode)
 		return
 	}
-	b.flows[userID] = &flow{step: "book_date", book: bookDraft{client: client}}
-	b.send(ctx, chatID, fmt.Sprintf(
-		"Клієнт: %s (%s). Введіть дату консультації (наприклад 29.07.2026):",
-		client.Name, client.Phone,
-	))
+
+	matches, err := b.store.SearchClients(ctx, query)
+	if err != nil {
+		b.log.ErrorContext(ctx, "telegram: resolve client: search failed", "err", err)
+		b.send(ctx, chatID, "Помилка пошуку, спробуйте ще раз.")
+		return
+	}
+	if len(matches) == 0 {
+		b.flows[userID] = &flow{step: string(mode) + "_new_phone", newClient: newClientDraft{name: query, mode: mode}}
+		b.send(ctx, chatID, fmt.Sprintf("Клієнта не знайдено. Створити нового на ім'я «%s»? Введіть телефон:", query))
+		return
+	}
+
+	rows := make([][]tgbotapi.InlineKeyboardButton, 0, len(matches))
+	for _, c := range matches {
+		label := c.Name
+		if label == "" {
+			label = c.TelegramName
+		}
+		if c.Phone != "" {
+			label += " (" + c.Phone + ")"
+		}
+		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(label, "clientpick:"+string(mode)+":"+c.ID),
+		))
+	}
+	msg := tgbotapi.NewMessage(chatID, "Кілька збігів, оберіть клієнта:")
+	msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(rows...)
+	if _, err := b.bot.Send(msg); err != nil {
+		b.log.ErrorContext(ctx, "telegram: send client picker failed", "err", err)
+	}
+}
+
+// continueWithClient starts whichever flow mode called for once a Client
+// is in hand — same two prompts /book and /case already sent, just no
+// longer requiring staff to have found the client's id themselves first.
+func (b *AdminBot) continueWithClient(ctx context.Context, chatID, userID int64, client consultations.Client, mode clientLookupMode) {
+	switch mode {
+	case lookupForBooking:
+		b.flows[userID] = &flow{step: "book_date", book: bookDraft{client: client}}
+		b.send(ctx, chatID, fmt.Sprintf(
+			"Клієнт: %s (%s). Введіть дату консультації (наприклад 29.07.2026):",
+			client.Name, client.Phone,
+		))
+	case lookupForCase:
+		b.flows[userID] = &flow{step: "case_fee", kase: caseDraft{client: client}}
+		b.send(ctx, chatID, fmt.Sprintf(
+			"Клієнт: %s (%s). Введіть суму договору в грн (наприклад 15000):",
+			client.Name, client.Phone,
+		))
+	}
+}
+
+// pickClientForFlow is the picker's tap handler — resolveClientOrCreate's
+// "кілька збігів" case, when more than one search match came back.
+func (b *AdminBot) pickClientForFlow(ctx context.Context, cb *tgbotapi.CallbackQuery, mode clientLookupMode, clientID string) {
+	client, err := b.store.FindClient(ctx, clientID)
+	if err != nil {
+		b.log.WarnContext(ctx, "telegram: pick client: find client failed", "client_id", clientID, "err", err)
+		b.answerCallback(ctx, cb.ID, "Клієнта не знайдено")
+		return
+	}
+	b.answerCallback(ctx, cb.ID, "")
+	b.editCallbackMessage(ctx, cb, "Клієнт: "+client.Name)
+	if cb.Message != nil {
+		b.continueWithClient(ctx, cb.Message.Chat.ID, cb.From.ID, client, mode)
+	}
 }
 
 func (b *AdminBot) finishBooking(ctx context.Context, chatID, userID int64, draft bookDraft, caseNote string) {
@@ -1123,6 +1210,13 @@ func (b *AdminBot) handleCallback(ctx context.Context, cb *tgbotapi.CallbackQuer
 		b.pickCaseAdvocate(ctx, cb, rest)
 	case "clinfo":
 		b.showClientInfo(ctx, cb, rest)
+	case "clientpick":
+		mode, clientID, ok := strings.Cut(rest, ":")
+		if !ok {
+			b.answerCallback(ctx, cb.ID, "")
+			return
+		}
+		b.pickClientForFlow(ctx, cb, clientLookupMode(mode), clientID)
 	default:
 		b.answerCallback(ctx, cb.ID, "")
 	}
