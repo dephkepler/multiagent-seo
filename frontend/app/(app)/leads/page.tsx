@@ -662,11 +662,32 @@ const WEEKDAY_ORDER = ['1', '2', '3', '4', '5', '6', '7']
 // ChartTooltip replaces the native `title` attribute on a bar/column —
 // `title` only appears after a slow, motionless hover and is easy to miss
 // entirely (that's what "hovering shows nothing" turned out to be).
-function ChartTooltip({ content, className, children }: { content: React.ReactNode; className?: string; children: React.ReactNode }) {
+// CSS `:hover` alone (group-hover/tip below) covers mouse/trackpad, but
+// touch has no hover state at all — nothing ever showed on a phone. `open`/
+// `onToggle` are owned by the chart above so tapping one bar closes
+// whichever other one was open, instead of every tapped tooltip stacking up.
+function ChartTooltip({
+  content,
+  className,
+  open,
+  onToggle,
+  children,
+}: {
+  content: React.ReactNode
+  className?: string
+  open: boolean
+  onToggle: () => void
+  children: React.ReactNode
+}) {
   return (
-    <div className={cx('group/tip relative', className)}>
+    <div className={cx('group/tip relative', className)} onClick={onToggle}>
       {children}
-      <div className='pointer-events-none absolute bottom-full left-1/2 z-10 mb-1.5 -translate-x-1/2 rounded-md bg-gray-900 px-2 py-1 text-xs whitespace-nowrap text-white opacity-0 shadow-lg transition-opacity group-hover/tip:opacity-100'>
+      <div
+        className={cx(
+          'pointer-events-none absolute bottom-full left-1/2 z-10 mb-1.5 -translate-x-1/2 rounded-md bg-gray-900 px-2 py-1 text-xs whitespace-nowrap text-white opacity-0 shadow-lg transition-opacity group-hover/tip:opacity-100',
+          open && 'opacity-100'
+        )}
+      >
         {content}
       </div>
     </div>
@@ -690,6 +711,7 @@ function WeekdayChart({ rows }: { rows: { key: string; count: number }[] }) {
   const values = WEEKDAY_ORDER.map((d) => byDay.get(d) ?? 0)
   const max = Math.max(1, ...values)
   const total = values.reduce((s, v) => s + v, 0)
+  const [active, setActive] = useState<string | null>(null)
   if (total === 0) return <div className='text-sm text-gray-400'>Нет данных за период.</div>
 
   return (
@@ -701,6 +723,8 @@ function WeekdayChart({ rows }: { rows: { key: string; count: number }[] }) {
           <ChartTooltip
             key={d}
             className='flex min-w-0 flex-1 flex-col items-center gap-1'
+            open={active === d}
+            onToggle={() => setActive((a) => (a === d ? null : d))}
             content={
               <span>
                 <span className='font-semibold'>{fmtLeads(value)}</span>
@@ -724,6 +748,7 @@ function WeekdayChart({ rows }: { rows: { key: string; count: number }[] }) {
 }
 
 function TrendChart({ trend, groupBy }: { trend: { bucket: string; leads: number; consultations: number }[]; groupBy: string }) {
+  const [active, setActive] = useState<string | null>(null)
   if (!trend.length) return <div className='text-sm text-gray-400'>Нет данных за период.</div>
   const max = Math.max(1, ...trend.map((t) => Math.max(t.leads, t.consultations)))
   const step = Math.max(1, Math.ceil(trend.length / 14))
@@ -746,6 +771,8 @@ function TrendChart({ trend, groupBy }: { trend: { bucket: string; leads: number
           <ChartTooltip
             key={t.bucket}
             className='flex min-w-0 flex-1 items-end justify-center gap-0.5'
+            open={active === t.bucket}
+            onToggle={() => setActive((a) => (a === t.bucket ? null : t.bucket))}
             content={
               <div className='space-y-1'>
                 <div className='text-gray-300'>{bucketLabel(t.bucket, groupBy)}</div>
@@ -781,6 +808,7 @@ function RevenueTrendChart({
   trend: { bucket: string; revenue_earned: number }[]
   groupBy: string
 }) {
+  const [active, setActive] = useState<string | null>(null)
   if (!trend.length) return <div className='text-sm text-gray-400'>Нет данных за период.</div>
   const max = Math.max(1, ...trend.map((t) => t.revenue_earned))
   const step = Math.max(1, Math.ceil(trend.length / 14))
@@ -792,6 +820,8 @@ function RevenueTrendChart({
           <ChartTooltip
             key={t.bucket}
             className='flex min-w-0 flex-1 items-end justify-center'
+            open={active === t.bucket}
+            onToggle={() => setActive((a) => (a === t.bucket ? null : t.bucket))}
             content={
               <div className='space-y-1'>
                 <div className='text-gray-300'>{bucketLabel(t.bucket, groupBy)}</div>
@@ -825,6 +855,7 @@ function TrafficTrendChart({
   trend: { bucket: string; site_sessions: number; organic_sessions: number }[]
   groupBy: string
 }) {
+  const [active, setActive] = useState<string | null>(null)
   if (!trend.length) return <div className='text-sm text-gray-400'>Нет данных за период.</div>
   const max = Math.max(1, ...trend.map((t) => t.site_sessions))
   const step = Math.max(1, Math.ceil(trend.length / 14))
@@ -844,6 +875,8 @@ function TrafficTrendChart({
           <ChartTooltip
             key={t.bucket}
             className='flex min-w-0 flex-1 items-end justify-center gap-0.5'
+            open={active === t.bucket}
+            onToggle={() => setActive((a) => (a === t.bucket ? null : t.bucket))}
             content={
               <div className='space-y-1'>
                 <div className='text-gray-300'>{bucketLabel(t.bucket, groupBy)}</div>
