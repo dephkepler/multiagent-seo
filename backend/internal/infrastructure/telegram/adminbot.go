@@ -59,7 +59,15 @@ type flow struct {
 	book        bookDraft
 	request     requestDraft
 	kase        caseDraft
+	pay         payDraft
 	creategroup creategroupDraft
+}
+
+// payDraft holds the Case ID while /pay's wizard waits on the amount —
+// same two-step shape as /book and /case, needed because unlike /invoice
+// (amount alone), /pay needs a Case ID from staff first.
+type payDraft struct {
+	caseID string
 }
 
 type caseDraft struct {
@@ -327,6 +335,11 @@ func (b *AdminBot) handle(ctx context.Context, update tgbotapi.Update) {
 	// otherwise and this branch would never fire.
 	case strings.HasPrefix(text, "/caseclose"):
 		caseID := strings.TrimSpace(strings.TrimPrefix(text, "/caseclose"))
+		if caseID == "" {
+			b.flows[userID] = &flow{step: "caseclose_id"}
+			b.send(ctx, chatID, "Введіть Case ID:")
+			return
+		}
 		b.handleCaseClose(ctx, chatID, caseID)
 		return
 
@@ -341,7 +354,13 @@ func (b *AdminBot) handle(ctx context.Context, update tgbotapi.Update) {
 		return
 
 	case strings.HasPrefix(text, "/pay"):
-		b.handlePay(ctx, chatID, strings.TrimSpace(strings.TrimPrefix(text, "/pay")))
+		arg := strings.TrimSpace(strings.TrimPrefix(text, "/pay"))
+		if arg == "" {
+			b.flows[userID] = &flow{step: "pay_case_id"}
+			b.send(ctx, chatID, "Введіть Case ID:")
+			return
+		}
+		b.handlePay(ctx, chatID, arg)
 		return
 
 	case strings.HasPrefix(text, "/creategroup"):
@@ -383,6 +402,24 @@ func (b *AdminBot) handle(ctx context.Context, update tgbotapi.Update) {
 		}
 		delete(b.flows, userID)
 		b.sendInvoice(ctx, chatID, amount)
+
+	case "pay_case_id":
+		fl.pay.caseID = text
+		fl.step = "pay_amount"
+		b.send(ctx, chatID, "Введіть суму в грн (наприклад 1500):")
+
+	case "pay_amount":
+		if _, err := parseAmount(text); err != nil {
+			b.send(ctx, chatID, "Не розпізнав суму. Введіть число, наприклад 1500.")
+			return
+		}
+		caseID := fl.pay.caseID
+		delete(b.flows, userID)
+		b.handlePay(ctx, chatID, caseID+" "+text)
+
+	case "caseclose_id":
+		delete(b.flows, userID)
+		b.handleCaseClose(ctx, chatID, text)
 
 	case "consult_name":
 		fl.consult.name = text
