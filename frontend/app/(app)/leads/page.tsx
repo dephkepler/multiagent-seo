@@ -659,6 +659,32 @@ const WEEKDAY_ORDER = ['1', '2', '3', '4', '5', '6', '7']
 // Fixed Mon–Sun order, not sorted by count like the other bar lists here —
 // this is a calendar, not a ranking, so re-sorting it would make the shape
 // unreadable (that's the whole point of asking "which day").
+// ChartTooltip replaces the native `title` attribute on a bar/column —
+// `title` only appears after a slow, motionless hover and is easy to miss
+// entirely (that's what "hovering shows nothing" turned out to be).
+function ChartTooltip({ content, className, children }: { content: React.ReactNode; className?: string; children: React.ReactNode }) {
+  return (
+    <div className={cx('group/tip relative', className)}>
+      {children}
+      <div className='pointer-events-none absolute bottom-full left-1/2 z-10 mb-1.5 -translate-x-1/2 rounded-md bg-gray-900 px-2 py-1 text-xs whitespace-nowrap text-white opacity-0 shadow-lg transition-opacity group-hover/tip:opacity-100'>
+        {content}
+      </div>
+    </div>
+  )
+}
+
+// SeriesRow keys a tooltip line with a short stroke of the series color
+// (not a filled box — at tooltip density a box is data-weight ink doing a
+// label's job) with the value leading, bold, ahead of the muted color key.
+function SeriesRow({ color, value }: { color: string; value: string }) {
+  return (
+    <div className='flex items-center gap-1.5'>
+      <span className={cx('h-0.5 w-2.5 shrink-0', color)} />
+      <span className='font-semibold tabular-nums'>{value}</span>
+    </div>
+  )
+}
+
 function WeekdayChart({ rows }: { rows: { key: string; count: number }[] }) {
   const byDay = new Map(rows.map((r) => [r.key, r.count]))
   const values = WEEKDAY_ORDER.map((d) => byDay.get(d) ?? 0)
@@ -672,17 +698,25 @@ function WeekdayChart({ rows }: { rows: { key: string; count: number }[] }) {
         const value = values[i]
         const pct = total ? Math.round((value / total) * 100) : 0
         return (
-          <div key={d} className='flex min-w-0 flex-1 flex-col items-center gap-1'>
+          <ChartTooltip
+            key={d}
+            className='flex min-w-0 flex-1 flex-col items-center gap-1'
+            content={
+              <span>
+                <span className='font-semibold'>{fmtLeads(value)}</span>
+                <span className='text-gray-400'> ({pct}%)</span>
+              </span>
+            }
+          >
             <div className='text-xs text-gray-500 tabular-nums'>{value}</div>
             <div className='flex h-20 w-full items-end'>
               <div
                 className='w-full rounded-t bg-emerald-500'
-                title={`${WEEKDAY_LABEL[d]}: ${fmtLeads(value)} (${pct}%)`}
                 style={{ height: `${Math.max(value > 0 ? 4 : 0, (value / max) * 100)}%` }}
               />
             </div>
             <div className='text-xs text-gray-400'>{WEEKDAY_LABEL[d]}</div>
-          </div>
+          </ChartTooltip>
         )
       })}
     </div>
@@ -709,14 +743,20 @@ function TrendChart({ trend, groupBy }: { trend: { bucket: string; leads: number
           size each column to its content instead of stretching it, collapsing the bars. */}
       <div className='flex h-40 gap-1 border-b border-gray-200'>
         {trend.map((t) => (
-          <div
+          <ChartTooltip
             key={t.bucket}
             className='flex min-w-0 flex-1 items-end justify-center gap-0.5'
-            title={`${bucketLabel(t.bucket, groupBy)}: ${fmtLeads(t.leads)}, ${fmtConsultations(t.consultations)}`}
+            content={
+              <div className='space-y-1'>
+                <div className='text-gray-300'>{bucketLabel(t.bucket, groupBy)}</div>
+                <SeriesRow color='bg-emerald-500' value={fmtLeads(t.leads)} />
+                <SeriesRow color='bg-sky-500' value={fmtConsultations(t.consultations)} />
+              </div>
+            }
           >
             <div className='w-1/2 max-w-[10px] rounded-t bg-emerald-500' style={{ height: `${Math.max(2, (t.leads / max) * 100)}%` }} />
             <div className='w-1/2 max-w-[10px] rounded-t bg-sky-500' style={{ height: `${Math.max(2, (t.consultations / max) * 100)}%` }} />
-          </div>
+          </ChartTooltip>
         ))}
       </div>
       <div className='mt-1 flex gap-1'>
@@ -749,13 +789,18 @@ function RevenueTrendChart({
     <div>
       <div className='flex h-32 gap-1 border-b border-gray-200'>
         {trend.map((t) => (
-          <div
+          <ChartTooltip
             key={t.bucket}
             className='flex min-w-0 flex-1 items-end justify-center'
-            title={`${bucketLabel(t.bucket, groupBy)}: ${fmtMoney(t.revenue_earned)}`}
+            content={
+              <div className='space-y-1'>
+                <div className='text-gray-300'>{bucketLabel(t.bucket, groupBy)}</div>
+                <div className='font-semibold tabular-nums'>{fmtMoney(t.revenue_earned)}</div>
+              </div>
+            }
           >
             <div className='w-3/5 max-w-[18px] rounded-t bg-emerald-500' style={{ height: `${Math.max(2, (t.revenue_earned / max) * 100)}%` }} />
-          </div>
+          </ChartTooltip>
         ))}
       </div>
       <div className='mt-1 flex gap-1'>
@@ -796,14 +841,20 @@ function TrafficTrendChart({
       </div>
       <div className='flex h-40 gap-1 border-b border-gray-200'>
         {trend.map((t) => (
-          <div
+          <ChartTooltip
             key={t.bucket}
             className='flex min-w-0 flex-1 items-end justify-center gap-0.5'
-            title={`${bucketLabel(t.bucket, groupBy)}: ${t.site_sessions} визитов, ${t.organic_sessions} из поиска`}
+            content={
+              <div className='space-y-1'>
+                <div className='text-gray-300'>{bucketLabel(t.bucket, groupBy)}</div>
+                <SeriesRow color='bg-sky-500' value={`${t.site_sessions} визитов`} />
+                <SeriesRow color='bg-emerald-500' value={`${t.organic_sessions} из поиска`} />
+              </div>
+            }
           >
             <div className='w-1/2 max-w-[10px] rounded-t bg-sky-500' style={{ height: `${Math.max(2, (t.site_sessions / max) * 100)}%` }} />
             <div className='w-1/2 max-w-[10px] rounded-t bg-emerald-500' style={{ height: `${Math.max(2, (t.organic_sessions / max) * 100)}%` }} />
-          </div>
+          </ChartTooltip>
         ))}
       </div>
       <div className='mt-1 flex gap-1'>
