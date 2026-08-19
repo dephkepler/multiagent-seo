@@ -999,6 +999,23 @@ func (b *AdminBot) searchForGroup(ctx context.Context, chatID int64, query strin
 // client's own card (IDs to reuse in other commands) instead of feeding
 // into the group-creation flow.
 func (b *AdminBot) searchClientInfo(ctx context.Context, chatID int64, query string) {
+	query = strings.TrimSpace(query)
+
+	// Staff often already have a Client ID on hand — copied from a lead
+	// notification, a booking confirmation, another card — rather than a
+	// name to type. Try it as an exact id first; a query that isn't one
+	// simply won't match here and falls through to the search below.
+	if client, err := b.store.FindClient(ctx, query); err == nil {
+		card, err := b.buildFullClientCard(ctx, client)
+		if err != nil {
+			b.log.ErrorContext(ctx, "telegram: client info: build card failed", "client_id", client.ID, "err", err)
+			b.send(ctx, chatID, "Помилка отримання справ.")
+			return
+		}
+		b.sendHTML(ctx, chatID, card)
+		return
+	}
+
 	clients, err := b.store.SearchClients(ctx, query)
 	if err != nil {
 		b.log.ErrorContext(ctx, "telegram: client info: search clients failed", "err", err)
@@ -1041,21 +1058,33 @@ func (b *AdminBot) showClientInfo(ctx context.Context, cb *tgbotapi.CallbackQuer
 		b.answerCallback(ctx, cb.ID, "Клієнта не знайдено")
 		return
 	}
-
-	// No consultation yet is the normal case for a client who only just
-	// left a request — not an error worth logging.
-	latest, err := b.store.LatestConsultation(ctx, clientID)
-	hasConsultation := err == nil
-
-	clientCases, err := b.cases.ListByClient(ctx, clientID)
+	card, err := b.buildFullClientCard(ctx, client)
 	if err != nil {
-		b.log.ErrorContext(ctx, "telegram: client info: list cases failed", "client_id", clientID, "err", err)
+		b.log.ErrorContext(ctx, "telegram: client info: build card failed", "client_id", clientID, "err", err)
 		b.answerCallback(ctx, cb.ID, "Помилка отримання справ")
 		return
 	}
 
 	b.answerCallback(ctx, cb.ID, "")
-	b.editCallbackMessageHTML(ctx, cb, buildClientInfoCard(client, latest, hasConsultation, clientCases, b.adminURL))
+	b.editCallbackMessageHTML(ctx, cb, card)
+}
+
+// buildFullClientCard fetches the rest of what buildClientInfoCard needs
+// (latest consultation, every case) and renders the card — shared by the
+// picker (showClientInfo) and the exact-Client-ID fast path
+// (searchClientInfo), which don't share a caller further up.
+func (b *AdminBot) buildFullClientCard(ctx context.Context, client consultations.Client) (string, error) {
+	// No consultation yet is the normal case for a client who only just
+	// left a request — not an error worth logging.
+	latest, err := b.store.LatestConsultation(ctx, client.ID)
+	hasConsultation := err == nil
+
+	clientCases, err := b.cases.ListByClient(ctx, client.ID)
+	if err != nil {
+		return "", fmt.Errorf("list cases for client %q: %w", client.ID, err)
+	}
+
+	return buildClientInfoCard(client, latest, hasConsultation, clientCases, b.adminURL), nil
 }
 
 // handleCreateGroupCallback drives /creategroup's pick client → pick
