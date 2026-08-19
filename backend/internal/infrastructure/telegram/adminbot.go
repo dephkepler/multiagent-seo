@@ -869,16 +869,16 @@ func (b *AdminBot) finishCase(ctx context.Context, chatID, userID int64, draft c
 		return
 	}
 
-	b.send(ctx, chatID, fmt.Sprintf(
-		"Готово. Справа %s (%s, %s), сума %s грн.\n\nЩоб додати оплату: /pay %s <сума>\nЩоб позначити виконаною: /caseclose %s",
-		saved.ID, draft.advocateName, draft.category, formatAmount(draft.fee), saved.ID, saved.ID,
+	b.sendHTML(ctx, chatID, fmt.Sprintf(
+		"Готово. Справа <code>%s</code> (%s, %s), сума %s грн.\n\nЩоб додати оплату: /pay <code>%s</code> &lt;сума&gt;\nЩоб позначити виконаною: /caseclose <code>%s</code>",
+		saved.ID, html.EscapeString(draft.advocateName), html.EscapeString(draft.category), formatAmount(draft.fee), saved.ID, saved.ID,
 	))
 }
 
 func (b *AdminBot) handlePay(ctx context.Context, chatID int64, arg string) {
 	parts := strings.Fields(arg)
 	if len(parts) != 2 {
-		b.send(ctx, chatID, "Формат: /pay <Case ID> <сума>, наприклад /pay 3f0b8beb-23c2-4ad4-90fb-48064c9359d4 5000")
+		b.sendHTML(ctx, chatID, "Формат: /pay &lt;Case ID&gt; &lt;сума&gt;, наприклад /pay <code>3f0b8beb-23c2-4ad4-90fb-48064c9359d4</code> 5000")
 		return
 	}
 	amount, err := parseAmount(parts[1])
@@ -983,7 +983,7 @@ func (b *AdminBot) finishBooking(ctx context.Context, chatID, userID int64, draf
 
 	scheduledAt, err := time.Parse("02.01.2006 15:04", draft.date+" "+draft.time)
 	if err != nil {
-		b.send(ctx, chatID, "Не розпізнав дату/час. Спробуйте ще раз: /book "+draft.client.ID)
+		b.sendHTML(ctx, chatID, "Не розпізнав дату/час. Спробуйте ще раз: /book <code>"+draft.client.ID+"</code>")
 		return
 	}
 
@@ -1540,7 +1540,7 @@ func buildClientInfoCard(client consultations.Client, latest consultations.Consu
 
 	fmt.Fprintf(&b, "\n\nСправи (%d):", len(clientCases))
 	if len(clientCases) == 0 {
-		fmt.Fprintf(&b, "\nще нема — /case %s", client.ID)
+		fmt.Fprintf(&b, "\nще нема — /case <code>%s</code>", client.ID)
 	}
 	for _, c := range clientCases {
 		advocate := c.AdvocateName
