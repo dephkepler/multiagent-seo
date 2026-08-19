@@ -147,13 +147,15 @@ export default function VaultPage() {
                     value={entry.username || '—'}
                     onCopy={entry.username ? () => copy(entry.username, 'Login') : undefined}
                   />
-                  <Field
-                    label='Password'
-                    value={revealed.has(entry.id) ? entry.password : '•'.repeat(Math.max(entry.password.length, 8))}
-                    onCopy={() => copy(entry.password, 'Password')}
-                    onToggle={() => toggleReveal(entry.id)}
-                    revealed={revealed.has(entry.id)}
-                  />
+                  {entry.password && (
+                    <Field
+                      label='Password'
+                      value={revealed.has(entry.id) ? entry.password : '•'.repeat(Math.max(entry.password.length, 8))}
+                      onCopy={() => copy(entry.password, 'Password')}
+                      onToggle={() => toggleReveal(entry.id)}
+                      revealed={revealed.has(entry.id)}
+                    />
+                  )}
                 </div>
 
                 {entry.notes && <p className='whitespace-pre-wrap text-xs text-gray-500'>{entry.notes}</p>}
@@ -261,7 +263,7 @@ function EntryFormFields({
         </div>
         <div>
           <Label>Password</Label>
-          <Input value={form.password} onChange={(e) => set('password', e.target.value)} className='font-mono' required />
+          <Input value={form.password} onChange={(e) => set('password', e.target.value)} className='font-mono' />
         </div>
       </div>
       <div>

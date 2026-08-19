@@ -68,7 +68,7 @@ func (h *VaultHandler) CreateVaultEntry(w http.ResponseWriter, r *http.Request) 
 		Title:     body.Title,
 		URL:       strPtrValue(body.Url),
 		Username:  strPtrValue(body.Username),
-		Password:  body.Password,
+		Password:  strPtrValue(body.Password),
 		Notes:     strPtrValue(body.Notes),
 		CreatedBy: createdBy,
 	})

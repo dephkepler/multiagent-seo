@@ -1808,7 +1808,7 @@ components:
 
     CreateVaultEntryRequest:
       type: object
-      required: [ title, password ]
+      required: [ title ]
       properties:
         title:
           type: string
@@ -1820,8 +1820,6 @@ components:
           type: string
         password:
           type: string
-          x-oapi-codegen-extra-tags:
-            validate: "required"
         notes:
           type: string
 
