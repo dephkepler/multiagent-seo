@@ -66,6 +66,33 @@ func (r *CaseRepository) Get(ctx context.Context, caseID string) (cases.Case, er
 	return c, nil
 }
 
+func (r *CaseRepository) ListByClient(ctx context.Context, clientID string) ([]cases.Case, error) {
+	const q = `SELECT id, client_id, coalesce(consultation_id::text, ''), coalesce(advocate_id::text, ''), advocate_name, category, fee, paid_amount, status, description, created_by, created_at
+		FROM cases WHERE client_id = @client_id
+		ORDER BY created_at DESC`
+
+	rows, err := r.db.Query(ctx, q, pgx.NamedArgs{"client_id": clientID})
+	if err != nil {
+		return nil, fmt.Errorf("list cases for client %q: %w", clientID, err)
+	}
+	defer rows.Close()
+
+	var out []cases.Case
+	for rows.Next() {
+		var c cases.Case
+		if err := rows.Scan(
+			&c.ID, &c.ClientID, &c.ConsultationID, &c.AdvocateID, &c.AdvocateName, &c.Category, &c.Fee, &c.PaidAmount, &c.Status, &c.Description, &c.CreatedBy, &c.CreatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("list cases for client %q: scan: %w", clientID, err)
+		}
+		out = append(out, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list cases for client %q: %w", clientID, err)
+	}
+	return out, nil
+}
+
 func (r *CaseRepository) AddPayment(ctx context.Context, caseID string, amount float64) (cases.Case, error) {
 	const q = `UPDATE cases SET paid_amount = paid_amount + @amount WHERE id = @id
 		RETURNING id, client_id, coalesce(consultation_id::text, ''), coalesce(advocate_id::text, ''), advocate_name, category, fee, paid_amount, status, description, created_by, created_at`

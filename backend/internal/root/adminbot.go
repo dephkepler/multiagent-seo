@@ -63,6 +63,7 @@ func buildAdminBot(ctx context.Context, cfg config.Config, log *slog.Logger, poo
 	bot, err := telegram.NewAdminBot(
 		cfg.Telegram.BotToken,
 		cfg.Telegram.PaymentCard,
+		cfg.Server.AdminURL,
 		cfg.Telegram.AllowedUsers,
 		consultationRepo,
 		sheetSink,
