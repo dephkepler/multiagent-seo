@@ -1,17 +1,9 @@
-// Package leadstats aggregates the leads/clients/consultations tables into
-// the numbers the admin dashboard shows — counts, revenue, breakdown by
-// source page and by who booked the consultation. Read-only: nothing here
-// writes to those tables (see webleads and consultations for that).
+// Package leadstats aggregates leads/clients/consultations for the admin dashboard; read-only.
 package leadstats
 
 import "time"
 
-// Revenue is split by outcome, not just summed — a cancelled consultation's
-// price is not money the business has, so lumping it into one "Revenue"
-// number (as the first version of this package did) overstates it. Booked
-// is the full potential (every priced consultation regardless of status),
-// Earned is only completed ones, Lost is what cancelled/no_show ones would
-// have been worth.
+// revenue split by outcome (Booked/Earned/Lost) — summing all would count cancelled money as real.
 type Totals struct {
 	Leads         int64
 	Clients       int64
@@ -124,7 +116,13 @@ type Funnel struct {
 	// trickle of eventual conversions doesn't get diluted by the ones who
 	// never will. 0 when nobody in the cohort converted yet.
 	AvgDaysToConsult float64
-	AvgDaysToCase    float64
+	// AvgDaysConsultToCase is the gap between first consultation and first
+	// case, not lead and first case — named ToCase before, which read as
+	// "time from lead" like AvgDaysToConsult above it and was wrong; a
+	// client with no consultation on file isn't counted here at all (see
+	// the repository query), so this only covers the "consulted, then
+	// became a case" path.
+	AvgDaysConsultToCase float64
 }
 
 type Stats struct {

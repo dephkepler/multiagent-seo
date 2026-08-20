@@ -347,7 +347,7 @@ func (r *LeadStatsRepository) Funnel(ctx context.Context, from, to time.Time) (l
 	var f leadstats.Funnel
 	if err := r.db.QueryRow(ctx, q, pgx.NamedArgs{"from": from, "to": to}).Scan(
 		&f.CohortLeads, &f.ConsultedEver, &f.CasedEver,
-		&f.AvgDaysToConsult, &f.AvgDaysToCase,
+		&f.AvgDaysToConsult, &f.AvgDaysConsultToCase,
 	); err != nil {
 		return f, fmt.Errorf("funnel: %w", err)
 	}

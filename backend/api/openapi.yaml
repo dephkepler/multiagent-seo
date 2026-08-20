@@ -1487,7 +1487,7 @@ components:
         whose first-ever lead fell in the requested range; consulted_ever/
         cased_ever count them regardless of when the consultation/case
         happened, even long after the range ends.
-      required: [ cohort_leads, consulted_ever, cased_ever, avg_days_to_consult, avg_days_to_case ]
+      required: [ cohort_leads, consulted_ever, cased_ever, avg_days_to_consult, avg_days_consult_to_case ]
       properties:
         cohort_leads:
           type: integer
@@ -1500,8 +1500,10 @@ components:
           format: int64
         avg_days_to_consult:
           type: number
-        avg_days_to_case:
+          description: Average gap between first lead and first consultation, over clients who got one
+        avg_days_consult_to_case:
           type: number
+          description: Average gap between first consultation and first case, over clients who got both — not lead-to-case
 
     LeadStatsBucket:
       type: object

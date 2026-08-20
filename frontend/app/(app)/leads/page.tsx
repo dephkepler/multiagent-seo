@@ -49,7 +49,7 @@ interface LeadStats {
     consulted_ever: number
     cased_ever: number
     avg_days_to_consult: number
-    avg_days_to_case: number
+    avg_days_consult_to_case: number
   }
   by_weekday: { key: string; count: number }[]
 }
@@ -246,7 +246,7 @@ export default function LeadsPage() {
             consultations={data.funnel.consulted_ever}
             cases={data.funnel.cased_ever}
             daysToConsult={data.funnel.avg_days_to_consult}
-            daysToCase={data.funnel.avg_days_to_case}
+            daysToCase={data.funnel.avg_days_consult_to_case}
           />
 
           <GroupHeading title='Деньги' />
