@@ -2,11 +2,12 @@ package clientsegments
 
 import "context"
 
-// Repository reads facts (same read-only contract as leadstats) plus the
-// one write it owns: the manual segment override.
 type Repository interface {
 	ListActivity(ctx context.Context) ([]Activity, error)
-	// SetSegmentOverride pins clientID's segment to *segment, or clears the
-	// override and falls back to the calculated value when segment is nil.
+	// nil segment clears the override, falling back to the calculated value.
 	SetSegmentOverride(ctx context.Context, clientID string, segment *string) error
+	// idempotent (existing tag is fine); returns ErrNotFound if clientID doesn't exist.
+	AddTag(ctx context.Context, clientID, tag, createdBy string) error
+	// idempotent; unlike AddTag, a missing client here is not an error either.
+	RemoveTag(ctx context.Context, clientID, tag string) error
 }

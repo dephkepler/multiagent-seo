@@ -8,6 +8,7 @@ import (
 	openapi_types "github.com/oapi-codegen/runtime/types"
 
 	domain "multiagent-seo/internal/domain/clientsegments"
+	"multiagent-seo/internal/infrastructure/http/middleware"
 	"multiagent-seo/internal/infrastructure/http/problem"
 	"multiagent-seo/internal/infrastructure/http/response"
 	"multiagent-seo/internal/oapigen"
@@ -17,6 +18,8 @@ import (
 type clientSegmentsService interface {
 	List(ctx context.Context, filter domain.ListFilter) (domain.ClientList, error)
 	SetOverride(ctx context.Context, clientID string, segment *string) error
+	AddTag(ctx context.Context, clientID, tag, createdBy string) error
+	RemoveTag(ctx context.Context, clientID, tag string) error
 }
 
 type ClientSegmentsHandler struct {
@@ -106,11 +109,48 @@ func (h *ClientSegmentsHandler) SetClientSegmentOverride(w http.ResponseWriter, 
 	response.NoContent(w)
 }
 
+func (h *ClientSegmentsHandler) AddClientTag(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
+	if isNil(h.svc) {
+		problem.Write(w, http.StatusServiceUnavailable, "client segments unavailable")
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
+	var body oapigen.AddClientTagRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		log := logger.New(r.Context(), "handlers.clientsegments")
+		log.Debug().Err(err).Msg("decode add tag body")
+		problem.Write(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	// admin-panel identity; bot sets its own createdBy directly, bypassing this HTTP path
+	createdBy, _ := middleware.UserIDFromContext(r.Context())
+
+	if err := h.svc.AddTag(r.Context(), id.String(), body.Tag, createdBy); err != nil {
+		h.writeError(r.Context(), w, "add_client_tag", err)
+		return
+	}
+	response.NoContent(w)
+}
+
+func (h *ClientSegmentsHandler) RemoveClientTag(w http.ResponseWriter, r *http.Request, id openapi_types.UUID, tag string) {
+	if isNil(h.svc) {
+		problem.Write(w, http.StatusServiceUnavailable, "client segments unavailable")
+		return
+	}
+	if err := h.svc.RemoveTag(r.Context(), id.String(), tag); err != nil {
+		h.writeError(r.Context(), w, "remove_client_tag", err)
+		return
+	}
+	response.NoContent(w)
+}
+
 var clientSegmentsErrMap = newErrMap("handlers.clientsegments",
 	E(domain.ErrNotFound, http.StatusNotFound, "client not found"),
 	EMsg(domain.ErrInvalidSegment, http.StatusBadRequest),
-	EMsg(domain.ErrInvalidTag, http.StatusBadRequest),
 	EMsg(domain.ErrInvalidSort, http.StatusBadRequest),
+	EMsg(domain.ErrInvalidManualTag, http.StatusBadRequest),
 )
 
 func (h *ClientSegmentsHandler) writeError(ctx context.Context, w http.ResponseWriter, op string, err error) {
@@ -122,6 +162,10 @@ func toAPIClientSegment(s domain.ClientSegment) oapigen.ClientSegment {
 	if tags == nil {
 		tags = []string{} // encode as [], not null — Tags is a required field
 	}
+	manualTags := s.ManualTags
+	if manualTags == nil {
+		manualTags = []string{}
+	}
 	return oapigen.ClientSegment{
 		ClientId:     s.ClientID,
 		Name:         s.Name,
@@ -129,6 +173,7 @@ func toAPIClientSegment(s domain.ClientSegment) oapigen.ClientSegment {
 		Segment:      oapigen.Segment(s.Segment),
 		Overridden:   s.Overridden,
 		Tags:         tags,
+		ManualTags:   manualTags,
 		LastActivity: s.LastActivity,
 		CaseCount:    int64(s.CaseCount),
 		CaseFee:      float32(s.CaseFee),

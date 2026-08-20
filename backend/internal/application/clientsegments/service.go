@@ -7,13 +7,12 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	domain "multiagent-seo/internal/domain/clientsegments"
 )
 
-// defaultLimit matches the page size the /clients UI used client-side
-// before pagination moved to the backend — keeping it means the page looks
-// unchanged to staff even though the list is now server-paginated.
+// matches the old client-side page size so /clients looks unchanged to staff
 const defaultLimit = 25
 
 type Service struct {
@@ -24,26 +23,12 @@ func NewService(repo domain.Repository) *Service {
 	return &Service{repo: repo}
 }
 
-// List returns a filtered, sorted, paginated page of clients plus all-time
-// segment counts — no date range on the underlying data, unlike leadstats:
-// a client's funnel position is a snapshot of everything that's ever
-// happened to them, not something that makes sense sliced by period.
-//
-// Segment/Tag live only on the derived ClientSegment, not as DB columns
-// (see Derive), so filtering happens here in Go, after deriving every
-// client, rather than as SQL WHERE clauses the repository could push down.
-// Duplicating Derive's classification rules in SQL would be the same logic
-// maintained in two places and drifting apart — at today's data volume
-// (~700 clients, one query, no N+1) doing it here is simpler and still
-// cheap; if the table grows enough for this to matter, that's the moment
-// to reconsider, not before.
+// Segment/Tag come from Derive, not DB columns — filtering happens here in Go, not SQL.
 func (s *Service) List(ctx context.Context, filter domain.ListFilter) (domain.ClientList, error) {
 	if filter.Segment != "" && !domain.IsSegment(filter.Segment) {
 		return domain.ClientList{}, fmt.Errorf("clientsegments: list: %w: %q", domain.ErrInvalidSegment, filter.Segment)
 	}
-	if filter.Tag != "" && !domain.IsTag(filter.Tag) {
-		return domain.ClientList{}, fmt.Errorf("clientsegments: list: %w: %q", domain.ErrInvalidTag, filter.Tag)
-	}
+	// Tag isn't validated — manual tags are free text; unknown values just match nothing.
 	if filter.Sort != "" && filter.Sort != domain.SortActivity && filter.Sort != domain.SortLTV {
 		return domain.ClientList{}, fmt.Errorf("clientsegments: list: %w: %q", domain.ErrInvalidSort, filter.Sort)
 	}
@@ -73,7 +58,7 @@ func (s *Service) List(ctx context.Context, filter domain.ListFilter) (domain.Cl
 		if filter.Segment != "" && cs.Segment != filter.Segment {
 			continue
 		}
-		if filter.Tag != "" && !slices.Contains(cs.Tags, filter.Tag) {
+		if filter.Tag != "" && !slices.Contains(cs.Tags, filter.Tag) && !slices.Contains(cs.ManualTags, filter.Tag) {
 			continue
 		}
 		if search != "" && !strings.Contains(strings.ToLower(cs.Name), search) && !strings.Contains(cs.Phone, search) {
@@ -103,10 +88,7 @@ func (s *Service) List(ctx context.Context, filter domain.ListFilter) (domain.Cl
 	}, nil
 }
 
-// SetOverride pins clientID's segment by hand, or clears the override (and
-// falls back to Derive) when segment is nil. Validated here, not just left
-// to the DB check constraint, so a bad value fails with a clear domain
-// error instead of a raw Postgres constraint message reaching the client.
+// nil segment clears the override and falls back to Derive.
 func (s *Service) SetOverride(ctx context.Context, clientID string, segment *string) error {
 	if segment != nil && !domain.IsSegment(*segment) {
 		return fmt.Errorf("clientsegments: set override: %w: %q", domain.ErrInvalidSegment, *segment)
@@ -115,4 +97,33 @@ func (s *Service) SetOverride(ctx context.Context, clientID string, segment *str
 		return fmt.Errorf("clientsegments: set override: %w", err)
 	}
 	return nil
+}
+
+func (s *Service) AddTag(ctx context.Context, clientID, tag, createdBy string) error {
+	tag = strings.TrimSpace(tag)
+	if tag == "" || utf8.RuneCountInString(tag) > domain.ManualTagMaxLen {
+		return fmt.Errorf("clientsegments: add tag: %w: %q", domain.ErrInvalidManualTag, tag)
+	}
+	if err := s.repo.AddTag(ctx, clientID, tag, createdBy); err != nil {
+		return fmt.Errorf("clientsegments: add tag: %w", err)
+	}
+	return nil
+}
+
+func (s *Service) RemoveTag(ctx context.Context, clientID, tag string) error {
+	if err := s.repo.RemoveTag(ctx, clientID, tag); err != nil {
+		return fmt.Errorf("clientsegments: remove tag: %w", err)
+	}
+	return nil
+}
+
+func (s *Service) Tags(ctx context.Context, clientID string) ([]string, error) {
+	list, err := s.List(ctx, domain.ListFilter{ClientID: clientID, Limit: 1})
+	if err != nil {
+		return nil, fmt.Errorf("clientsegments: tags: %w", err)
+	}
+	if len(list.Items) == 0 {
+		return nil, fmt.Errorf("clientsegments: tags: %w", domain.ErrNotFound)
+	}
+	return list.Items[0].ManualTags, nil
 }

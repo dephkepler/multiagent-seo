@@ -17,7 +17,7 @@ import (
 	"multiagent-seo/pkg/config"
 )
 
-func buildAdminBot(ctx context.Context, cfg config.Config, log *slog.Logger, pool *pgxpool.Pool, leadsSvc *appleads.Service) *telegram.AdminBot {
+func buildAdminBot(ctx context.Context, cfg config.Config, log *slog.Logger, pool *pgxpool.Pool, leadsSvc *appleads.Service, tagsSvc telegram.ClientTagger) *telegram.AdminBot {
 	if cfg.Telegram.BotToken == "" || cfg.Telegram.PaymentCard == "" || len(cfg.Telegram.AllowedUsers) == 0 {
 		log.Warn("admin bot disabled: telegram token, payment card, or allowed users not configured")
 		return nil
@@ -43,11 +43,7 @@ func buildAdminBot(ctx context.Context, cfg config.Config, log *slog.Logger, poo
 		log.Warn("admin bot: self-booking requests disabled, webleads service unavailable")
 	}
 
-	// /creategroup needs the personal-account MTProto session (see
-	// cmd/tgsession) — the Bot API this bot otherwise runs on has no way to
-	// create a group chat at all. Falls back to a noop (command just errors)
-	// rather than failing the whole admin bot when it's not configured or
-	// the session/connection isn't available.
+	// Bot API can't create groups — /creategroup needs the MTProto session, else falls back to noop
 	var groups telegram.GroupCreator = noopGroupCreator{}
 	if cfg.TelegramUser.APIID != 0 && cfg.TelegramUser.APIHash != "" {
 		tgUser, err := telegramuser.New(ctx, cfg.TelegramUser.APIID, cfg.TelegramUser.APIHash, cfg.TelegramUser.SessionFile, log)
@@ -70,6 +66,7 @@ func buildAdminBot(ctx context.Context, cfg config.Config, log *slog.Logger, poo
 		leads,
 		caseRepo,
 		groups,
+		tagsSvc,
 		cfg.Reminder.Before,
 		log,
 	)
@@ -80,8 +77,7 @@ func buildAdminBot(ctx context.Context, cfg config.Config, log *slog.Logger, poo
 	return bot
 }
 
-// noopConsultationSink is used when CF_LEADS_SHEETS_SPREADSHEET_ID isn't
-// set — booking still works, sheet sync is just skipped.
+// used when spreadsheet ID isn't configured; booking still works, sheet sync is skipped
 type noopConsultationSink struct{}
 
 func (noopConsultationSink) AppendRow(context.Context, consultations.Consultation, consultations.Client) error {

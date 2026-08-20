@@ -2,9 +2,11 @@ package postgres
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"multiagent-seo/internal/domain/clientsegments"
@@ -18,11 +20,7 @@ func NewClientSegmentsRepository(db *pgxpool.Pool) *ClientSegmentsRepository {
 	return &ClientSegmentsRepository{db: db}
 }
 
-// ListActivity reads one row per client with everything Derive needs to
-// classify them. Consultations and cases are aggregated in their own
-// subquery each (a client can have many of both) and left-joined back onto
-// clients, so someone with a lead but no consultation yet still shows up
-// with zero counts instead of being dropped.
+// LEFT JOINs matter: a client with a lead but no consultation/case must still show up, not be dropped.
 func (r *ClientSegmentsRepository) ListActivity(ctx context.Context) ([]clientsegments.Activity, error) {
 	const q = `
 		SELECT
@@ -41,7 +39,8 @@ func (r *ClientSegmentsRepository) ListActivity(ctx context.Context) ([]clientse
 				coalesce(co.last_at, cl.first_seen_at),
 				coalesce(ca.last_at, cl.first_seen_at)
 			),
-			cl.segment_override
+			cl.segment_override,
+			coalesce(mt.tags, '{}')
 		FROM clients cl
 		LEFT JOIN (
 			SELECT
@@ -65,6 +64,11 @@ func (r *ClientSegmentsRepository) ListActivity(ctx context.Context) ([]clientse
 			FROM cases
 			GROUP BY client_id
 		) ca ON ca.client_id = cl.id
+		LEFT JOIN (
+			SELECT client_id, array_agg(tag ORDER BY tag) AS tags
+			FROM client_tags
+			GROUP BY client_id
+		) mt ON mt.client_id = cl.id
 		ORDER BY cl.first_seen_at DESC`
 
 	rows, err := r.db.Query(ctx, q)
@@ -83,6 +87,7 @@ func (r *ClientSegmentsRepository) ListActivity(ctx context.Context) ([]clientse
 			&a.CaseCount, &a.CaseFee, &a.CasePaid,
 			&a.LastActivity,
 			&a.SegmentOverride,
+			&a.ManualTags,
 		); err != nil {
 			return nil, fmt.Errorf("list activity: scan: %w", err)
 		}
@@ -94,8 +99,6 @@ func (r *ClientSegmentsRepository) ListActivity(ctx context.Context) ([]clientse
 	return out, nil
 }
 
-// SetSegmentOverride is the write half of the override — see the
-// clientsegments package doc for why it exists.
 func (r *ClientSegmentsRepository) SetSegmentOverride(ctx context.Context, clientID string, segment *string) error {
 	const q = `UPDATE clients SET segment_override = @segment WHERE id = @id`
 	tag, err := r.db.Exec(ctx, q, pgx.NamedArgs{"segment": segment, "id": clientID})
@@ -104,6 +107,29 @@ func (r *ClientSegmentsRepository) SetSegmentOverride(ctx context.Context, clien
 	}
 	if tag.RowsAffected() == 0 {
 		return fmt.Errorf("set segment override %q: %w", clientID, clientsegments.ErrNotFound)
+	}
+	return nil
+}
+
+// idempotent: ON CONFLICT DO NOTHING, re-adding an existing tag is a no-op, not an error
+func (r *ClientSegmentsRepository) AddTag(ctx context.Context, clientID, tag, createdBy string) error {
+	const q = `INSERT INTO client_tags (client_id, tag, created_by) VALUES (@id, @tag, @by)
+		ON CONFLICT (client_id, tag) DO NOTHING`
+	_, err := r.db.Exec(ctx, q, pgx.NamedArgs{"id": clientID, "tag": tag, "by": createdBy})
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23503" {
+			return fmt.Errorf("add tag %q for %q: %w", tag, clientID, clientsegments.ErrNotFound)
+		}
+		return fmt.Errorf("add tag %q for %q: %w", tag, clientID, err)
+	}
+	return nil
+}
+
+func (r *ClientSegmentsRepository) RemoveTag(ctx context.Context, clientID, tag string) error {
+	const q = `DELETE FROM client_tags WHERE client_id = @id AND tag = @tag`
+	if _, err := r.db.Exec(ctx, q, pgx.NamedArgs{"id": clientID, "tag": tag}); err != nil {
+		return fmt.Errorf("remove tag %q for %q: %w", tag, clientID, err)
 	}
 	return nil
 }

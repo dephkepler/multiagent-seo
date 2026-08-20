@@ -63,7 +63,8 @@ func Run(ctx context.Context, cfg config.Config) error {
 	linkbuildingBacklinkSvc, lbRunner := buildLinkbuilding(ctx, cfg, slogLog, pool, wordpressRepo)
 	emailScrapeSvc, emailRunner := buildEmailScrape(ctx, cfg, slogLog, pool)
 	leadsSvc := buildLeads(ctx, cfg, slogLog, pool)
-	adminBot := buildAdminBot(ctx, cfg, slogLog, pool, leadsSvc)
+	clientSegmentsSvc := appclientsegments.NewService(postgres.NewClientSegmentsRepository(pool))
+	adminBot := buildAdminBot(ctx, cfg, slogLog, pool, leadsSvc, clientSegmentsSvc)
 	var trafficSource domainleadstats.TrafficSource
 	if cfg.GA4.PropertyID != "" {
 		ga4Client, err := ga4.New(ctx, cfg.Sheets.CredentialsFile, cfg.GA4.PropertyID)
@@ -74,7 +75,6 @@ func Run(ctx context.Context, cfg config.Config) error {
 		}
 	}
 	leadStatsSvc := appleadstats.NewService(postgres.NewLeadStatsRepository(pool), trafficSource, slogLog)
-	clientSegmentsSvc := appclientsegments.NewService(postgres.NewClientSegmentsRepository(pool))
 	clientDetailSvc := appclientdetail.NewService(
 		postgres.NewClientDetailRepository(pool, cfg.Clients.EncryptionKey),
 		postgres.NewConsultationRepository(pool, cfg.Clients.EncryptionKey),

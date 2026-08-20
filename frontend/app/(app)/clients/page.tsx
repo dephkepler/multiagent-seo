@@ -18,6 +18,7 @@ interface ClientSegment {
   segment: Segment
   overridden: boolean
   tags: string[]
+  manual_tags: string[]
   last_activity: string
   case_count: number
   case_fee: number
@@ -108,6 +109,19 @@ export default function ClientsPage() {
   const setOverride = useMutation({
     mutationFn: ({ id, segment }: { id: string; segment: Segment | null }) =>
       api(`/clients/${id}/segment`, { method: 'PATCH', body: JSON.stringify({ segment_override: segment }) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['client-segments'] }),
+    onError: (e: Error) => toast.error(e.message),
+  })
+
+  const addTag = useMutation({
+    mutationFn: ({ id, tag }: { id: string; tag: string }) =>
+      api(`/clients/${id}/tags`, { method: 'POST', body: JSON.stringify({ tag }) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['client-segments'] }),
+    onError: (e: Error) => toast.error(e.message),
+  })
+  const removeTag = useMutation({
+    mutationFn: ({ id, tag }: { id: string; tag: string }) =>
+      api(`/clients/${id}/tags/${encodeURIComponent(tag)}`, { method: 'DELETE' }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['client-segments'] }),
     onError: (e: Error) => toast.error(e.message),
   })
@@ -225,13 +239,13 @@ export default function ClientsPage() {
                       </div>
                     </td>
                     <td className='py-2 pr-4'>
-                      <div className='flex flex-wrap gap-1'>
-                        {c.tags.map((t) => (
-                          <span key={t} className={cx('rounded px-1.5 py-0.5 text-[11px] font-medium', TAG_COLOR[t] || 'bg-gray-100 text-gray-600')}>
-                            {TAG_LABEL[t] || t}
-                          </span>
-                        ))}
-                      </div>
+                      <TagsCell
+                        tags={c.tags}
+                        manualTags={c.manual_tags}
+                        pending={addTag.isPending || removeTag.isPending}
+                        onAdd={(tag) => addTag.mutate({ id: c.client_id, tag })}
+                        onRemove={(tag) => removeTag.mutate({ id: c.client_id, tag })}
+                      />
                     </td>
                     <td className='py-2 pr-4 text-gray-500'>{c.case_count || '—'}</td>
                     <td className={cx('py-2 pr-4', debt > 0 ? 'font-medium text-rose-600' : 'text-gray-400')}>
@@ -306,6 +320,93 @@ function SortableHeader({
         {active && <span aria-hidden>↓</span>}
       </button>
     </th>
+  )
+}
+
+// TagsCell renders the four auto-computed tags read-only, plus every
+// manual tag as a removable chip and a "+ тег" affordance to add one —
+// auto tags never get an × since they're recomputed on every load (see
+// clientsegments.Derive), manual ones are the one thing staff owns here.
+function TagsCell({
+  tags,
+  manualTags,
+  onAdd,
+  onRemove,
+  pending,
+}: {
+  tags: string[]
+  manualTags: string[]
+  onAdd: (tag: string) => void
+  onRemove: (tag: string) => void
+  pending: boolean
+}) {
+  const [adding, setAdding] = useState(false)
+  const [value, setValue] = useState('')
+
+  function submit() {
+    const tag = value.trim()
+    setValue('')
+    setAdding(false)
+    if (tag) onAdd(tag)
+  }
+
+  return (
+    <div className='flex flex-wrap items-center gap-1'>
+      {tags.map((t) => (
+        <span key={t} className={cx('rounded px-1.5 py-0.5 text-[11px] font-medium', TAG_COLOR[t] || 'bg-gray-100 text-gray-600')}>
+          {TAG_LABEL[t] || t}
+        </span>
+      ))}
+      {manualTags.map((t) => (
+        <span
+          key={t}
+          className='inline-flex items-center gap-1 rounded border border-dashed border-gray-300 bg-white px-1.5 py-0.5 text-[11px] font-medium text-gray-600'
+        >
+          {t}
+          <button
+            type='button'
+            disabled={pending}
+            onClick={() => onRemove(t)}
+            aria-label={`Убрать тег ${t}`}
+            className='leading-none text-gray-400 hover:text-rose-600 disabled:cursor-wait'
+          >
+            ×
+          </button>
+        </span>
+      ))}
+      {adding ? (
+        <input
+          autoFocus
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              submit()
+            }
+            if (e.key === 'Escape') {
+              setValue('')
+              setAdding(false)
+            }
+          }}
+          onBlur={() => {
+            setValue('')
+            setAdding(false)
+          }}
+          maxLength={40}
+          placeholder='тег…'
+          className='w-20 rounded border border-gray-200 px-1 py-0.5 text-[11px] outline-none focus:border-emerald-400'
+        />
+      ) : (
+        <button
+          type='button'
+          onClick={() => setAdding(true)}
+          className='rounded border border-dashed border-gray-300 px-1.5 py-0.5 text-[11px] text-gray-400 hover:border-gray-400 hover:text-gray-600'
+        >
+          + тег
+        </button>
+      )}
+    </div>
   )
 }
 

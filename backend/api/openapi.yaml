@@ -664,6 +664,57 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+  /clients/{id}/tags:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      operationId: addClientTag
+      security:
+        - bearerAuth: [ ]
+      tags: [ Clients ]
+      summary: Attach a staff-added tag to a client — idempotent, adding a tag already present is not an error
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddClientTagRequest"
+      responses:
+        "204":
+          description: Tag added
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /clients/{id}/tags/{tag}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: tag
+        in: path
+        required: true
+        schema:
+          type: string
+    delete:
+      operationId: removeClientTag
+      security:
+        - bearerAuth: [ ]
+      tags: [ Clients ]
+      summary: Detach a staff-added tag from a client — idempotent, removing a tag that isn't present is not an error
+      responses:
+        "204":
+          description: Tag removed (or wasn't present)
+
   /clients/{id}:
     parameters:
       - name: id
@@ -1594,7 +1645,7 @@ components:
 
     ClientSegment:
       type: object
-      required: [ client_id, name, phone, segment, overridden, tags, last_activity, case_count, case_fee, case_paid, ltv ]
+      required: [ client_id, name, phone, segment, overridden, tags, manual_tags, last_activity, case_count, case_fee, case_paid, ltv ]
       properties:
         client_id:
           type: string
@@ -1611,6 +1662,12 @@ components:
           type: array
           items:
             type: string
+          description: Auto-computed only (debtor / no_show_risk / high_value / dormant) — see manual_tags for staff-added ones
+        manual_tags:
+          type: array
+          items:
+            type: string
+          description: Staff-added via POST/DELETE /clients/{id}/tags — free text, never recomputed
         last_activity:
           type: string
           format: date-time
@@ -1660,6 +1717,15 @@ components:
             - $ref: "#/components/schemas/Segment"
           nullable: true
           description: Null clears the override and falls back to the calculated segment
+
+    AddClientTagRequest:
+      type: object
+      required: [ tag ]
+      properties:
+        tag:
+          type: string
+          maxLength: 40
+          description: Free text — no fixed vocabulary, unlike the four auto-computed tags
 
     ClientDetailInfo:
       type: object

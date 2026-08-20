@@ -77,6 +77,7 @@ interface ClientSegment {
   segment: Segment
   overridden: boolean
   tags: string[]
+  manual_tags: string[]
 }
 const SEGMENT_LABEL: Record<Segment, string> = {
   lead: 'Заявка',
@@ -245,6 +246,16 @@ export default function ClientDetailPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['client-segments'] }),
     onError: (e: Error) => toast.error(e.message),
   })
+  const addTag = useMutation({
+    mutationFn: (tag: string) => api(`/clients/${id}/tags`, { method: 'POST', body: JSON.stringify({ tag }) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['client-segments'] }),
+    onError: (e: Error) => toast.error(e.message),
+  })
+  const removeTag = useMutation({
+    mutationFn: (tag: string) => api(`/clients/${id}/tags/${encodeURIComponent(tag)}`, { method: 'DELETE' }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['client-segments'] }),
+    onError: (e: Error) => toast.error(e.message),
+  })
 
   // Editable draft, seeded from the loaded client — re-seeded whenever a
   // fresh fetch lands (loadedFor tracks which one we've already synced
@@ -372,17 +383,13 @@ export default function ClientDetailPage() {
           </div>
           <div className='rounded-md border border-gray-100 bg-gray-50/60 p-3'>
             <div className='mb-1 text-xs text-gray-500'>Теги</div>
-            <div className='flex flex-wrap gap-1'>
-              {(segment?.tags.length ?? 0) === 0 ? (
-                <span className='text-sm text-gray-400'>—</span>
-              ) : (
-                segment!.tags.map((t) => (
-                  <span key={t} className={cx('rounded px-1.5 py-0.5 text-[11px] font-medium', TAG_COLOR[t] || 'bg-gray-100 text-gray-600')}>
-                    {TAG_LABEL[t] || t}
-                  </span>
-                ))
-              )}
-            </div>
+            <TagsEditor
+              tags={segment?.tags ?? []}
+              manualTags={segment?.manual_tags ?? []}
+              pending={addTag.isPending || removeTag.isPending}
+              onAdd={(tag) => addTag.mutate(tag)}
+              onRemove={(tag) => removeTag.mutate(tag)}
+            />
           </div>
           <MetricTile label='Принесено денег' value={fmtMoney(d.revenue_total)} accent='good' />
           <MetricTile label='Долг' value={debtTotal > 0 ? fmtMoney(debtTotal) : '—'} accent={debtTotal > 0 ? 'bad' : undefined} />
@@ -613,6 +620,94 @@ export default function ClientDetailPage() {
           </div>
         )}
       </Card>
+    </div>
+  )
+}
+
+// TagsEditor renders the four auto-computed tags read-only, plus every
+// manual tag as a removable chip and a "+ тег" affordance to add one — auto
+// tags never get an × since they're recomputed on every load (see backend
+// clientsegments.Derive), manual ones are the one thing staff owns here.
+function TagsEditor({
+  tags,
+  manualTags,
+  onAdd,
+  onRemove,
+  pending,
+}: {
+  tags: string[]
+  manualTags: string[]
+  onAdd: (tag: string) => void
+  onRemove: (tag: string) => void
+  pending: boolean
+}) {
+  const [adding, setAdding] = useState(false)
+  const [value, setValue] = useState('')
+
+  function submit() {
+    const tag = value.trim()
+    setValue('')
+    setAdding(false)
+    if (tag) onAdd(tag)
+  }
+
+  return (
+    <div className='flex flex-wrap items-center gap-1'>
+      {tags.length === 0 && manualTags.length === 0 && !adding && <span className='text-sm text-gray-400'>—</span>}
+      {tags.map((t) => (
+        <span key={t} className={cx('rounded px-1.5 py-0.5 text-[11px] font-medium', TAG_COLOR[t] || 'bg-gray-100 text-gray-600')}>
+          {TAG_LABEL[t] || t}
+        </span>
+      ))}
+      {manualTags.map((t) => (
+        <span
+          key={t}
+          className='inline-flex items-center gap-1 rounded border border-dashed border-gray-300 bg-white px-1.5 py-0.5 text-[11px] font-medium text-gray-600'
+        >
+          {t}
+          <button
+            type='button'
+            disabled={pending}
+            onClick={() => onRemove(t)}
+            aria-label={`Убрать тег ${t}`}
+            className='leading-none text-gray-400 hover:text-rose-600 disabled:cursor-wait'
+          >
+            ×
+          </button>
+        </span>
+      ))}
+      {adding ? (
+        <input
+          autoFocus
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              submit()
+            }
+            if (e.key === 'Escape') {
+              setValue('')
+              setAdding(false)
+            }
+          }}
+          onBlur={() => {
+            setValue('')
+            setAdding(false)
+          }}
+          maxLength={40}
+          placeholder='тег…'
+          className='w-24 rounded border border-gray-200 px-1 py-0.5 text-[11px] outline-none focus:border-emerald-400'
+        />
+      ) : (
+        <button
+          type='button'
+          onClick={() => setAdding(true)}
+          className='rounded border border-dashed border-gray-300 px-1.5 py-0.5 text-[11px] text-gray-400 hover:border-gray-400 hover:text-gray-600'
+        >
+          + тег
+        </button>
+      )}
     </div>
   )
 }
