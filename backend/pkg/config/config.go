@@ -173,6 +173,13 @@ type ClientsConfig struct {
 	EncryptionKey string `env:"CLIENTS_ENCRYPTION_KEY" envDefault:"dev-insecure-change-me" validate:"required"`
 }
 
+// GenerateInterval paces the recurring/payout generator. It is idempotent, so
+// running it several times a day only costs a no-op query — the point of the
+// short interval is that a rule due today shows up as a draft today.
+type FinanceConfig struct {
+	GenerateInterval time.Duration `env:"FINANCE_GENERATE_INTERVAL" envDefault:"6h"`
+}
+
 type MODXConfig struct {
 	DBHost     string `env:"MODX_DB_HOST"`
 	DBPort     string `env:"MODX_DB_PORT" envDefault:"3306"`
@@ -212,6 +219,7 @@ type Config struct {
 	Reminder     ReminderConfig
 	MODX         MODXConfig
 	Clients      ClientsConfig `validate:"required"`
+	Finance      FinanceConfig
 }
 
 type PromptConfig struct {

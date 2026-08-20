@@ -956,6 +956,459 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+  /finance/report:
+    get:
+      operationId: getFinanceReport
+      security:
+        - bearerAuth: [ ]
+      tags: [ Finance ]
+      summary: P&L by month — income read from consultations/case payments (never re-entered by hand), expenses summed per category, plus running balance and acquisition metrics
+      parameters:
+        - name: from
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+      responses:
+        "200":
+          description: One row per calendar month in range, including months with no activity, plus an "Итого" column
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceReport"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /finance/expenses:
+    get:
+      operationId: listExpenses
+      security:
+        - bearerAuth: [ ]
+      tags: [ Finance ]
+      summary: Expense ledger, newest first — includes drafts, which are excluded from every P&L number until confirmed
+      parameters:
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: category
+          in: query
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            $ref: "#/components/schemas/ExpenseStatus"
+        - name: origin
+          in: query
+          schema:
+            $ref: "#/components/schemas/ExpenseOrigin"
+        - name: search
+          in: query
+          description: Case-insensitive substring match against vendor or description
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        "200":
+          description: A page of expenses; total and sum cover the whole filtered set, not the page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExpenseList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+    post:
+      operationId: createExpense
+      security:
+        - bearerAuth: [ ]
+      tags: [ Finance ]
+      summary: Record a spend by hand — always posted, there is nothing to confirm about a payment a person already made
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateExpenseRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Expense"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /finance/expenses/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    patch:
+      operationId: updateExpense
+      security:
+        - bearerAuth: [ ]
+      tags: [ Finance ]
+      summary: Correct an expense — keeps its draft/posted status, so fixing a generated draft's amount does not post it
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateExpenseRequest"
+      responses:
+        "204":
+          description: Updated
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      operationId: deleteExpense
+      security:
+        - bearerAuth: [ ]
+      tags: [ Finance ]
+      summary: Delete an expense
+      responses:
+        "204":
+          description: Deleted
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /finance/expenses/{id}/confirm:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      operationId: confirmExpense
+      security:
+        - bearerAuth: [ ]
+      tags: [ Finance ]
+      summary: Accept a generated draft into the ledger — this is the moment it starts counting in the P&L
+      responses:
+        "204":
+          description: Confirmed
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /finance/generate:
+    post:
+      operationId: runAutoExpenses
+      security:
+        - bearerAuth: [ ]
+      tags: [ Finance ]
+      summary: Materialize the recurring templates and advocate payouts due in a month — idempotent, a repeat run inserts nothing
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RunAutoExpensesRequest"
+      responses:
+        "200":
+          description: What the pass created; skipped counts occurrences already in the ledger
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GeneratedExpenses"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /finance/categories:
+    get:
+      operationId: listExpenseCategories
+      security:
+        - bearerAuth: [ ]
+      tags: [ Finance ]
+      summary: The closed expense-category vocabulary — free text would drift into three spellings of one line in the P&L
+      parameters:
+        - name: active_only
+          in: query
+          schema:
+            type: boolean
+            default: false
+      responses:
+        "200":
+          description: Categories in display order
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExpenseCategoryList"
+    post:
+      operationId: createExpenseCategory
+      security:
+        - bearerAuth: [ ]
+      tags: [ Finance ]
+      summary: Add a category to the vocabulary
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateExpenseCategoryRequest"
+      responses:
+        "204":
+          description: Created
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /finance/categories/{code}:
+    parameters:
+      - name: code
+        in: path
+        required: true
+        schema:
+          type: string
+    patch:
+      operationId: updateExpenseCategory
+      security:
+        - bearerAuth: [ ]
+      tags: [ Finance ]
+      summary: Rename a category, regroup it, or retire it — the code stays, so history keeps pointing at it
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateExpenseCategoryRequest"
+      responses:
+        "204":
+          description: Updated
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /finance/rules:
+    get:
+      operationId: listExpenseRules
+      security:
+        - bearerAuth: [ ]
+      tags: [ Finance ]
+      summary: Recurring expense templates — the monthly charges the generator materializes (hosting, telephony, retainers)
+      parameters:
+        - name: active_only
+          in: query
+          schema:
+            type: boolean
+            default: false
+      responses:
+        "200":
+          description: Templates
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExpenseRuleList"
+    post:
+      operationId: createExpenseRule
+      security:
+        - bearerAuth: [ ]
+      tags: [ Finance ]
+      summary: Add a recurring expense template
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateExpenseRuleRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExpenseRule"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /finance/rules/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    patch:
+      operationId: updateExpenseRule
+      security:
+        - bearerAuth: [ ]
+      tags: [ Finance ]
+      summary: Update a recurring template — takes effect on the next generator pass, already-generated rows stay as they are
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateExpenseRuleRequest"
+      responses:
+        "204":
+          description: Updated
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      operationId: deleteExpenseRule
+      security:
+        - bearerAuth: [ ]
+      tags: [ Finance ]
+      summary: Delete a recurring template; expenses it already generated keep their history
+      responses:
+        "204":
+          description: Deleted
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /finance/income:
+    get:
+      operationId: listOtherIncome
+      security:
+        - bearerAuth: [ ]
+      tags: [ Finance ]
+      summary: Money in that never passed through a consultation or a case — refunds, company top-ups, one-offs
+      parameters:
+        - name: from
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+      responses:
+        "200":
+          description: Other income in range
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OtherIncomeList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+    post:
+      operationId: createOtherIncome
+      security:
+        - bearerAuth: [ ]
+      tags: [ Finance ]
+      summary: Record income outside the CRM's own consultation/case flow
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateOtherIncomeRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OtherIncome"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /finance/income/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    delete:
+      operationId: deleteOtherIncome
+      security:
+        - bearerAuth: [ ]
+      tags: [ Finance ]
+      summary: Delete an other-income entry
+      responses:
+        "204":
+          description: Deleted
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /finance/advocate-rates:
+    get:
+      operationId: listAdvocateRates
+      security:
+        - bearerAuth: [ ]
+      tags: [ Finance ]
+      summary: Advocate payout rates — 0 means no automatic payout is generated for that advocate
+      responses:
+        "200":
+          description: Roster with each advocate's commission percent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdvocateRateList"
+
+  /finance/advocate-rates/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    patch:
+      operationId: setAdvocateRate
+      security:
+        - bearerAuth: [ ]
+      tags: [ Finance ]
+      summary: Set an advocate's share of what they collect; the generated payout is always a draft to confirm, never posted automatically
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetAdvocateRateRequest"
+      responses:
+        "204":
+          description: Updated
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+
 components:
   securitySchemes:
     bearerAuth:
@@ -2083,3 +2536,455 @@ components:
           type: string
         notes:
           type: string
+    ExpenseKind:
+      type: string
+      description: Drives the derived numbers, not just grouping — marketing is the CAC/ROMI denominator, direct is what gross margin subtracts
+      enum: [ marketing, direct, payroll, development, infra, admin ]
+
+    ExpensePaymentMethod:
+      type: string
+      enum: [ card, invoice, company, cash ]
+
+    ExpenseStatus:
+      type: string
+      description: >
+        A draft is generated but not yet acknowledged and stays out of every P&L number until confirmed.
+        A void row is a generated expense staff retired — it keeps its external ref so the generator
+        will not re-create it, and it counts as spend nowhere.
+      enum: [ draft, posted, void ]
+
+    ExpenseOrigin:
+      type: string
+      description: derived means computed from CRM data (advocate payouts off case payments), imported means backfilled from the old spreadsheet
+      enum: [ manual, recurring, derived, imported ]
+
+    Expense:
+      type: object
+      required: [ id, spent_at, amount, category_code, category_label, payment_method, vendor, description, status, origin, created_at ]
+      properties:
+        id:
+          type: string
+        spent_at:
+          type: string
+          format: date
+        amount:
+          type: number
+          format: double
+        category_code:
+          type: string
+        category_label:
+          type: string
+        payment_method:
+          $ref: "#/components/schemas/ExpensePaymentMethod"
+        vendor:
+          type: string
+        description:
+          type: string
+        status:
+          $ref: "#/components/schemas/ExpenseStatus"
+        origin:
+          $ref: "#/components/schemas/ExpenseOrigin"
+        rule_id:
+          type: string
+          description: Set when the row came from a recurring template
+        created_by:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    ExpenseList:
+      type: object
+      required: [ items, total, sum ]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Expense"
+        total:
+          type: integer
+          format: int64
+        sum:
+          type: number
+          format: double
+          description: >
+            Sum of POSTED rows in the whole filtered set (not just this page) — drafts and voided rows
+            are counted by total but never added into a spend sum
+
+    CreateExpenseRequest:
+      type: object
+      required: [ spent_at, amount, category_code ]
+      properties:
+        spent_at:
+          type: string
+          format: date
+        amount:
+          type: number
+          format: double
+        category_code:
+          type: string
+        payment_method:
+          $ref: "#/components/schemas/ExpensePaymentMethod"
+        vendor:
+          type: string
+        description:
+          type: string
+
+    UpdateExpenseRequest:
+      type: object
+      required: [ spent_at, amount, category_code ]
+      properties:
+        spent_at:
+          type: string
+          format: date
+        amount:
+          type: number
+          format: double
+        category_code:
+          type: string
+        payment_method:
+          $ref: "#/components/schemas/ExpensePaymentMethod"
+        vendor:
+          type: string
+        description:
+          type: string
+
+    ExpenseCategory:
+      type: object
+      required: [ code, label, kind, is_active, sort_order ]
+      properties:
+        code:
+          type: string
+        label:
+          type: string
+        kind:
+          $ref: "#/components/schemas/ExpenseKind"
+        is_active:
+          type: boolean
+        sort_order:
+          type: integer
+
+    ExpenseCategoryList:
+      type: object
+      required: [ items ]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ExpenseCategory"
+
+    CreateExpenseCategoryRequest:
+      type: object
+      required: [ code, label, kind ]
+      properties:
+        code:
+          type: string
+          maxLength: 40
+          description: Stable machine key, lowercase — never changes, unlike label
+        label:
+          type: string
+          maxLength: 60
+        kind:
+          $ref: "#/components/schemas/ExpenseKind"
+        sort_order:
+          type: integer
+
+    UpdateExpenseCategoryRequest:
+      type: object
+      required: [ label, kind, is_active ]
+      properties:
+        label:
+          type: string
+          maxLength: 60
+        kind:
+          $ref: "#/components/schemas/ExpenseKind"
+        is_active:
+          type: boolean
+        sort_order:
+          type: integer
+
+    ExpenseRule:
+      type: object
+      required: [ id, name, category_code, category_label, vendor, payment_method, amount, day_of_month, auto_post, active_from, is_active ]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        category_code:
+          type: string
+        category_label:
+          type: string
+        vendor:
+          type: string
+        payment_method:
+          $ref: "#/components/schemas/ExpensePaymentMethod"
+        amount:
+          type: number
+          format: double
+        day_of_month:
+          type: integer
+        auto_post:
+          type: boolean
+        active_from:
+          type: string
+          format: date
+        active_to:
+          type: string
+          format: date
+        is_active:
+          type: boolean
+
+    CreateExpenseRuleRequest:
+      type: object
+      required: [ name, category_code, amount, day_of_month ]
+      properties:
+        name:
+          type: string
+          maxLength: 120
+        category_code:
+          type: string
+        vendor:
+          type: string
+        payment_method:
+          $ref: "#/components/schemas/ExpensePaymentMethod"
+        amount:
+          type: number
+          format: double
+        day_of_month:
+          type: integer
+          minimum: 1
+          maximum: 28
+          description: Capped at 28 so a rule never silently skips February
+        auto_post:
+          type: boolean
+          description: true writes straight to the ledger; false generates a draft to confirm
+        active_from:
+          type: string
+          format: date
+        active_to:
+          type: string
+          format: date
+        is_active:
+          type: boolean
+
+    ExpenseRuleList:
+      type: object
+      required: [ items ]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ExpenseRule"
+
+    UpdateExpenseRuleRequest:
+      type: object
+      description: >
+        Full replacement, not a partial patch — is_active and active_from are required on purpose:
+        an omitted is_active would silently re-enable a template that was switched off, and an omitted
+        active_from would reset the start date, which decides whether a backfill run generates the rule.
+      required: [ name, category_code, amount, day_of_month, auto_post, active_from, is_active ]
+      properties:
+        name:
+          type: string
+          maxLength: 120
+        category_code:
+          type: string
+        vendor:
+          type: string
+        payment_method:
+          $ref: "#/components/schemas/ExpensePaymentMethod"
+        amount:
+          type: number
+          format: double
+        day_of_month:
+          type: integer
+          minimum: 1
+          maximum: 28
+        auto_post:
+          type: boolean
+        active_from:
+          type: string
+          format: date
+        active_to:
+          type: string
+          format: date
+        is_active:
+          type: boolean
+
+    OtherIncome:
+      type: object
+      required: [ id, received_at, amount, source, description, created_at ]
+      properties:
+        id:
+          type: string
+        received_at:
+          type: string
+          format: date
+        amount:
+          type: number
+          format: double
+        source:
+          type: string
+        description:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    OtherIncomeList:
+      type: object
+      required: [ items, sum ]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/OtherIncome"
+        sum:
+          type: number
+          format: double
+
+    CreateOtherIncomeRequest:
+      type: object
+      required: [ received_at, amount ]
+      properties:
+        received_at:
+          type: string
+          format: date
+        amount:
+          type: number
+          format: double
+        source:
+          type: string
+        description:
+          type: string
+
+    RunAutoExpensesRequest:
+      type: object
+      properties:
+        month:
+          type: string
+          pattern: '^\d{4}-\d{2}$'
+          description: Month to generate for, "2026-08". Defaults to the current month
+
+    GeneratedExpenses:
+      type: object
+      required: [ month, recurring, payouts, skipped ]
+      properties:
+        month:
+          type: string
+        recurring:
+          type: integer
+        payouts:
+          type: integer
+        skipped:
+          type: integer
+          description: Occurrences already in the ledger — the normal result of a repeat run, not an error
+
+    FinanceMonth:
+      type: object
+      required: [ month, income_consult, income_cases, income_other, income_total, expense_by_category, expense_by_kind, expense_total, balance, cumulative, marketing_spend, direct_cost, gross_profit, leads, new_clients, cac, cpl, romi ]
+      properties:
+        month:
+          type: string
+          description: '"2026-08", or "total" for the Итого column'
+        income_consult:
+          type: number
+          format: double
+        income_cases:
+          type: number
+          format: double
+        income_other:
+          type: number
+          format: double
+        income_total:
+          type: number
+          format: double
+        expense_by_category:
+          type: object
+          additionalProperties:
+            type: number
+            format: double
+        expense_by_kind:
+          type: object
+          additionalProperties:
+            type: number
+            format: double
+        expense_total:
+          type: number
+          format: double
+        balance:
+          type: number
+          format: double
+        cumulative:
+          type: number
+          format: double
+          description: Running balance across the whole report — the spreadsheet's "Нар. итог"
+        marketing_spend:
+          type: number
+          format: double
+        direct_cost:
+          type: number
+          format: double
+        gross_profit:
+          type: number
+          format: double
+        leads:
+          type: integer
+        new_clients:
+          type: integer
+          description: Clients whose first-ever lead landed in this month — the CAC denominator
+        cac:
+          type: number
+          format: double
+          description: 0 when the denominator is 0 — an undefined ratio, not a real zero
+        cpl:
+          type: number
+          format: double
+        romi:
+          type: number
+          format: double
+
+    FinanceReport:
+      type: object
+      required: [ months, total ]
+      properties:
+        months:
+          type: array
+          items:
+            $ref: "#/components/schemas/FinanceMonth"
+        total:
+          $ref: "#/components/schemas/FinanceMonth"
+
+    AdvocateRate:
+      type: object
+      required: [ advocate_id, full_name, is_active, commission_percent ]
+      properties:
+        advocate_id:
+          type: string
+        full_name:
+          type: string
+        is_active:
+          type: boolean
+        commission_percent:
+          type: number
+          format: double
+
+    AdvocateRateList:
+      type: object
+      required: [ items ]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdvocateRate"
+
+    SetAdvocateRateRequest:
+      type: object
+      required: [ commission_percent ]
+      properties:
+        commission_percent:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 100

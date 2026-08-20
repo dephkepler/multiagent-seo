@@ -53,7 +53,7 @@ func newAuthRouter(t *testing.T) http.Handler {
 	authSvc := appauth.NewService(repo, jwtauth.New("test-secret", time.Hour))
 
 	healthHandler := handlers.NewHealthHandler(apphealth.NewService(domainhealth.NewService(stubRepo{})))
-	server := handlers.NewServer(healthHandler, handlers.NewWordpressSitesHandler(nil), handlers.NewLoginHandler(authSvc), handlers.NewArticlesHandler(nil), handlers.NewLinkbuildingHandler(nil), handlers.NewApiTokensHandler(nil), handlers.NewEmailScrapeHandler(nil), handlers.NewLeadStatsHandler(nil), handlers.NewClientSegmentsHandler(nil), handlers.NewClientDetailHandler(nil), handlers.NewVaultHandler(nil))
+	server := handlers.NewServer(healthHandler, handlers.NewWordpressSitesHandler(nil), handlers.NewLoginHandler(authSvc), handlers.NewArticlesHandler(nil), handlers.NewLinkbuildingHandler(nil), handlers.NewApiTokensHandler(nil), handlers.NewEmailScrapeHandler(nil), handlers.NewLeadStatsHandler(nil), handlers.NewClientSegmentsHandler(nil), handlers.NewClientDetailHandler(nil), handlers.NewVaultHandler(nil), handlers.NewFinanceHandler(nil))
 	return apihttp.NewRouter(config.ServerConfig{
 		Host:               "localhost",
 		Port:               "0",

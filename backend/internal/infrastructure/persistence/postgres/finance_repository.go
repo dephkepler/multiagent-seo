@@ -1,0 +1,731 @@
+package postgres
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"multiagent-seo/internal/domain/finance"
+)
+
+// Month boundaries for timestamptz columns are pinned to the firm's own
+// timezone: date_trunc over a timestamptz otherwise follows the DB session
+// TimeZone, and the same row would land in different months on two deployments.
+const businessTZ = "Europe/Kyiv"
+
+type FinanceRepository struct {
+	db *pgxpool.Pool
+}
+
+func NewFinanceRepository(db *pgxpool.Pool) *FinanceRepository {
+	return &FinanceRepository{db: db}
+}
+
+// --- categories ---
+
+func (r *FinanceRepository) ListCategories(ctx context.Context, activeOnly bool) ([]finance.Category, error) {
+	const q = `SELECT code, label, kind, is_active, sort_order FROM expense_categories
+		WHERE (NOT @active_only::boolean OR is_active)
+		ORDER BY sort_order, code`
+
+	rows, err := r.db.Query(ctx, q, pgx.NamedArgs{"active_only": activeOnly})
+	if err != nil {
+		return nil, fmt.Errorf("list categories: %w", err)
+	}
+	defer rows.Close()
+
+	var out []finance.Category
+	for rows.Next() {
+		var c finance.Category
+		if err := rows.Scan(&c.Code, &c.Label, &c.Kind, &c.IsActive, &c.SortOrder); err != nil {
+			return nil, fmt.Errorf("list categories: scan: %w", err)
+		}
+		out = append(out, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list categories: %w", err)
+	}
+	return out, nil
+}
+
+func (r *FinanceRepository) CreateCategory(ctx context.Context, c finance.Category) error {
+	const q = `INSERT INTO expense_categories (code, label, kind, is_active, sort_order)
+		VALUES (@code, @label, @kind, @is_active, @sort_order)`
+
+	_, err := r.db.Exec(ctx, q, pgx.NamedArgs{
+		"code":       c.Code,
+		"label":      c.Label,
+		"kind":       string(c.Kind),
+		"is_active":  c.IsActive,
+		"sort_order": c.SortOrder,
+	})
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return fmt.Errorf("create category %q: %w", c.Code, finance.ErrCategoryExists)
+		}
+		return fmt.Errorf("create category %q: %w", c.Code, err)
+	}
+	return nil
+}
+
+func (r *FinanceRepository) UpdateCategory(ctx context.Context, c finance.Category) error {
+	const q = `UPDATE expense_categories
+		SET label = @label, kind = @kind, is_active = @is_active, sort_order = @sort_order
+		WHERE code = @code`
+
+	tag, err := r.db.Exec(ctx, q, pgx.NamedArgs{
+		"code":       c.Code,
+		"label":      c.Label,
+		"kind":       string(c.Kind),
+		"is_active":  c.IsActive,
+		"sort_order": c.SortOrder,
+	})
+	if err != nil {
+		return fmt.Errorf("update category %q: %w", c.Code, err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("update category %q: %w", c.Code, finance.ErrNotFound)
+	}
+	return nil
+}
+
+// --- expenses ---
+
+const expenseSelect = `SELECT e.id, e.spent_at, e.amount, e.category_code, coalesce(c.label, ''),
+		e.payment_method, e.vendor, e.description, e.status, e.origin,
+		coalesce(e.rule_id::text, ''), coalesce(e.external_ref, ''), e.created_by, e.created_at
+	FROM expenses e
+	LEFT JOIN expense_categories c ON c.code = e.category_code`
+
+// One static predicate set instead of a hand-built WHERE: a nil date or an
+// empty enum/search short-circuits its own clause, so every filter shape
+// runs the same statement.
+const expenseFilterWhere = `
+	WHERE (@from::date IS NULL OR e.spent_at >= @from::date)
+		AND (@to::date IS NULL OR e.spent_at <= @to::date)
+		AND (@category_code::text = '' OR e.category_code = @category_code::text)
+		AND (@status::text = '' OR e.status = @status::text)
+		AND (@origin::text = '' OR e.origin = @origin::text)
+		AND (@search::text = ''
+			OR e.vendor ILIKE '%' || @search::text || '%' ESCAPE '\'
+			OR e.description ILIKE '%' || @search::text || '%' ESCAPE '\')`
+
+const insertExpense = `INSERT INTO expenses
+		(spent_at, amount, category_code, payment_method, vendor, description, status, origin, rule_id, external_ref, created_by)
+	VALUES (@spent_at, @amount, @category_code, @payment_method, @vendor, @description, @status, @origin, @rule_id, @external_ref, @created_by)`
+
+// Drafts stay in the list (staff confirms them from a separate block) and are
+// counted by Total, but Sum covers POSTED rows only: it is read as "spent this
+// month", and unconfirmed or voided money must not appear in a spend total.
+// Both cover the whole filtered set, not the returned page.
+func (r *FinanceRepository) ListExpenses(ctx context.Context, filter finance.ExpenseFilter) (finance.ExpenseList, error) {
+	args := pgx.NamedArgs{
+		"from":          nullTime(filter.From),
+		"to":            nullTime(filter.To),
+		"category_code": filter.CategoryCode,
+		"status":        string(filter.Status),
+		"origin":        string(filter.Origin),
+		"search":        escapeLike(filter.Search),
+		"limit":         filter.Limit,
+		"offset":        filter.Offset,
+	}
+
+	var list finance.ExpenseList
+	totalQ := `SELECT count(*), coalesce(sum(e.amount) FILTER (WHERE e.status = 'posted'), 0) FROM expenses e` + expenseFilterWhere
+	if err := r.db.QueryRow(ctx, totalQ, args).Scan(&list.Total, &list.Sum); err != nil {
+		return finance.ExpenseList{}, fmt.Errorf("list expenses: totals: %w", err)
+	}
+
+	// nullif(limit, 0) — LIMIT NULL is "no limit", so a zero Limit reads everything.
+	pageQ := expenseSelect + expenseFilterWhere + `
+		ORDER BY e.spent_at DESC, e.created_at DESC
+		LIMIT nullif(@limit::int, 0) OFFSET @offset::int`
+	rows, err := r.db.Query(ctx, pageQ, args)
+	if err != nil {
+		return finance.ExpenseList{}, fmt.Errorf("list expenses: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var e finance.Expense
+		if err := scanExpense(rows, &e); err != nil {
+			return finance.ExpenseList{}, fmt.Errorf("list expenses: scan: %w", err)
+		}
+		list.Items = append(list.Items, e)
+	}
+	if err := rows.Err(); err != nil {
+		return finance.ExpenseList{}, fmt.Errorf("list expenses: %w", err)
+	}
+	return list, nil
+}
+
+func (r *FinanceRepository) GetExpense(ctx context.Context, id string) (finance.Expense, error) {
+	q := expenseSelect + ` WHERE e.id = @id`
+	var e finance.Expense
+	err := scanExpense(r.db.QueryRow(ctx, q, pgx.NamedArgs{"id": id}), &e)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return finance.Expense{}, fmt.Errorf("get expense %q: %w", id, finance.ErrNotFound)
+	}
+	if err != nil {
+		return finance.Expense{}, fmt.Errorf("get expense %q: %w", id, err)
+	}
+	return e, nil
+}
+
+func (r *FinanceRepository) CreateExpense(ctx context.Context, e finance.Expense) (finance.Expense, error) {
+	e = expenseWithDefaults(e)
+	q := insertExpense + `
+		RETURNING id, created_at, coalesce((SELECT label FROM expense_categories WHERE code = expenses.category_code), '')`
+
+	err := r.db.QueryRow(ctx, q, expenseArgs(e)).Scan(&e.ID, &e.CreatedAt, &e.CategoryLabel)
+	if err != nil {
+		return finance.Expense{}, fmt.Errorf("create expense: %w", translateExpenseWrite(err))
+	}
+	return e, nil
+}
+
+// Status/origin/rule_id/external_ref are provenance, not editable fields:
+// rewriting external_ref would break the generator's idempotency, and a
+// draft is promoted through ConfirmExpense.
+func (r *FinanceRepository) UpdateExpense(ctx context.Context, e finance.Expense) error {
+	const q = `UPDATE expenses SET
+			spent_at = @spent_at,
+			amount = @amount,
+			category_code = @category_code,
+			payment_method = @payment_method,
+			vendor = @vendor,
+			description = @description
+		WHERE id = @id`
+
+	tag, err := r.db.Exec(ctx, q, pgx.NamedArgs{
+		"id":             e.ID,
+		"spent_at":       e.SpentAt,
+		"amount":         e.Amount,
+		"category_code":  e.CategoryCode,
+		"payment_method": string(e.PaymentMethod),
+		"vendor":         e.Vendor,
+		"description":    e.Description,
+	})
+	if err != nil {
+		return fmt.Errorf("update expense %q: %w", e.ID, translateExpenseWrite(err))
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("update expense %q: %w", e.ID, finance.ErrNotFound)
+	}
+	return nil
+}
+
+func (r *FinanceRepository) DeleteExpense(ctx context.Context, id string) error {
+	const q = `DELETE FROM expenses WHERE id = @id`
+	tag, err := r.db.Exec(ctx, q, pgx.NamedArgs{"id": id})
+	if err != nil {
+		return fmt.Errorf("delete expense %q: %w", id, err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("delete expense %q: %w", id, finance.ErrNotFound)
+	}
+	return nil
+}
+
+func (r *FinanceRepository) ConfirmExpense(ctx context.Context, id string) error {
+	const q = `UPDATE expenses SET status = 'posted' WHERE id = @id AND status = 'draft'`
+	tag, err := r.db.Exec(ctx, q, pgx.NamedArgs{"id": id})
+	if err != nil {
+		return fmt.Errorf("confirm expense %q: %w", id, err)
+	}
+	if tag.RowsAffected() > 0 {
+		return nil
+	}
+
+	// Zero rows is ambiguous — no such expense, or one that is already
+	// posted. The caller needs to tell those apart.
+	const statusQ = `SELECT status FROM expenses WHERE id = @id`
+	var status finance.Status
+	err = r.db.QueryRow(ctx, statusQ, pgx.NamedArgs{"id": id}).Scan(&status)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("confirm expense %q: %w", id, finance.ErrNotFound)
+	}
+	if err != nil {
+		return fmt.Errorf("confirm expense %q: %w", id, err)
+	}
+	return fmt.Errorf("confirm expense %q: %w", id, finance.ErrNotDraft)
+}
+
+// VoidExpense keeps the row (and its external_ref) so the generator will not
+// re-create what staff retired; every P&L aggregate filters on 'posted'.
+func (r *FinanceRepository) VoidExpense(ctx context.Context, id string) error {
+	const q = `UPDATE expenses SET status = 'void' WHERE id = @id`
+	tag, err := r.db.Exec(ctx, q, pgx.NamedArgs{"id": id})
+	if err != nil {
+		return fmt.Errorf("void expense %q: %w", id, err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("void expense %q: %w", id, finance.ErrNotFound)
+	}
+	return nil
+}
+
+// The unique index on external_ref is partial, so the conflict target has to
+// repeat its predicate for inference. A re-run of the generator hits the
+// index and inserts nothing — that is a no-op, not an error.
+func (r *FinanceRepository) InsertGenerated(ctx context.Context, e finance.Expense) (bool, error) {
+	e = expenseWithDefaults(e)
+	q := insertExpense + `
+		ON CONFLICT (external_ref) WHERE external_ref IS NOT NULL DO NOTHING`
+
+	tag, err := r.db.Exec(ctx, q, expenseArgs(e))
+	if err != nil {
+		return false, fmt.Errorf("insert generated expense %q: %w", e.ExternalRef, translateExpenseWrite(err))
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
+// --- rules ---
+
+const ruleSelect = `SELECT r.id, r.name, r.category_code, coalesce(c.label, ''), r.vendor, r.payment_method,
+		r.amount, r.day_of_month, r.auto_post, r.active_from, r.active_to, r.is_active, r.created_by, r.created_at
+	FROM expense_rules r
+	LEFT JOIN expense_categories c ON c.code = r.category_code`
+
+func (r *FinanceRepository) ListRules(ctx context.Context, activeOnly bool) ([]finance.Rule, error) {
+	q := ruleSelect + `
+		WHERE (NOT @active_only::boolean OR r.is_active)
+		ORDER BY r.day_of_month, r.name`
+
+	rows, err := r.db.Query(ctx, q, pgx.NamedArgs{"active_only": activeOnly})
+	if err != nil {
+		return nil, fmt.Errorf("list rules: %w", err)
+	}
+	defer rows.Close()
+
+	var out []finance.Rule
+	for rows.Next() {
+		var rule finance.Rule
+		if err := scanRule(rows, &rule); err != nil {
+			return nil, fmt.Errorf("list rules: scan: %w", err)
+		}
+		out = append(out, rule)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list rules: %w", err)
+	}
+	return out, nil
+}
+
+func (r *FinanceRepository) CreateRule(ctx context.Context, rule finance.Rule) (finance.Rule, error) {
+	const q = `INSERT INTO expense_rules
+			(name, category_code, vendor, payment_method, amount, day_of_month, auto_post, active_from, active_to, is_active, created_by)
+		VALUES (@name, @category_code, @vendor, @payment_method, @amount, @day_of_month, @auto_post, @active_from, @active_to, @is_active, @created_by)
+		RETURNING id, created_at, coalesce((SELECT label FROM expense_categories WHERE code = expense_rules.category_code), '')`
+
+	if rule.PaymentMethod == "" {
+		rule.PaymentMethod = finance.PaymentCard
+	}
+	err := r.db.QueryRow(ctx, q, ruleArgs(rule)).Scan(&rule.ID, &rule.CreatedAt, &rule.CategoryLabel)
+	if err != nil {
+		return finance.Rule{}, fmt.Errorf("create rule %q: %w", rule.Name, translateExpenseWrite(err))
+	}
+	return rule, nil
+}
+
+func (r *FinanceRepository) UpdateRule(ctx context.Context, rule finance.Rule) error {
+	const q = `UPDATE expense_rules SET
+			name = @name,
+			category_code = @category_code,
+			vendor = @vendor,
+			payment_method = @payment_method,
+			amount = @amount,
+			day_of_month = @day_of_month,
+			auto_post = @auto_post,
+			active_from = @active_from,
+			active_to = @active_to,
+			is_active = @is_active
+		WHERE id = @id`
+
+	args := ruleArgs(rule)
+	args["id"] = rule.ID
+	tag, err := r.db.Exec(ctx, q, args)
+	if err != nil {
+		return fmt.Errorf("update rule %q: %w", rule.ID, translateExpenseWrite(err))
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("update rule %q: %w", rule.ID, finance.ErrNotFound)
+	}
+	return nil
+}
+
+func (r *FinanceRepository) DeleteRule(ctx context.Context, id string) error {
+	const q = `DELETE FROM expense_rules WHERE id = @id`
+	tag, err := r.db.Exec(ctx, q, pgx.NamedArgs{"id": id})
+	if err != nil {
+		return fmt.Errorf("delete rule %q: %w", id, err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("delete rule %q: %w", id, finance.ErrNotFound)
+	}
+	return nil
+}
+
+// --- other income ---
+
+func (r *FinanceRepository) ListOtherIncome(ctx context.Context, from, to time.Time) ([]finance.OtherIncome, error) {
+	const q = `SELECT id, received_at, amount, source, description, created_by, created_at
+		FROM other_income
+		WHERE (@from::date IS NULL OR received_at >= @from::date)
+			AND (@to::date IS NULL OR received_at <= @to::date)
+		ORDER BY received_at DESC, created_at DESC`
+
+	rows, err := r.db.Query(ctx, q, pgx.NamedArgs{"from": nullTime(from), "to": nullTime(to)})
+	if err != nil {
+		return nil, fmt.Errorf("list other income: %w", err)
+	}
+	defer rows.Close()
+
+	var out []finance.OtherIncome
+	for rows.Next() {
+		var i finance.OtherIncome
+		if err := rows.Scan(&i.ID, &i.ReceivedAt, &i.Amount, &i.Source, &i.Description, &i.CreatedBy, &i.CreatedAt); err != nil {
+			return nil, fmt.Errorf("list other income: scan: %w", err)
+		}
+		out = append(out, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list other income: %w", err)
+	}
+	return out, nil
+}
+
+func (r *FinanceRepository) CreateOtherIncome(ctx context.Context, i finance.OtherIncome) (finance.OtherIncome, error) {
+	const q = `INSERT INTO other_income (received_at, amount, source, description, created_by)
+		VALUES (@received_at, @amount, @source, @description, @created_by)
+		RETURNING id, created_at`
+
+	err := r.db.QueryRow(ctx, q, pgx.NamedArgs{
+		"received_at": i.ReceivedAt,
+		"amount":      i.Amount,
+		"source":      i.Source,
+		"description": i.Description,
+		"created_by":  i.CreatedBy,
+	}).Scan(&i.ID, &i.CreatedAt)
+	if err != nil {
+		return finance.OtherIncome{}, fmt.Errorf("create other income: %w", err)
+	}
+	return i, nil
+}
+
+func (r *FinanceRepository) DeleteOtherIncome(ctx context.Context, id string) error {
+	const q = `DELETE FROM other_income WHERE id = @id`
+	tag, err := r.db.Exec(ctx, q, pgx.NamedArgs{"id": id})
+	if err != nil {
+		return fmt.Errorf("delete other income %q: %w", id, err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("delete other income %q: %w", id, finance.ErrNotFound)
+	}
+	return nil
+}
+
+// --- report source ---
+
+// MonthlyFacts drives the whole report off generate_series over months, so a
+// month with no activity at all still comes back as a zero row and never
+// shifts the report's columns.
+//
+// Consultation revenue is bucketed by scheduled_at — the month the
+// consultation actually happened — while leadstats buckets its own numbers by
+// created_at ("when it was booked"). The price>0 AND status='completed' filter
+// is the same one, so both pages agree on what "earned" means, but NOT on
+// which month a consultation booked in one month and held in the next belongs
+// to. That difference is deliberate here: a P&L is about when the money moved.
+//
+// scheduled_at is a timestamptz, and date_trunc over one follows the DB session
+// TimeZone — so the month is pinned to businessTZ instead, or the same row
+// would land in different months on two deployments.
+//
+// Only posted expenses are summed: a draft is a generated suggestion nobody
+// has confirmed, and counting it would overstate spend.
+func (r *FinanceRepository) MonthlyFacts(ctx context.Context, from, to time.Time) ([]finance.MonthFacts, error) {
+	const factsQ = `
+		WITH bounds AS (
+			SELECT date_trunc('month', @from::date)::date AS lo,
+				(date_trunc('month', @to::date) + interval '1 month')::date AS hi
+		),
+		months AS (
+			SELECT generate_series(b.lo::timestamp, (b.hi - interval '1 month')::timestamp, interval '1 month')::date AS month
+			FROM bounds b
+		),
+		consult AS (
+			SELECT date_trunc('month', c.scheduled_at AT TIME ZONE '` + businessTZ + `')::date AS month,
+				coalesce(sum(c.price) FILTER (WHERE c.price > 0 AND c.status = 'completed'), 0) AS revenue
+			FROM consultations c, bounds b
+			WHERE c.scheduled_at >= b.lo AND c.scheduled_at < b.hi
+			GROUP BY 1
+		),
+		case_paid AS (
+			SELECT date_trunc('month', p.paid_at)::date AS month, sum(p.amount) AS paid
+			FROM case_payments p, bounds b
+			WHERE p.paid_at >= b.lo AND p.paid_at < b.hi
+			GROUP BY 1
+		),
+		other_inc AS (
+			SELECT date_trunc('month', o.received_at)::date AS month, sum(o.amount) AS amount
+			FROM other_income o, bounds b
+			WHERE o.received_at >= b.lo AND o.received_at < b.hi
+			GROUP BY 1
+		),
+		lead_count AS (
+			SELECT date_trunc('month', l.received_at)::date AS month, count(*) AS leads
+			FROM leads l, bounds b
+			WHERE l.received_at >= b.lo AND l.received_at < b.hi
+			GROUP BY 1
+		),
+		first_lead AS (
+			SELECT client_id, min(received_at) AS first_lead_at
+			FROM leads
+			WHERE client_id IS NOT NULL
+			GROUP BY client_id
+		),
+		new_clients AS (
+			SELECT date_trunc('month', f.first_lead_at)::date AS month, count(*) AS clients
+			FROM first_lead f, bounds b
+			WHERE f.first_lead_at >= b.lo AND f.first_lead_at < b.hi
+			GROUP BY 1
+		)
+		SELECT m.month,
+			coalesce(cr.revenue, 0),
+			coalesce(cp.paid, 0),
+			coalesce(oi.amount, 0),
+			coalesce(lc.leads, 0),
+			coalesce(nc.clients, 0)
+		FROM months m
+		LEFT JOIN consult cr ON cr.month = m.month
+		LEFT JOIN case_paid cp ON cp.month = m.month
+		LEFT JOIN other_inc oi ON oi.month = m.month
+		LEFT JOIN lead_count lc ON lc.month = m.month
+		LEFT JOIN new_clients nc ON nc.month = m.month
+		ORDER BY m.month`
+
+	args := pgx.NamedArgs{"from": from, "to": to}
+	rows, err := r.db.Query(ctx, factsQ, args)
+	if err != nil {
+		return nil, fmt.Errorf("monthly facts: %w", err)
+	}
+	defer rows.Close()
+
+	var out []finance.MonthFacts
+	byMonth := map[string]int{}
+	for rows.Next() {
+		var monthAt time.Time
+		var f finance.MonthFacts
+		if err := rows.Scan(&monthAt, &f.ConsultRevenue, &f.CasePaid, &f.OtherIncome, &f.Leads, &f.NewClients); err != nil {
+			return nil, fmt.Errorf("monthly facts: scan: %w", err)
+		}
+		f.Month = finance.MonthKey(monthAt)
+		f.ExpenseByCategory = map[string]float64{}
+		byMonth[f.Month] = len(out)
+		out = append(out, f)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("monthly facts: %w", err)
+	}
+
+	const spendQ = `
+		SELECT date_trunc('month', spent_at)::date, category_code, sum(amount)
+		FROM expenses
+		WHERE status = 'posted'
+			AND spent_at >= date_trunc('month', @from::date)
+			AND spent_at < date_trunc('month', @to::date) + interval '1 month'
+		GROUP BY 1, 2`
+
+	spendRows, err := r.db.Query(ctx, spendQ, args)
+	if err != nil {
+		return nil, fmt.Errorf("monthly facts: expenses: %w", err)
+	}
+	defer spendRows.Close()
+
+	for spendRows.Next() {
+		var monthAt time.Time
+		var code string
+		var amount float64
+		if err := spendRows.Scan(&monthAt, &code, &amount); err != nil {
+			return nil, fmt.Errorf("monthly facts: expenses: scan: %w", err)
+		}
+		if idx, ok := byMonth[finance.MonthKey(monthAt)]; ok {
+			out[idx].ExpenseByCategory[code] = amount
+		}
+	}
+	if err := spendRows.Err(); err != nil {
+		return nil, fmt.Errorf("monthly facts: expenses: %w", err)
+	}
+	return out, nil
+}
+
+// Same income/expense definitions as MonthlyFacts, with no lower bound and
+// drafts excluded — everything strictly before from, as one number.
+func (r *FinanceRepository) BalanceBefore(ctx context.Context, from time.Time) (float64, error) {
+	const q = `
+		SELECT
+			coalesce((SELECT sum(price) FROM consultations
+				WHERE price > 0 AND status = 'completed'
+					AND (scheduled_at AT TIME ZONE '` + businessTZ + `') < @from::date), 0)
+			+ coalesce((SELECT sum(amount) FROM case_payments WHERE paid_at < @from::date), 0)
+			+ coalesce((SELECT sum(amount) FROM other_income WHERE received_at < @from::date), 0)
+			- coalesce((SELECT sum(amount) FROM expenses
+				WHERE status = 'posted' AND spent_at < @from::date), 0)`
+
+	var balance float64
+	if err := r.db.QueryRow(ctx, q, pgx.NamedArgs{"from": from}).Scan(&balance); err != nil {
+		return 0, fmt.Errorf("balance before: %w", err)
+	}
+	return balance, nil
+}
+
+// Cases created before the advocates roster only carry free-text
+// advocate_name and no advocate_id, so they cannot be attributed to a roster
+// row and are left out — the gap is the missing link, not a bug.
+func (r *FinanceRepository) AdvocateCollections(ctx context.Context, month time.Time) ([]finance.AdvocateCollection, error) {
+	const q = `
+		SELECT a.id::text, a.full_name, sum(p.amount), a.commission_percent
+		FROM advocates a
+		JOIN cases c ON c.advocate_id = a.id
+		JOIN case_payments p ON p.case_id = c.id
+		WHERE p.paid_at >= date_trunc('month', @month::date)
+			AND p.paid_at < date_trunc('month', @month::date) + interval '1 month'
+		GROUP BY a.id, a.full_name, a.commission_percent
+		ORDER BY 3 DESC`
+
+	rows, err := r.db.Query(ctx, q, pgx.NamedArgs{"month": month})
+	if err != nil {
+		return nil, fmt.Errorf("advocate collections %s: %w", finance.MonthKey(month), err)
+	}
+	defer rows.Close()
+
+	var out []finance.AdvocateCollection
+	for rows.Next() {
+		var c finance.AdvocateCollection
+		if err := rows.Scan(&c.AdvocateID, &c.AdvocateName, &c.Collected, &c.CommissionPercent); err != nil {
+			return nil, fmt.Errorf("advocate collections %s: scan: %w", finance.MonthKey(month), err)
+		}
+		out = append(out, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("advocate collections %s: %w", finance.MonthKey(month), err)
+	}
+	return out, nil
+}
+
+// --- helpers ---
+
+func scanExpense(row pgx.Row, e *finance.Expense) error {
+	return row.Scan(
+		&e.ID, &e.SpentAt, &e.Amount, &e.CategoryCode, &e.CategoryLabel,
+		&e.PaymentMethod, &e.Vendor, &e.Description, &e.Status, &e.Origin,
+		&e.RuleID, &e.ExternalRef, &e.CreatedBy, &e.CreatedAt,
+	)
+}
+
+func scanRule(row pgx.Row, rule *finance.Rule) error {
+	var activeTo *time.Time
+	err := row.Scan(
+		&rule.ID, &rule.Name, &rule.CategoryCode, &rule.CategoryLabel, &rule.Vendor, &rule.PaymentMethod,
+		&rule.Amount, &rule.DayOfMonth, &rule.AutoPost, &rule.ActiveFrom, &activeTo,
+		&rule.IsActive, &rule.CreatedBy, &rule.CreatedAt,
+	)
+	if err != nil {
+		return err
+	}
+	rule.ActiveTo = activeTo
+	return nil
+}
+
+func expenseWithDefaults(e finance.Expense) finance.Expense {
+	if e.Status == "" {
+		e.Status = finance.StatusPosted
+	}
+	if e.Origin == "" {
+		e.Origin = finance.OriginManual
+	}
+	if e.PaymentMethod == "" {
+		e.PaymentMethod = finance.PaymentCard
+	}
+	return e
+}
+
+func expenseArgs(e finance.Expense) pgx.NamedArgs {
+	return pgx.NamedArgs{
+		"spent_at":       e.SpentAt,
+		"amount":         e.Amount,
+		"category_code":  e.CategoryCode,
+		"payment_method": string(e.PaymentMethod),
+		"vendor":         e.Vendor,
+		"description":    e.Description,
+		"status":         string(e.Status),
+		"origin":         string(e.Origin),
+		"rule_id":        nullText(e.RuleID),
+		"external_ref":   nullText(e.ExternalRef),
+		"created_by":     e.CreatedBy,
+	}
+}
+
+func ruleArgs(rule finance.Rule) pgx.NamedArgs {
+	return pgx.NamedArgs{
+		"name":           rule.Name,
+		"category_code":  rule.CategoryCode,
+		"vendor":         rule.Vendor,
+		"payment_method": string(rule.PaymentMethod),
+		"amount":         rule.Amount,
+		"day_of_month":   rule.DayOfMonth,
+		"auto_post":      rule.AutoPost,
+		"active_from":    rule.ActiveFrom,
+		"active_to":      rule.ActiveTo,
+		"is_active":      rule.IsActive,
+		"created_by":     rule.CreatedBy,
+	}
+}
+
+// ConstraintName disambiguates the FKs sharing SQLSTATE 23503 — only the
+// category_code one means the caller named a category that doesn't exist.
+func translateExpenseWrite(err error) error {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) {
+		return err
+	}
+	if pgErr.Code == "23503" {
+		switch pgErr.ConstraintName {
+		case "expenses_category_code_fkey", "expense_rules_category_code_fkey":
+			return finance.ErrUnknownCategory
+		}
+	}
+	return err
+}
+
+// An empty external_ref must land as NULL: the unique index on it is partial,
+// so a stored empty string would collide across unrelated manual rows.
+func nullText(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
+}
+
+func nullTime(t time.Time) *time.Time {
+	if t.IsZero() {
+		return nil
+	}
+	return &t
+}
+
+// A raw % or _ typed into the search box is a literal, not a LIKE wildcard —
+// without this a single "%" matches the entire ledger.
+func escapeLike(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, "%", `\%`)
+	return strings.ReplaceAll(s, "_", `\_`)
+}

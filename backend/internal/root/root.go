@@ -14,6 +14,7 @@ import (
 	appauth "multiagent-seo/internal/application/auth"
 	appclientdetail "multiagent-seo/internal/application/clientdetail"
 	appclientsegments "multiagent-seo/internal/application/clientsegments"
+	appfinance "multiagent-seo/internal/application/finance"
 	apphealth "multiagent-seo/internal/application/health"
 	appleadstats "multiagent-seo/internal/application/leadstats"
 	appvault "multiagent-seo/internal/application/vault"
@@ -81,6 +82,17 @@ func Run(ctx context.Context, cfg config.Config) error {
 	)
 	vaultSvc := appvault.NewService(postgres.NewVaultRepository(pool))
 
+	financeRepo := postgres.NewFinanceRepository(pool)
+	financeSvc := appfinance.NewService(appfinance.Deps{
+		Categories: financeRepo,
+		Expenses:   financeRepo,
+		Rules:      financeRepo,
+		Income:     financeRepo,
+		Report:     financeRepo,
+		Advocates:  postgres.NewAdvocateRateRepository(pool),
+		Log:        slogLog,
+	})
+
 	healthSvc := apphealth.NewService(domainhealth.NewService(healthRepo))
 	server := handlers.NewServer(
 		handlers.NewHealthHandler(healthSvc),
@@ -94,8 +106,10 @@ func Run(ctx context.Context, cfg config.Config) error {
 		handlers.NewClientSegmentsHandler(clientSegmentsSvc),
 		handlers.NewClientDetailHandler(clientDetailSvc),
 		handlers.NewVaultHandler(vaultSvc),
+		handlers.NewFinanceHandler(financeSvc),
 	)
 
+	schedule(ctx, cfg.Finance.GenerateInterval, financeSvc.GenerateDueExpenses)
 	schedule(ctx, cfg.Prompt.PromoteInterval, evolveSvc.PromotePrompts)
 	if cfg.Prompt.EvolveEnabled {
 		schedule(ctx, cfg.Prompt.EvolveInterval, evolveSvc.GenerateCandidate)
