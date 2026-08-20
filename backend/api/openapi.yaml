@@ -590,16 +590,51 @@ paths:
       security:
         - bearerAuth: [ ]
       tags: [ Clients ]
-      summary: Every client with their derived funnel segment and tags — no date range, this is a snapshot of all-time activity, not a period aggregate
+      summary: Clients with their derived funnel segment and tags, filtered/paginated — no date range, this is a snapshot of all-time activity, not a period aggregate
+      parameters:
+        - name: id
+          in: query
+          description: Exact client id — narrows to a single client (used by the client detail page instead of fetching every client)
+          schema:
+            type: string
+        - name: segment
+          in: query
+          schema:
+            $ref: "#/components/schemas/Segment"
+        - name: tag
+          in: query
+          schema:
+            type: string
+        - name: search
+          in: query
+          description: Case-insensitive substring match against name or phone
+          schema:
+            type: string
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [ activity, ltv ]
+            default: activity
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 25
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
       responses:
         "200":
-          description: Clients with segment and tags
+          description: A page of clients with segment and tags, plus all-time segment counts for the pill row
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/ClientSegment"
+                $ref: "#/components/schemas/ClientList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
 
   /clients/{id}/segment:
     parameters:
@@ -1590,6 +1625,29 @@ components:
             Lifetime value — completed consultations plus case payments
             actually received, all-time. Not case_fee (that's contracted,
             not collected) — kept in sync with ClientDetail.revenue_total.
+
+    ClientList:
+      type: object
+      required: [ items, total, segment_counts ]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ClientSegment"
+        total:
+          type: integer
+          format: int64
+          description: Count matching id/segment/tag/search — for pagination, not the same as items.length once limit is smaller than it
+        segment_counts:
+          type: object
+          additionalProperties:
+            type: integer
+            format: int64
+          description: >-
+            Client count per Segment value, computed over every client
+            regardless of the current id/segment/tag/search filters — powers
+            the segment-pill counts in the UI, which shouldn't shrink just
+            because staff typed something into the search box.
 
     SetClientSegmentOverrideRequest:
       type: object

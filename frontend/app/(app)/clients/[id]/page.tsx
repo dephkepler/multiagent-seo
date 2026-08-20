@@ -229,14 +229,15 @@ export default function ClientDetailPage() {
     queryFn: () => api<ClientDetail>(`/clients/${id}`),
   })
   // Segment/tags aren't part of the client card's own data — they're the
-  // funnel classification (see clientsegments on the backend), already
-  // fetched by the list page under this same query key, so opening a card
-  // straight from there costs no extra request.
+  // funnel classification (see clientsegments on the backend). GET /clients
+  // is now paginated (see the list page), so this client might not even be
+  // on whatever page the list happens to have cached — fetch it directly by
+  // id instead of searching a list that may not contain it.
   const segments = useQuery({
-    queryKey: ['client-segments'],
-    queryFn: () => api<ClientSegment[]>('/clients'),
+    queryKey: ['client-segments', id],
+    queryFn: () => api<{ items: ClientSegment[] }>(`/clients?id=${id}`),
   })
-  const segment = segments.data?.find((s) => s.client_id === id)
+  const segment = segments.data?.items[0]
 
   const setOverride = useMutation({
     mutationFn: (value: Segment | null) =>

@@ -15,7 +15,7 @@ import (
 )
 
 type clientSegmentsService interface {
-	List(ctx context.Context) ([]domain.ClientSegment, error)
+	List(ctx context.Context, filter domain.ListFilter) (domain.ClientList, error)
 	SetOverride(ctx context.Context, clientID string, segment *string) error
 }
 
@@ -27,26 +27,55 @@ func NewClientSegmentsHandler(svc clientSegmentsService) *ClientSegmentsHandler 
 	return &ClientSegmentsHandler{svc: svc}
 }
 
-func (h *ClientSegmentsHandler) ListClientSegments(w http.ResponseWriter, r *http.Request) {
+func (h *ClientSegmentsHandler) ListClientSegments(w http.ResponseWriter, r *http.Request, params oapigen.ListClientSegmentsParams) {
 	if isNil(h.svc) {
 		problem.Write(w, http.StatusServiceUnavailable, "client segments unavailable")
 		return
 	}
 
-	segments, err := h.svc.List(r.Context())
+	filter := domain.ListFilter{}
+	if params.Id != nil {
+		filter.ClientID = *params.Id
+	}
+	if params.Segment != nil {
+		filter.Segment = string(*params.Segment)
+	}
+	if params.Tag != nil {
+		filter.Tag = *params.Tag
+	}
+	if params.Search != nil {
+		filter.Search = *params.Search
+	}
+	if params.Sort != nil {
+		filter.Sort = string(*params.Sort)
+	}
+	if params.Limit != nil {
+		filter.Limit = *params.Limit
+	}
+	if params.Offset != nil {
+		filter.Offset = *params.Offset
+	}
+
+	list, err := h.svc.List(r.Context(), filter)
 	if err != nil {
-		log := logger.New(r.Context(), "handlers.clientsegments")
-		log.Error().Err(err).Msg("list client segments failed")
-		problem.Write(w, http.StatusInternalServerError, "failed to load client segments")
+		h.writeError(r.Context(), w, "list_client_segments", err)
 		return
 	}
 
-	out := make([]oapigen.ClientSegment, len(segments))
-	for i, s := range segments {
-		out[i] = toAPIClientSegment(s)
+	items := make([]oapigen.ClientSegment, len(list.Items))
+	for i, s := range list.Items {
+		items[i] = toAPIClientSegment(s)
+	}
+	counts := make(map[string]int64, len(list.SegmentCounts))
+	for segment, n := range list.SegmentCounts {
+		counts[segment] = int64(n)
 	}
 
-	response.WriteJSON(r.Context(), w, http.StatusOK, out)
+	response.WriteJSON(r.Context(), w, http.StatusOK, oapigen.ClientList{
+		Items:         items,
+		Total:         int64(list.Total),
+		SegmentCounts: counts,
+	})
 }
 
 func (h *ClientSegmentsHandler) SetClientSegmentOverride(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
@@ -80,6 +109,8 @@ func (h *ClientSegmentsHandler) SetClientSegmentOverride(w http.ResponseWriter, 
 var clientSegmentsErrMap = newErrMap("handlers.clientsegments",
 	E(domain.ErrNotFound, http.StatusNotFound, "client not found"),
 	EMsg(domain.ErrInvalidSegment, http.StatusBadRequest),
+	EMsg(domain.ErrInvalidTag, http.StatusBadRequest),
+	EMsg(domain.ErrInvalidSort, http.StatusBadRequest),
 )
 
 func (h *ClientSegmentsHandler) writeError(ctx context.Context, w http.ResponseWriter, op string, err error) {

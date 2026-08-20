@@ -23,6 +23,14 @@ var ErrInvalidSegment = errors.New("clientsegments: invalid segment")
 // doesn't exist.
 var ErrNotFound = errors.New("clientsegments: client not found")
 
+// ErrInvalidTag is returned when a ?tag= filter names a value outside the
+// known Tag* set (see IsTag).
+var ErrInvalidTag = errors.New("clientsegments: invalid tag")
+
+// ErrInvalidSort is returned when a ?sort= filter names a value outside
+// SortActivity/SortLTV.
+var ErrInvalidSort = errors.New("clientsegments: invalid sort")
+
 // Segment values, one per client — a straight-line funnel, checked in
 // Derive in the order a client actually moves through it (a case beats a
 // cancelled consultation history, so someone with both reads as Client,
@@ -73,6 +81,54 @@ func IsSegment(s string) bool {
 	default:
 		return false
 	}
+}
+
+// IsTag reports whether s is one of the known Tag* values — used to
+// validate a ?tag= filter before it's applied: an unrecognized value would
+// otherwise just silently match nothing, which reads as a bug, not "no
+// results".
+func IsTag(s string) bool {
+	switch s {
+	case TagDebtor, TagNoShowRisk, TagHighValue, TagDormant:
+		return true
+	default:
+		return false
+	}
+}
+
+// Sort values for List/ListFilter — always descending (both only make
+// sense high-to-low: newest activity, biggest LTV).
+const (
+	SortActivity = "activity"
+	SortLTV      = "ltv"
+)
+
+// ListFilter narrows Service.List's result. A zero-value field means "don't
+// filter on this" — except Limit, which the service defaults to 25 when
+// zero, so a caller can't accidentally request the entire table.
+type ListFilter struct {
+	// ClientID, when set, narrows to exactly one client — used by the
+	// client detail page instead of fetching (and searching through) every
+	// client just to find its own segment/tags.
+	ClientID string
+	Segment  string
+	Tag      string
+	Search   string
+	// Sort is SortActivity or SortLTV; "" defaults to SortActivity.
+	Sort   string
+	Limit  int
+	Offset int
+}
+
+// ClientList is Service.List's paginated result.
+type ClientList struct {
+	Items []ClientSegment
+	Total int
+	// SegmentCounts is always computed over every client, ignoring every
+	// ListFilter field — it powers the segment-pill counts in the UI, which
+	// shouldn't shrink just because staff typed something into the search
+	// box.
+	SegmentCounts map[string]int
 }
 
 // Activity is the raw per-client facts the repository reads straight off

@@ -1,8 +1,8 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
 import { Card } from '@/components/ui/card'
@@ -23,6 +23,12 @@ interface ClientSegment {
   case_fee: number
   case_paid: number
   ltv: number
+}
+
+interface ClientList {
+  items: ClientSegment[]
+  total: number
+  segment_counts: Partial<Record<Segment, number>>
 }
 
 const SEGMENT_LABEL: Record<Segment, string> = {
@@ -72,13 +78,31 @@ type SortKey = 'activity' | 'ltv'
 export default function ClientsPage() {
   const qc = useQueryClient()
   const [query, setQuery] = useState('')
+  // Filtering/sorting now happens server-side (see GET /clients), so typing
+  // fires a real HTTP request per change — debounce keeps that to one
+  // request per pause in typing, not one per keystroke.
+  const [debouncedQuery, setDebouncedQuery] = useState('')
   const [segmentFilter, setSegmentFilter] = useState<Segment | 'all'>('all')
   const [page, setPage] = useState(1)
   const [sortKey, setSortKey] = useState<SortKey>('activity')
 
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedQuery(query.trim()), 300)
+    return () => clearTimeout(t)
+  }, [query])
+
+  const params = new URLSearchParams()
+  if (segmentFilter !== 'all') params.set('segment', segmentFilter)
+  if (debouncedQuery) params.set('search', debouncedQuery)
+  params.set('sort', sortKey)
+  params.set('limit', String(PAGE_SIZE))
+  params.set('offset', String((page - 1) * PAGE_SIZE))
+  const queryString = params.toString()
+
   const clients = useQuery({
-    queryKey: ['client-segments'],
-    queryFn: () => api<ClientSegment[]>('/clients'),
+    queryKey: ['client-segments', queryString],
+    queryFn: () => api<ClientList>(`/clients?${queryString}`),
+    placeholderData: keepPreviousData,
   })
 
   const setOverride = useMutation({
@@ -88,25 +112,12 @@ export default function ClientsPage() {
     onError: (e: Error) => toast.error(e.message),
   })
 
-  const counts = useMemo(() => {
-    const c: Partial<Record<Segment, number>> = {}
-    for (const cl of clients.data || []) c[cl.segment] = (c[cl.segment] || 0) + 1
-    return c
-  }, [clients.data])
-
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    return (clients.data || [])
-      .filter((c) => segmentFilter === 'all' || c.segment === segmentFilter)
-      .filter((c) => !q || c.name.toLowerCase().includes(q) || c.phone.includes(q))
-      .sort((a, b) =>
-        sortKey === 'ltv' ? b.ltv - a.ltv : new Date(b.last_activity).getTime() - new Date(a.last_activity).getTime()
-      )
-  }, [clients.data, query, segmentFilter, sortKey])
-
-  const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
+  const items = clients.data?.items ?? []
+  const total = clients.data?.total ?? 0
+  const counts = clients.data?.segment_counts ?? {}
+  const totalAll = SEGMENT_ORDER.reduce((sum, s) => sum + (counts[s] || 0), 0)
+  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE))
   const pageSafe = Math.min(page, pageCount)
-  const pageItems = filtered.slice((pageSafe - 1) * PAGE_SIZE, pageSafe * PAGE_SIZE)
 
   function resetToFirstPage<T>(setter: (v: T) => void) {
     return (v: T) => {
@@ -130,7 +141,7 @@ export default function ClientsPage() {
 
         <div className='mb-4 flex flex-wrap gap-2'>
           <SegmentPill active={segmentFilter === 'all'} onClick={() => onSegmentFilterChange('all')}>
-            Все ({clients.data?.length ?? 0})
+            Все ({totalAll})
           </SegmentPill>
           {SEGMENT_ORDER.map((s) => (
             <SegmentPill
@@ -177,14 +188,14 @@ export default function ClientsPage() {
               </tr>
             </thead>
             <tbody>
-              {pageItems.length === 0 && (
+              {items.length === 0 && (
                 <tr>
                   <td colSpan={8} className='py-6 text-center text-gray-400'>
                     {clients.isLoading ? 'Загрузка…' : clients.isError ? 'Не удалось загрузить' : 'Никого не найдено'}
                   </td>
                 </tr>
               )}
-              {pageItems.map((c) => {
+              {items.map((c) => {
                 const debt = c.case_fee - c.case_paid
                 return (
                   <tr key={c.client_id} className='border-t border-gray-100'>
@@ -237,10 +248,10 @@ export default function ClientsPage() {
           </table>
         </div>
 
-        {filtered.length > 0 && (
+        {total > 0 && (
           <div className='mt-4 flex items-center justify-between text-xs text-gray-500'>
             <span>
-              {(pageSafe - 1) * PAGE_SIZE + 1}–{Math.min(pageSafe * PAGE_SIZE, filtered.length)} из {filtered.length}
+              {(pageSafe - 1) * PAGE_SIZE + 1}–{Math.min(pageSafe * PAGE_SIZE, total)} из {total}
             </span>
             <div className='flex items-center gap-2'>
               <button
