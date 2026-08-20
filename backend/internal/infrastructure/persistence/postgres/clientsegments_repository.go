@@ -137,6 +137,32 @@ func (r *ClientSegmentsRepository) RemoveTag(ctx context.Context, clientID, tag 
 	return nil
 }
 
+// ClientTags is a direct indexed lookup (client_tags' primary key leads
+// with client_id) — unlike List, it never touches consultations/cases or
+// runs Derive for every other client just to answer "what tags does this
+// one client have."
+func (r *ClientSegmentsRepository) ClientTags(ctx context.Context, clientID string) ([]string, error) {
+	const q = `SELECT tag FROM client_tags WHERE client_id = @id ORDER BY tag`
+	rows, err := r.db.Query(ctx, q, pgx.NamedArgs{"id": clientID})
+	if err != nil {
+		return nil, fmt.Errorf("client tags %q: %w", clientID, err)
+	}
+	defer rows.Close()
+
+	var tags []string
+	for rows.Next() {
+		var tag string
+		if err := rows.Scan(&tag); err != nil {
+			return nil, fmt.Errorf("client tags %q: scan: %w", clientID, err)
+		}
+		tags = append(tags, tag)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("client tags %q: %w", clientID, err)
+	}
+	return tags, nil
+}
+
 func (r *ClientSegmentsRepository) ListTagDefs(ctx context.Context) ([]clientsegments.TagDef, error) {
 	const q = `SELECT label, category, created_at FROM client_tag_defs ORDER BY category, label`
 	rows, err := r.db.Query(ctx, q)

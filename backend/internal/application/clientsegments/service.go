@@ -118,15 +118,18 @@ func (s *Service) RemoveTag(ctx context.Context, clientID, tag string) error {
 	return nil
 }
 
+// Tags is a scoped read (see Repository.ClientTags) — unlike List, it
+// doesn't run ListActivity/Derive over every client just to answer one
+// client's tags. A nonexistent clientID and an existing client with no
+// tags both come back as an empty slice; every caller (the bot's /tags
+// menu) already resolved the client via a separate lookup before reaching
+// here, so that ambiguity never actually matters in practice.
 func (s *Service) Tags(ctx context.Context, clientID string) ([]string, error) {
-	list, err := s.List(ctx, domain.ListFilter{ClientID: clientID, Limit: 1})
+	tags, err := s.repo.ClientTags(ctx, clientID)
 	if err != nil {
 		return nil, fmt.Errorf("clientsegments: tags: %w", err)
 	}
-	if len(list.Items) == 0 {
-		return nil, fmt.Errorf("clientsegments: tags: %w", domain.ErrNotFound)
-	}
-	return list.Items[0].ManualTags, nil
+	return tags, nil
 }
 
 func (s *Service) ListTagDefs(ctx context.Context) ([]domain.TagDef, error) {
@@ -137,17 +140,32 @@ func (s *Service) ListTagDefs(ctx context.Context) ([]domain.TagDef, error) {
 	return defs, nil
 }
 
-func (s *Service) CreateTagDef(ctx context.Context, label, category, createdBy string) error {
-	label = strings.TrimSpace(label)
-	if label == "" || utf8.RuneCountInString(label) > domain.ManualTagMaxLen {
-		return fmt.Errorf("clientsegments: create tag def: %w: %q", domain.ErrInvalidManualTag, label)
+// normalizeTagField trims a label/category and rejects it if that leaves
+// nothing, or more than ManualTagMaxLen runes — the one place this check
+// lives, so CreateTagDef/UpdateTagDef's four call sites (label and
+// category, create and update) can't drift out of sync with each other.
+func normalizeTagField(raw string) (string, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" || utf8.RuneCountInString(trimmed) > domain.ManualTagMaxLen {
+		return "", fmt.Errorf("%w: %q", domain.ErrInvalidManualTag, trimmed)
 	}
-	category = strings.TrimSpace(category)
-	if category == "" {
+	return trimmed, nil
+}
+
+func (s *Service) CreateTagDef(ctx context.Context, label, category, createdBy string) error {
+	label, err := normalizeTagField(label)
+	if err != nil {
+		return fmt.Errorf("clientsegments: create tag def: %w", err)
+	}
+	// Category alone defaults rather than rejects on empty — every other
+	// caller must pick or type one, but a bare label shouldn't fail just
+	// because the caller didn't bother categorizing it.
+	if strings.TrimSpace(category) == "" {
 		category = domain.DefaultTagCategory
 	}
-	if utf8.RuneCountInString(category) > domain.ManualTagMaxLen {
-		return fmt.Errorf("clientsegments: create tag def: %w: %q", domain.ErrInvalidManualTag, category)
+	category, err = normalizeTagField(category)
+	if err != nil {
+		return fmt.Errorf("clientsegments: create tag def: %w", err)
 	}
 	if err := s.repo.CreateTagDef(ctx, label, category, createdBy); err != nil {
 		return fmt.Errorf("clientsegments: create tag def: %w", err)
@@ -161,16 +179,16 @@ func (s *Service) CreateTagDef(ctx context.Context, label, category, createdBy s
 // surprising for a caller that explicitly asked to set it to something.
 func (s *Service) UpdateTagDef(ctx context.Context, label string, newLabel, newCategory *string) error {
 	if newLabel != nil {
-		trimmed := strings.TrimSpace(*newLabel)
-		if trimmed == "" || utf8.RuneCountInString(trimmed) > domain.ManualTagMaxLen {
-			return fmt.Errorf("clientsegments: update tag def: %w: %q", domain.ErrInvalidManualTag, trimmed)
+		trimmed, err := normalizeTagField(*newLabel)
+		if err != nil {
+			return fmt.Errorf("clientsegments: update tag def: %w", err)
 		}
 		newLabel = &trimmed
 	}
 	if newCategory != nil {
-		trimmed := strings.TrimSpace(*newCategory)
-		if trimmed == "" || utf8.RuneCountInString(trimmed) > domain.ManualTagMaxLen {
-			return fmt.Errorf("clientsegments: update tag def: %w: %q", domain.ErrInvalidManualTag, trimmed)
+		trimmed, err := normalizeTagField(*newCategory)
+		if err != nil {
+			return fmt.Errorf("clientsegments: update tag def: %w", err)
 		}
 		newCategory = &trimmed
 	}

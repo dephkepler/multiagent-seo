@@ -24,9 +24,16 @@ var ErrTagDefExists = errors.New("clientsegments: tag definition already exists"
 // UpdateTagDef/DeleteTagDef against a label that isn't in the vocabulary.
 var ErrTagDefNotFound = errors.New("clientsegments: tag definition not found")
 
-// keeps a manual tag (or a tag def's label/category) short — notes have
-// their own field (see clientdetail) for anything longer.
-const ManualTagMaxLen = 40
+// ManualTagMaxLen keeps a manual tag (or a tag def's label/category) short —
+// notes have their own field (see clientdetail) for anything longer. Also a
+// real technical ceiling, not just a style choice: the bot embeds a label or
+// category verbatim in a Telegram callback_data payload behind a 7-byte
+// prefix ("tagdel:"/"tagset:"/"tagcat:", see adminbot.go), and Telegram caps
+// callback_data at 64 bytes total. A rune here can cost up to 2 UTF-8 bytes
+// (Cyrillic, this product's whole alphabet), so 24 runes × 2 bytes + 7 = 55
+// stays under the cap with headroom; the previous limit of 40 allowed up to
+// 87 bytes and would have silently broken that client's /tags menu.
+const ManualTagMaxLen = 24
 
 // DefaultTagCategory is what a tag def gets when nothing more specific
 // applies — the vocabulary's one catch-all group.

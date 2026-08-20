@@ -10,6 +10,10 @@ type Repository interface {
 	AddTag(ctx context.Context, clientID, tag, createdBy string) error
 	// idempotent; unlike AddTag, a missing client here is not an error either.
 	RemoveTag(ctx context.Context, clientID, tag string) error
+	// ClientTags is a scoped read for callers (the bot's /tags menu) that
+	// only need one client's manual tags — a plain indexed lookup, not
+	// List's full ListActivity/Derive pass over every client.
+	ClientTags(ctx context.Context, clientID string) ([]string, error)
 
 	// category, then label — matches the two-level grouping the picker/
 	// management UI show.

@@ -7,6 +7,9 @@ import { toast } from 'sonner'
 import { api } from '@/lib/api'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { SectionHeader } from '@/components/ui/section-header'
 import { cx } from '@/lib/cx'
 
 type Segment = 'lead' | 'booked' | 'consulted' | 'client' | 'repeat' | 'lost'
@@ -66,27 +69,33 @@ const TAG_LABEL: Record<string, string> = {
   high_value: 'Ценный клиент',
   dormant: 'Без контакта 90+ дней',
 }
-const TAG_COLOR: Record<string, string> = {
-  debtor: 'border border-rose-200 bg-rose-50 text-rose-700',
-  no_show_risk: 'border border-orange-200 bg-orange-50 text-orange-700',
-  high_value: 'border border-emerald-200 bg-emerald-50 text-emerald-700',
-  dormant: 'border border-gray-200 bg-gray-50 text-gray-500',
+type BadgeVariant = 'neutral' | 'success' | 'warning' | 'danger' | 'info'
+const TAG_BADGE_VARIANT: Record<string, BadgeVariant> = {
+  debtor: 'danger',
+  no_show_risk: 'warning',
+  high_value: 'success',
+  dormant: 'neutral',
 }
 
-// One color per category, assigned by position in the sorted category list
-// — stable as long as the set of categories doesn't change, and gives
-// manual tags a real visual "level" (which group they're in) instead of
-// all looking the same regardless of category.
+// One color per category, assigned by position in the *alphabetically
+// sorted* category list — sorted so the assignment doesn't depend on
+// whatever order the API happens to return defs in (that's not guaranteed
+// stable), and gives manual tags a real visual "level" (which group
+// they're in) instead of all looking the same regardless of category.
+// Deliberately avoids gray/sky/amber/emerald/violet/rose/orange — every
+// hue SEGMENT_COLOR or TAG_BADGE_VARIANT already uses on this same row —
+// so a manual tag's color can't be mistaken for a segment or an auto-tag.
 const CATEGORY_PALETTE = [
-  'border-violet-200 bg-violet-50 text-violet-700',
+  'border-teal-200 bg-teal-50 text-teal-700',
   'border-cyan-200 bg-cyan-50 text-cyan-700',
-  'border-amber-200 bg-amber-50 text-amber-700',
-  'border-pink-200 bg-pink-50 text-pink-700',
-  'border-lime-200 bg-lime-50 text-lime-700',
+  'border-fuchsia-200 bg-fuchsia-50 text-fuchsia-700',
   'border-indigo-200 bg-indigo-50 text-indigo-700',
+  'border-lime-200 bg-lime-50 text-lime-700',
+  'border-blue-200 bg-blue-50 text-blue-700',
 ]
 function categoryColorClass(category: string, categories: string[]): string {
-  const idx = Math.max(0, categories.indexOf(category))
+  const sorted = [...categories].sort()
+  const idx = Math.max(0, sorted.indexOf(category))
   return CATEGORY_PALETTE[idx % CATEGORY_PALETTE.length]
 }
 
@@ -180,9 +189,13 @@ export default function ClientsPage() {
         method: 'PATCH',
         body: JSON.stringify({ label: newLabel, category: newCategory }),
       }),
-    onSuccess: () => {
+    onSuccess: (_data, vars) => {
       qc.invalidateQueries({ queryKey: ['client-tag-defs'] })
       qc.invalidateQueries({ queryKey: ['client-segments'] })
+      // Same reasoning as deleteTagDef below: a filter stuck on the old
+      // label would silently match nothing once every client_tags row has
+      // cascaded to the new one.
+      if (vars.newLabel) setTagFilter((f) => (f === vars.label ? vars.newLabel! : f))
     },
     onError: (e: Error) => toast.error(e.message),
   })
@@ -219,21 +232,17 @@ export default function ClientsPage() {
   return (
     <div className='space-y-6'>
       <Card>
-        <div className='mb-4 flex items-center justify-between'>
-          <h1 className='text-lg font-semibold'>Клиенты</h1>
-          <div className='flex items-center gap-3'>
-            <span className='text-xs text-gray-400'>
-              Снимок по всей истории, без периода — не путать с фильтром дат на «Заявках»
-            </span>
-            <button
-              type='button'
-              onClick={() => setManageTagsOpen((v) => !v)}
-              className='shrink-0 rounded-md border border-gray-200 px-2 py-1 text-xs text-gray-500 hover:bg-gray-50'
-            >
+        <SectionHeader
+          title='Клиенты'
+          action={
+            <Button type='button' variant='secondary' size='sm' onClick={() => setManageTagsOpen((v) => !v)}>
               ⚙ Управление тегами
-            </button>
-          </div>
-        </div>
+            </Button>
+          }
+        />
+        <p className='-mt-2 mb-4 text-xs text-gray-400'>
+          Снимок по всей истории, без периода — не путать с фильтром дат на «Заявках»
+        </p>
 
         {manageTagsOpen && (
           <ManageTagsPanel
@@ -268,7 +277,7 @@ export default function ClientsPage() {
               Все теги
             </TagFilterPill>
             {categories.map((category) => (
-              <div key={category} className='flex items-center gap-1.5'>
+              <div key={category} className='flex flex-wrap items-center gap-1.5'>
                 <span className='text-[11px] whitespace-nowrap text-gray-400'>{category}:</span>
                 {(defsByCategory.get(category) ?? []).map((d) => (
                   <TagFilterPill
@@ -285,14 +294,14 @@ export default function ClientsPage() {
           </div>
         )}
 
-        <div className='mb-4 flex items-center justify-between gap-4'>
+        <div className='mb-4 flex flex-wrap items-center justify-between gap-3'>
           <Input
             value={query}
             onChange={(e) => onQueryChange(e.target.value)}
             placeholder='Поиск по имени или телефону…'
-            className='max-w-sm'
+            className='w-full sm:max-w-sm'
           />
-          <span className='shrink-0 text-xs text-gray-400'>
+          <span className='text-xs text-gray-400'>
             Сегмент обычно считается сам — выберите вручную в таблице, чтобы закрепить свой (например клиент ушёл к
             другому адвокату)
           </span>
@@ -329,30 +338,34 @@ export default function ClientsPage() {
                 const debt = c.case_fee - c.case_paid
                 return (
                   <tr key={c.client_id} className='border-t border-gray-100'>
-                    <td className='py-2 pr-4 font-medium'>
-                      <Link href={`/clients/${c.client_id}`} className='text-emerald-700 hover:underline'>
+                    <td className='max-w-[180px] py-2 pr-4 font-medium'>
+                      <Link
+                        href={`/clients/${c.client_id}`}
+                        className='block truncate text-emerald-700 hover:underline'
+                        title={c.name || undefined}
+                      >
                         {c.name || '—'}
                       </Link>
                     </td>
-                    <td className='py-2 pr-4 text-gray-500'>{c.phone || '—'}</td>
+                    <td className='max-w-[140px] py-2 pr-4 text-gray-500'>
+                      <span className='block truncate'>{c.phone || '—'}</span>
+                    </td>
                     <td className='py-2 pr-4'>
-                      <div className='flex items-center gap-1.5'>
-                        <select
-                          value={c.segment}
-                          disabled={setOverride.isPending}
-                          onChange={(e) => setOverride.mutate({ id: c.client_id, segment: e.target.value as Segment })}
-                          className={cx(
-                            'cursor-pointer rounded px-1.5 py-0.5 text-xs font-medium outline-none disabled:cursor-wait',
-                            SEGMENT_COLOR[c.segment]
-                          )}
-                        >
-                          {SEGMENT_ORDER.map((s) => (
-                            <option key={s} value={s}>
-                              {SEGMENT_LABEL[s]}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
+                      <select
+                        value={c.segment}
+                        disabled={setOverride.isPending}
+                        onChange={(e) => setOverride.mutate({ id: c.client_id, segment: e.target.value as Segment })}
+                        className={cx(
+                          'cursor-pointer rounded px-2 py-1 text-xs font-medium outline-none disabled:cursor-wait',
+                          SEGMENT_COLOR[c.segment]
+                        )}
+                      >
+                        {SEGMENT_ORDER.map((s) => (
+                          <option key={s} value={s}>
+                            {SEGMENT_LABEL[s]}
+                          </option>
+                        ))}
+                      </select>
                     </td>
                     <td className='py-2 pr-4'>
                       <TagsCell
@@ -381,30 +394,32 @@ export default function ClientsPage() {
         </div>
 
         {total > 0 && (
-          <div className='mt-4 flex items-center justify-between text-xs text-gray-500'>
+          <div className='mt-4 flex flex-wrap items-center justify-between gap-2 text-xs text-gray-500'>
             <span>
               {(pageSafe - 1) * PAGE_SIZE + 1}–{Math.min(pageSafe * PAGE_SIZE, total)} из {total}
             </span>
             <div className='flex items-center gap-2'>
-              <button
+              <Button
                 type='button'
+                variant='secondary'
+                size='sm'
                 disabled={pageSafe <= 1}
                 onClick={() => setPage((p) => Math.max(1, p - 1))}
-                className='rounded-md border border-gray-200 px-2 py-1 disabled:cursor-not-allowed disabled:opacity-40'
               >
                 ← Назад
-              </button>
-              <span>
+              </Button>
+              <span className='shrink-0'>
                 Стр. {pageSafe} из {pageCount}
               </span>
-              <button
+              <Button
                 type='button'
+                variant='secondary'
+                size='sm'
                 disabled={pageSafe >= pageCount}
                 onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
-                className='rounded-md border border-gray-200 px-2 py-1 disabled:cursor-not-allowed disabled:opacity-40'
               >
                 Вперёд →
-              </button>
+              </Button>
             </div>
           </div>
         )}
@@ -477,9 +492,9 @@ function TagsCell({
   return (
     <div className='flex flex-wrap items-center gap-1'>
       {tags.map((t) => (
-        <span key={t} className={cx('rounded px-1.5 py-0.5 text-[11px] font-medium', TAG_COLOR[t] || 'bg-gray-100 text-gray-600')}>
+        <Badge key={t} variant={TAG_BADGE_VARIANT[t] || 'neutral'}>
           {TAG_LABEL[t] || t}
-        </span>
+        </Badge>
       ))}
       {manualTags.map((t) => (
         <span
@@ -495,7 +510,7 @@ function TagsCell({
             disabled={pending}
             onClick={() => onRemove(t)}
             aria-label={`Убрать тег ${t}`}
-            className='leading-none opacity-60 hover:text-rose-600 hover:opacity-100 disabled:cursor-wait'
+            className='px-1 leading-none opacity-60 hover:text-rose-600 hover:opacity-100 disabled:cursor-wait'
           >
             ×
           </button>
@@ -510,7 +525,7 @@ function TagsCell({
               if (e.target.value) onAdd(e.target.value)
             }}
             aria-label='Добавить тег'
-            className='cursor-pointer appearance-none rounded-full border border-gray-200 bg-gray-50 py-0.5 pr-4 pl-2 text-[11px] font-medium text-gray-500 outline-none hover:bg-gray-100 disabled:cursor-wait'
+            className='min-h-[30px] cursor-pointer appearance-none rounded-full border border-gray-200 bg-gray-50 py-1.5 pr-4 pl-2 text-[11px] font-medium text-gray-500 outline-none hover:bg-gray-100 disabled:cursor-wait'
           >
             <option value=''>+ тег</option>
             {categories.map((category) => {
@@ -601,7 +616,7 @@ function ManageTagsPanel({
                       if (e.key === 'Escape') setEditing(null)
                     }}
                     onBlur={() => submitRename(d.label)}
-                    maxLength={40}
+                    maxLength={24}
                     className='w-32 rounded border border-emerald-300 px-1.5 py-0.5 text-xs outline-none'
                   />
                 ) : (
@@ -639,7 +654,7 @@ function ManageTagsPanel({
                       type='button'
                       onClick={() => onDelete(d.label)}
                       aria-label={`Удалить тег ${d.label}`}
-                      className='leading-none opacity-60 hover:text-rose-600 hover:opacity-100'
+                      className='px-1 leading-none opacity-60 hover:text-rose-600 hover:opacity-100'
                     >
                       ×
                     </button>
@@ -655,7 +670,7 @@ function ManageTagsPanel({
         <input
           value={newLabel}
           onChange={(e) => setNewLabel(e.target.value)}
-          maxLength={40}
+          maxLength={24}
           placeholder='Новый тег…'
           className='w-36 rounded border border-gray-200 px-1.5 py-1 text-xs outline-none focus:border-emerald-400'
         />
@@ -663,7 +678,7 @@ function ManageTagsPanel({
           <input
             value={newCategory}
             onChange={(e) => setNewCategory(e.target.value)}
-            maxLength={40}
+            maxLength={24}
             placeholder='Новая категория…'
             className='w-36 rounded border border-gray-200 px-1.5 py-1 text-xs outline-none focus:border-emerald-400'
           />
@@ -718,7 +733,7 @@ function SegmentPill({
       type='button'
       onClick={onClick}
       className={cx(
-        'rounded-full px-3 py-1 text-xs font-medium transition',
+        'rounded-full px-3 py-1.5 text-xs font-medium transition',
         active ? cx(colorClass || 'bg-gray-800 text-white', 'ring-2 ring-gray-300 ring-offset-1') : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
       )}
     >
@@ -747,7 +762,7 @@ function TagFilterPill({
       type='button'
       onClick={onClick}
       className={cx(
-        'rounded-full border px-2.5 py-0.5 text-[11px] font-medium transition',
+        'rounded-full border px-2.5 py-1 text-[11px] font-medium transition',
         colorClass || 'border-gray-200 bg-white text-gray-600',
         active ? 'ring-2 ring-gray-300 ring-offset-1' : 'opacity-70 hover:opacity-100'
       )}

@@ -10,6 +10,8 @@ import { Card } from '@/components/ui/card'
 import { Input, Label } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { SectionHeader } from '@/components/ui/section-header'
 import { cx } from '@/lib/cx'
 
 type Gender = '' | 'male' | 'female'
@@ -102,11 +104,19 @@ const TAG_LABEL: Record<string, string> = {
   high_value: 'Ценный клиент',
   dormant: 'Без контакта 90+ дней',
 }
-const TAG_COLOR: Record<string, string> = {
-  debtor: 'border border-rose-200 bg-rose-50 text-rose-700',
-  no_show_risk: 'border border-orange-200 bg-orange-50 text-orange-700',
-  high_value: 'border border-emerald-200 bg-emerald-50 text-emerald-700',
-  dormant: 'border border-gray-200 bg-gray-50 text-gray-500',
+// Same Badge variants /clients uses for these — a hand-rolled color map
+// here used to render this same auto-tag in a different color than the
+// list page for identical data (rose/orange for no_show_risk vs the list
+// page's amber "warning"), which reads as two different signals for the
+// same client. Badge is the shared house style (see also this page's
+// status/case chips), so this is the one place that follows it, not a
+// second parallel palette.
+type BadgeVariant = 'neutral' | 'success' | 'warning' | 'danger' | 'info'
+const TAG_BADGE_VARIANT: Record<string, BadgeVariant> = {
+  debtor: 'danger',
+  no_show_risk: 'warning',
+  high_value: 'success',
+  dormant: 'neutral',
 }
 
 interface TagDef {
@@ -116,17 +126,21 @@ interface TagDef {
 }
 // One color per category, by position in the sorted category list — same
 // scheme as the /clients list page, so a tag reads as the same "level"
-// wherever staff sees it.
+// wherever staff sees it. Deliberately avoids gray/sky/amber/emerald/
+// violet/rose/orange — every hue SEGMENT_COLOR or TAG_BADGE_VARIANT
+// already uses on this same card — so a manual tag's color can't be
+// mistaken for a segment or an auto-tag.
 const CATEGORY_PALETTE = [
-  'border-violet-200 bg-violet-50 text-violet-700',
+  'border-teal-200 bg-teal-50 text-teal-700',
   'border-cyan-200 bg-cyan-50 text-cyan-700',
-  'border-amber-200 bg-amber-50 text-amber-700',
-  'border-pink-200 bg-pink-50 text-pink-700',
-  'border-lime-200 bg-lime-50 text-lime-700',
+  'border-fuchsia-200 bg-fuchsia-50 text-fuchsia-700',
   'border-indigo-200 bg-indigo-50 text-indigo-700',
+  'border-lime-200 bg-lime-50 text-lime-700',
+  'border-blue-200 bg-blue-50 text-blue-700',
 ]
 function categoryColorClass(category: string, categories: string[]): string {
-  const idx = Math.max(0, categories.indexOf(category))
+  const sorted = [...categories].sort()
+  const idx = Math.max(0, sorted.indexOf(category))
   return CATEGORY_PALETTE[idx % CATEGORY_PALETTE.length]
 }
 
@@ -144,10 +158,16 @@ const CASE_STATUS_LABEL: Record<CaseStatus, string> = {
   completed: 'Завершено',
   cancelled: 'Отменено',
 }
-const CASE_STATUS_COLOR: Record<CaseStatus, string> = {
-  in_progress: 'bg-sky-100 text-sky-800',
-  completed: 'bg-emerald-100 text-emerald-800',
-  cancelled: 'bg-gray-100 text-gray-600',
+const CASE_STATUS_VARIANT: Record<CaseStatus, 'info' | 'success' | 'neutral'> = {
+  in_progress: 'info',
+  completed: 'success',
+  cancelled: 'neutral',
+}
+const CONSULT_STATUS_VARIANT: Record<ConsultationStatus, 'info' | 'success' | 'neutral' | 'danger'> = {
+  scheduled: 'info',
+  completed: 'success',
+  cancelled: 'neutral',
+  no_show: 'danger',
 }
 
 function fmtMoney(n: number): string {
@@ -373,12 +393,12 @@ export default function ClientDetailPage() {
 
   return (
     <div className='space-y-6'>
-      <div className='flex items-center justify-between'>
+      <div className='flex flex-wrap items-center justify-between gap-2'>
         <Link href='/clients' className='text-sm text-gray-500 hover:text-gray-700'>
           ← Все клиенты
         </Link>
-        <div className='flex items-center gap-3'>
-          <span className='font-mono text-xs text-gray-400 select-all'>Client ID: {d.client.id}</span>
+        <div className='flex min-w-0 items-center gap-3'>
+          <span className='truncate font-mono text-xs text-gray-400 select-all'>Client ID: {d.client.id}</span>
           <button
             type='button'
             disabled={deleteClient.isPending}
@@ -393,8 +413,9 @@ export default function ClientDetailPage() {
       </div>
 
       <Card>
-        <div className='mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6'>
-          <div className='rounded-md border border-gray-100 bg-gray-50/60 p-3'>
+        <SectionHeader title='Обзор' />
+        <div className='grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6'>
+          <div className='col-span-2 rounded-md border border-gray-100 bg-gray-50/60 p-3 sm:col-span-1'>
             <div className='text-xs text-gray-500'>Сегмент</div>
             <div className='mt-1 flex items-center gap-1.5'>
               {segment ? (
@@ -415,7 +436,7 @@ export default function ClientDetailPage() {
               )}
             </div>
           </div>
-          <div className='rounded-md border border-gray-100 bg-gray-50/60 p-3'>
+          <div className='col-span-2 rounded-md border border-gray-100 bg-gray-50/60 p-3 sm:col-span-1'>
             <div className='mb-1 text-xs text-gray-500'>Теги</div>
             <TagsEditor
               tags={segment?.tags ?? []}
@@ -432,13 +453,14 @@ export default function ClientDetailPage() {
           <MetricTile label='Дел' value={`${d.cases.length}${casesActive ? ` (${casesActive} в работе)` : ''}`} />
           <MetricTile label='Консультаций' value={`${d.consultations.length}${consultsDone ? ` (${consultsDone} провёл)` : ''}`} />
         </div>
-        <p className='mb-4 text-xs text-gray-400'>
+        <p className='mt-4 text-xs text-gray-400'>
           Первое обращение: {fmtDate(d.client.first_seen_at)} · Последняя активность: {fmtDate(d.client.last_seen_at)}
           {idle !== null && (idle === 0 ? ' (сегодня)' : ` (${idle} дн. назад)`)}
         </p>
+      </Card>
 
-        {/* Личные данные */}
-        <div className='mb-2 text-xs font-semibold tracking-wide text-gray-400 uppercase'>Личные данные</div>
+      <Card>
+        <SectionHeader title='Личные данные' />
         <div className='grid grid-cols-1 gap-4 md:grid-cols-3'>
           <div>
             <Label>Фамилия</Label>
@@ -472,9 +494,8 @@ export default function ClientDetailPage() {
           </div>
         </div>
 
-        {/* Тип клиента */}
-        <div className='mt-5 border-t border-gray-100 pt-4'>
-          <div className='mb-2 text-xs font-semibold tracking-wide text-gray-400 uppercase'>Тип клиента</div>
+        <div className='mt-6'>
+          <SectionHeader title='Тип клиента' />
           <div className='grid grid-cols-1 gap-4 md:grid-cols-3'>
             <div>
               <Label>Физ./юр. лицо</Label>
@@ -501,11 +522,14 @@ export default function ClientDetailPage() {
           </div>
         </div>
 
-        {/* Чувствительные данные — для документов, шифруются в базе */}
-        <div className='mt-5 border-t border-gray-100 pt-4'>
-          <div className='mb-2 flex items-center gap-1.5 text-xs font-semibold tracking-wide text-gray-400 uppercase'>
-            <span>🔒</span> Чувствительные данные
-          </div>
+        <div className='mt-6'>
+          <SectionHeader
+            title={
+              <span className='flex items-center gap-1.5'>
+                <span>🔒</span> Чувствительные данные
+              </span>
+            }
+          />
           <p className='mb-3 text-xs text-gray-400'>
             Для позовних заяв/клопотань — не для аналитики. Хранятся в базе зашифрованными, не в открытом виде.
           </p>
@@ -525,7 +549,7 @@ export default function ClientDetailPage() {
           </div>
         </div>
 
-        <div className='mt-5 flex justify-end border-t border-gray-100 pt-4'>
+        <div className='mt-6 flex justify-end border-t border-gray-100 pt-4'>
           <Button disabled={!dirty || saveClient.isPending} onClick={() => saveClient.mutate()}>
             {saveClient.isPending ? 'Сохранение…' : 'Сохранить'}
           </Button>
@@ -533,7 +557,7 @@ export default function ClientDetailPage() {
       </Card>
 
       <Card>
-        <h2 className='mb-3 text-sm font-semibold text-gray-700'>Дела ({d.cases.length})</h2>
+        <SectionHeader title={`Дела (${d.cases.length})`} />
         {d.cases.length === 0 ? (
           <p className='text-sm text-gray-400'>Дел пока не было.</p>
         ) : (
@@ -558,9 +582,7 @@ export default function ClientDetailPage() {
                     <td className='py-2 pr-4 text-gray-500'>{c.category || '—'}</td>
                     <td className='max-w-xs py-2 pr-4'>{c.description || '—'}</td>
                     <td className='py-2 pr-4'>
-                      <span className={cx('rounded px-2 py-0.5 text-xs font-medium', CASE_STATUS_COLOR[c.status])}>
-                        {CASE_STATUS_LABEL[c.status] || c.status}
-                      </span>
+                      <Badge variant={CASE_STATUS_VARIANT[c.status]}>{CASE_STATUS_LABEL[c.status] || c.status}</Badge>
                     </td>
                     <td className='py-2 pr-4 whitespace-nowrap'>{fmtMoney(c.fee)}</td>
                     <td className={cx('py-2 whitespace-nowrap', c.paid < c.fee ? 'font-medium text-rose-600' : 'text-gray-500')}>
@@ -575,7 +597,7 @@ export default function ClientDetailPage() {
       </Card>
 
       <Card>
-        <h2 className='mb-3 text-sm font-semibold text-gray-700'>Консультации ({d.consultations.length})</h2>
+        <SectionHeader title={`Консультации (${d.consultations.length})`} />
         {d.consultations.length === 0 ? (
           <p className='text-sm text-gray-400'>Консультаций пока не было.</p>
         ) : (
@@ -595,7 +617,9 @@ export default function ClientDetailPage() {
                   <tr key={c.id} className='border-t border-gray-100 align-top'>
                     <td className='py-2 pr-4 font-mono text-xs whitespace-nowrap text-gray-400 select-all'>{c.id}</td>
                     <td className='py-2 pr-4 whitespace-nowrap text-gray-500'>{fmtDateTime(c.scheduled_at)}</td>
-                    <td className='py-2 pr-4 text-gray-500'>{CONSULT_STATUS_LABEL[c.status] || c.status}</td>
+                    <td className='py-2 pr-4'>
+                      <Badge variant={CONSULT_STATUS_VARIANT[c.status]}>{CONSULT_STATUS_LABEL[c.status] || c.status}</Badge>
+                    </td>
                     <td className='py-2 pr-4 whitespace-nowrap'>{fmtMoney(c.price)}</td>
                     <td className='py-2 text-gray-500'>{c.case_note || '—'}</td>
                   </tr>
@@ -607,16 +631,18 @@ export default function ClientDetailPage() {
       </Card>
 
       <Card>
-        <h2 className='mb-3 text-sm font-semibold text-gray-700'>Заявки ({d.leads.length})</h2>
+        <SectionHeader title={`Заявки (${d.leads.length})`} />
         {d.leads.length === 0 ? (
           <p className='text-sm text-gray-400'>Заявок пока не было.</p>
         ) : (
           <div className='space-y-3'>
             {d.leads.map((l) => (
               <div key={l.id} className='rounded-md border border-gray-100 p-3'>
-                <div className='mb-1 flex items-center justify-between text-xs text-gray-400'>
-                  <span>{fmtDateTime(l.received_at)}</span>
-                  <span>{l.page || '—'}</span>
+                <div className='mb-1 flex items-center justify-between gap-2 text-xs text-gray-400'>
+                  <span className='shrink-0'>{fmtDateTime(l.received_at)}</span>
+                  <span className='min-w-0 truncate' title={l.page}>
+                    {l.page || '—'}
+                  </span>
                 </div>
                 <p className='text-sm whitespace-pre-wrap'>{l.message || '—'}</p>
               </div>
@@ -626,7 +652,7 @@ export default function ClientDetailPage() {
       </Card>
 
       <Card>
-        <h2 className='mb-1 text-sm font-semibold text-gray-700'>Заметки ({d.notes.length})</h2>
+        <SectionHeader title={`Заметки (${d.notes.length})`} />
         <p className='mb-3 text-xs text-gray-400'>
           Ручной журнал звонков/контактов — система не подключена ни к какой телефонии, это то, что вы сами сюда впишете.
         </p>
@@ -696,9 +722,9 @@ function TagsEditor({
         <span className='text-sm text-gray-400'>—</span>
       )}
       {tags.map((t) => (
-        <span key={t} className={cx('rounded px-1.5 py-0.5 text-[11px] font-medium', TAG_COLOR[t] || 'bg-gray-100 text-gray-600')}>
+        <Badge key={t} variant={TAG_BADGE_VARIANT[t] || 'neutral'}>
           {TAG_LABEL[t] || t}
-        </span>
+        </Badge>
       ))}
       {manualTags.map((t) => (
         <span
@@ -729,7 +755,7 @@ function TagsEditor({
               if (e.target.value) onAdd(e.target.value)
             }}
             aria-label='Добавить тег'
-            className='cursor-pointer appearance-none rounded-full border border-gray-200 bg-gray-50 py-0.5 pr-4 pl-2 text-[11px] font-medium text-gray-500 outline-none hover:bg-gray-100 disabled:cursor-wait'
+            className='min-h-[30px] cursor-pointer appearance-none rounded-full border border-gray-200 bg-gray-50 py-1.5 pr-4 pl-2 text-[11px] font-medium text-gray-500 outline-none hover:bg-gray-100 disabled:cursor-wait'
           >
             <option value=''>+ тег</option>
             {categories.map((category) => {

@@ -1889,17 +1889,20 @@ func (b *AdminBot) pickRemoveTag(ctx context.Context, cb *tgbotapi.CallbackQuery
 // category, in ListTagDefs' order (category, then label) — shared by
 // pickShowAddTagPicker (which only needs the category names) and
 // pickShowCategoryTags (which needs one category's labels).
-func (b *AdminBot) remainingTagsByCategory(ctx context.Context, clientID string) ([]string, map[string][]string, error) {
+// remainingTagsByCategory also returns the vocabulary's total size, so
+// callers can tell "nothing left to add because the vocabulary itself is
+// empty" apart from "nothing left because this client already has every
+// tag" — two very different situations that looked identical before.
+func (b *AdminBot) remainingTagsByCategory(ctx context.Context, clientID string) (categories []string, byCategory map[string][]string, totalDefs int, err error) {
 	defs, err := b.tags.ListTagDefs(ctx)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, 0, err
 	}
 	current, err := b.tags.Tags(ctx, clientID)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, 0, err
 	}
-	var categories []string
-	byCategory := make(map[string][]string)
+	byCategory = make(map[string][]string)
 	for _, d := range defs {
 		if slices.Contains(current, d.Label) {
 			continue
@@ -1909,7 +1912,7 @@ func (b *AdminBot) remainingTagsByCategory(ctx context.Context, clientID string)
 		}
 		byCategory[d.Category] = append(byCategory[d.Category], d.Label)
 	}
-	return categories, byCategory, nil
+	return categories, byCategory, len(defs), nil
 }
 
 // pickShowAddTagPicker handles "➕ Додати тег" — the vocabulary's first
@@ -1921,7 +1924,7 @@ func (b *AdminBot) pickShowAddTagPicker(ctx context.Context, cb *tgbotapi.Callba
 		b.answerCallback(ctx, cb, "Сесія застаріла, почніть з /tags")
 		return
 	}
-	categories, _, err := b.remainingTagsByCategory(ctx, fl.tags.clientID)
+	categories, _, totalDefs, err := b.remainingTagsByCategory(ctx, fl.tags.clientID)
 	if err != nil {
 		b.log.ErrorContext(ctx, "telegram: tags: list failed", "client_id", fl.tags.clientID, "err", err)
 		b.answerCallback(ctx, cb, "Помилка отримання міток")
@@ -1943,9 +1946,17 @@ func (b *AdminBot) pickShowAddTagPicker(ctx context.Context, cb *tgbotapi.Callba
 		tgbotapi.NewInlineKeyboardButtonData(b.tr(ctx, chatID, "‹ Назад"), "tagback"),
 	))
 
-	text := b.tr(ctx, chatID, "Оберіть категорію:")
-	if len(categories) == 0 {
-		text = b.tr(ctx, chatID, "Усі мітки вже додані клієнту.")
+	var text string
+	switch {
+	case totalDefs == 0:
+		// Distinct from "already all applied" below — telling staff a
+		// client "already has every tag" when none exist at all would be
+		// actively misleading about the system's own state.
+		text = fmt.Sprintf(b.tr(ctx, chatID, "%s: словник міток ще порожній. Додайте мітки в CRM (⚙ Управління тегами)."), fl.tags.clientName)
+	case len(categories) == 0:
+		text = fmt.Sprintf(b.tr(ctx, chatID, "%s: усі мітки вже додані."), fl.tags.clientName)
+	default:
+		text = fmt.Sprintf(b.tr(ctx, chatID, "%s — оберіть категорію:"), fl.tags.clientName)
 	}
 	edited := tgbotapi.NewEditMessageTextAndMarkup(chatID, cb.Message.MessageID, text, tgbotapi.NewInlineKeyboardMarkup(rows...))
 	if _, err := b.bot.Send(edited); err != nil {
@@ -1961,7 +1972,7 @@ func (b *AdminBot) pickShowCategoryTags(ctx context.Context, cb *tgbotapi.Callba
 		b.answerCallback(ctx, cb, "Сесія застаріла, почніть з /tags")
 		return
 	}
-	_, byCategory, err := b.remainingTagsByCategory(ctx, fl.tags.clientID)
+	_, byCategory, _, err := b.remainingTagsByCategory(ctx, fl.tags.clientID)
 	if err != nil {
 		b.log.ErrorContext(ctx, "telegram: tags: list failed", "client_id", fl.tags.clientID, "err", err)
 		b.answerCallback(ctx, cb, "Помилка отримання міток")
@@ -1984,7 +1995,11 @@ func (b *AdminBot) pickShowCategoryTags(ctx context.Context, cb *tgbotapi.Callba
 		tgbotapi.NewInlineKeyboardButtonData(b.tr(ctx, chatID, "‹ Назад"), "tagcatback"),
 	))
 
-	text := fmt.Sprintf(b.tr(ctx, chatID, "Категорія «%s» — оберіть мітку:"), category)
+	// Client name rendered here too (not just on the main menu) — so
+	// staff opening a second /tags session for a different client mid-flow
+	// at least has a visible cue if a stale drill-down screen from the
+	// first client is still on screen.
+	text := fmt.Sprintf(b.tr(ctx, chatID, "%s · «%s» — оберіть мітку:"), fl.tags.clientName, category)
 	edited := tgbotapi.NewEditMessageTextAndMarkup(chatID, cb.Message.MessageID, text, tgbotapi.NewInlineKeyboardMarkup(rows...))
 	if _, err := b.bot.Send(edited); err != nil {
 		b.log.WarnContext(ctx, "telegram: edit category tags picker failed", "err", err)
@@ -2593,12 +2608,13 @@ var ukToRu = map[string]string{
 	"Додано":                           "Добавлено",
 	"‹ Назад":                          "‹ Назад",
 	"Оберіть мітку:":                   "Выберите метку:",
-	"Оберіть категорію:":               "Выберите категорию:",
-	"Категорія «%s» — оберіть мітку:":  "Категория «%s» — выберите метку:",
-	"Усі мітки вже додані клієнту.":    "Все метки уже добавлены клиенту.",
-	"Помилка отримання списку міток":   "Ошибка получения списка меток",
-	"Помилка отримання міток":          "Ошибка получения меток",
-	"Не вдалося додати мітку":          "Не удалось добавить метку",
+	"%s: словник міток ще порожній. Додайте мітки в CRM (⚙ Управління тегами).": "%s: словарь меток ещё пуст. Добавьте метки в CRM (⚙ Управление тегами).",
+	"%s: усі мітки вже додані.":      "%s: все метки уже добавлены.",
+	"%s — оберіть категорію:":        "%s — выберите категорию:",
+	"%s · «%s» — оберіть мітку:":     "%s · «%s» — выберите метку:",
+	"Помилка отримання списку міток": "Ошибка получения списка меток",
+	"Помилка отримання міток":        "Ошибка получения меток",
+	"Не вдалося додати мітку":        "Не удалось добавить метку",
 }
 
 // inverse of ukToRu — lets handle() map a Russian-rendered button back to Ukrainian

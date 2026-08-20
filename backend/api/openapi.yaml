@@ -1796,7 +1796,7 @@ components:
       properties:
         tag:
           type: string
-          maxLength: 40
+          maxLength: 24
           description: Must be one of GET /clients/tag-defs' labels — rejected (400) otherwise
 
     TagDef:
@@ -1805,10 +1805,10 @@ components:
       properties:
         label:
           type: string
-          maxLength: 40
+          maxLength: 24
         category:
           type: string
-          maxLength: 40
+          maxLength: 24
           description: Groups defs into the two-level (category → tag) structure the picker/management UI show — free text, not a fixed enum
         created_at:
           type: string
@@ -1829,21 +1829,21 @@ components:
       properties:
         label:
           type: string
-          maxLength: 40
+          maxLength: 24
         category:
           type: string
-          maxLength: 40
+          maxLength: 24
 
     UpdateTagDefRequest:
       type: object
       properties:
         label:
           type: string
-          maxLength: 40
+          maxLength: 24
           description: The new label — omit to leave it unchanged
         category:
           type: string
-          maxLength: 40
+          maxLength: 24
           description: The new category — omit to leave it unchanged
 
     ClientDetailInfo:
