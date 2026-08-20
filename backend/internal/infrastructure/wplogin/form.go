@@ -196,4 +196,3 @@ func attrVal(n *html.Node, key string) string {
 	}
 	return ""
 }
-

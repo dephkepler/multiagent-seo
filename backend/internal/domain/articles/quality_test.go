@@ -35,9 +35,9 @@ func TestQualityFloorCopywriterRules(t *testing.T) {
 		mutate func(string) string
 		want   string
 	}{
-		"no H1":      {func(s string) string { return strings.Replace(s, "# Running Shoes Guide", "Running Shoes Guide", 1) }, "does not start with H1"},
-		"no FAQ":     {func(s string) string { return strings.Replace(s, "## FAQ", "## Other", 1) }, "missing FAQ section"},
-		"bold kw":    {func(s string) string { return strings.Replace(s, "running shoes with", "**running shoes** with", 1) }, "keyword is bold: running shoes"},
+		"no H1":   {func(s string) string { return strings.Replace(s, "# Running Shoes Guide", "Running Shoes Guide", 1) }, "does not start with H1"},
+		"no FAQ":  {func(s string) string { return strings.Replace(s, "## FAQ", "## Other", 1) }, "missing FAQ section"},
+		"bold kw": {func(s string) string { return strings.Replace(s, "running shoes with", "**running shoes** with", 1) }, "keyword is bold: running shoes"},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {

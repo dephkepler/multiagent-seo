@@ -3,31 +3,31 @@ package linkbuilding
 import "strings"
 
 const (
-	OutcomePlaced         = "placed"
-	OutcomeBadCredentials = "bad_credentials"
-	OutcomeCaptcha        = "captcha"
-	OutcomeCloudflare     = "cloudflare"
-	OutcomeLocked         = "locked"
-	OutcomeTwoFactor      = "two_factor"
-	OutcomeDNS            = "dns"
-	OutcomeNoMarker       = "no_marker"
+	OutcomePlaced          = "placed"
+	OutcomeBadCredentials  = "bad_credentials"
+	OutcomeCaptcha         = "captcha"
+	OutcomeCloudflare      = "cloudflare"
+	OutcomeLocked          = "locked"
+	OutcomeTwoFactor       = "two_factor"
+	OutcomeDNS             = "dns"
+	OutcomeNoMarker        = "no_marker"
 	OutcomeAppPasswordsOff = "app_passwords_off"
-	OutcomeNoTarget       = "no_target"
-	OutcomePending        = "pending"
-	OutcomeLinkMissing    = "link_missing"
-	OutcomeLoginFailed    = "login_failed"
-	OutcomePostFailed     = "post_failed"
-	OutcomeError          = "error"
+	OutcomeNoTarget        = "no_target"
+	OutcomePending         = "pending"
+	OutcomeLinkMissing     = "link_missing"
+	OutcomeLoginFailed     = "login_failed"
+	OutcomePostFailed      = "post_failed"
+	OutcomeError           = "error"
 )
 
 var outcomeLabel = map[string]string{
-	OutcomePlaced:         "ok",
-	OutcomeBadCredentials: "bad creds",
-	OutcomeCaptcha:        "captcha",
-	OutcomeCloudflare:     "cloudflare",
-	OutcomeLocked:         "locked",
-	OutcomeTwoFactor:      "2fa",
-	OutcomeDNS:            "dead domain",
+	OutcomePlaced:          "ok",
+	OutcomeBadCredentials:  "bad creds",
+	OutcomeCaptcha:         "captcha",
+	OutcomeCloudflare:      "cloudflare",
+	OutcomeLocked:          "locked",
+	OutcomeTwoFactor:       "2fa",
+	OutcomeDNS:             "dead domain",
 	OutcomeNoMarker:        "custom login",
 	OutcomeAppPasswordsOff: "app passwords off",
 	OutcomeNoTarget:        "no editable target",

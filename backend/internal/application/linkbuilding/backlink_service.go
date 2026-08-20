@@ -450,7 +450,6 @@ func (s *BacklinkService) placeOnDonor(ctx context.Context, log *slog.Logger, re
 
 	if touched {
 		s.sleep(ctx)
-		touched = false
 	}
 
 	switch {
