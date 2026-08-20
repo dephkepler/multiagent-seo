@@ -821,6 +821,14 @@ func (b *AdminBot) pickLanguage(ctx context.Context, cb *tgbotapi.CallbackQuery,
 		label = "Язык сохранён: Русский ✅"
 	}
 	b.editCallbackMessage(ctx, cb, label)
+
+	// Telegram never re-renders an already-sent reply keyboard on its own —
+	// only a new message carrying a new one does — so without this the menu
+	// buttons at the bottom would keep showing the old language until staff
+	// happened to send /menu again.
+	if cb.Message != nil {
+		b.sendStaffMenu(ctx, cb.Message.Chat.ID)
+	}
 }
 
 func (b *AdminBot) sendRequestPrompt(ctx context.Context, chatID int64) {
