@@ -211,17 +211,6 @@ export default function ClientsPage() {
                             </option>
                           ))}
                         </select>
-                        {c.overridden && (
-                          <button
-                            type='button'
-                            title='Выбрано вручную — нажмите, чтобы вернуть автоматический расчёт'
-                            disabled={setOverride.isPending}
-                            onClick={() => setOverride.mutate({ id: c.client_id, segment: null })}
-                            className='shrink-0 text-[10px] whitespace-nowrap text-gray-400 underline hover:text-gray-600'
-                          >
-                            вручную · сброс
-                          </button>
-                        )}
                       </div>
                     </td>
                     <td className='py-2 pr-4'>
