@@ -79,9 +79,16 @@ func (r *ConsultationRepository) CreateClient(ctx context.Context, name, phone, 
 	lastName, firstName, patronymic := consultations.SplitName(name)
 
 	if phone != "" {
+		// The ON CONFLICT target's WHERE clause has to repeat the partial
+		// unique index's predicate verbatim (see migration 000040) —
+		// Postgres only matches ON CONFLICT against a partial index when
+		// the inference clause matches its WHERE exactly; without this,
+		// every insert here fails with "no unique or exclusion constraint
+		// matching the ON CONFLICT specification", which is exactly what
+		// happened between that migration landing and this fix.
 		const q = `INSERT INTO clients (phone, name, last_name, first_name, patronymic)
 			VALUES (@phone, @name, @last_name, @first_name, @patronymic)
-			ON CONFLICT (phone) DO UPDATE SET
+			ON CONFLICT (phone) WHERE phone IS NOT NULL AND phone <> '' DO UPDATE SET
 				last_seen_at = now(),
 				name = CASE WHEN @name = '' THEN clients.name ELSE @name END
 			RETURNING id, name, coalesce(phone, ''), coalesce(telegram_name, '')`
