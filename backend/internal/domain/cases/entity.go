@@ -35,11 +35,24 @@ type Case struct {
 	AdvocateName   string
 	Category       string  // practice area — free text, see Categories for the suggested list
 	Fee            float64 // the agreed contract amount
-	PaidAmount     float64 // running total actually received — grows via AddPayment, not a full ledger
+	PaidAmount     float64 // running total actually received — grows via AddPayment, backed by the case_payments ledger
 	Status         string
 	Description    string
 	CreatedBy      string
 	CreatedAt      time.Time
+	// Payments is the ledger behind PaidAmount — only populated by
+	// ListByClient (the /client card's use case); other reads that don't
+	// need per-installment history leave it nil.
+	Payments []Payment
+}
+
+// Payment is one installment against a case's fee — AddPayment records one
+// every time staff runs /pay, so "how much, and on what date" survives
+// past PaidAmount's single running total.
+type Payment struct {
+	ID     string
+	Amount float64
+	PaidAt time.Time
 }
 
 // Owed is what's left to collect — the number that actually matters to the

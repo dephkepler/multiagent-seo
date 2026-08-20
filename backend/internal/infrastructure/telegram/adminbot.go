@@ -72,11 +72,11 @@ type newClientDraft struct {
 	mode clientLookupMode
 }
 
-// payDraft holds the Case ID while /pay's wizard waits on the amount —
-// same two-step shape as /book and /case, needed because unlike /invoice
-// (amount alone), /pay needs a Case ID from staff first.
+// payDraft holds what /pay's wizard has collected so far while it waits on
+// the next step — Case ID, then amount, then which date it was paid.
 type payDraft struct {
 	caseID string
+	amount float64
 }
 
 type caseDraft struct {
@@ -370,7 +370,7 @@ func (b *AdminBot) handle(ctx context.Context, update tgbotapi.Update) {
 			b.send(ctx, chatID, "Введіть Case ID:")
 			return
 		}
-		b.handlePay(ctx, chatID, arg)
+		b.handlePay(ctx, chatID, userID, arg)
 		return
 
 	case strings.HasPrefix(text, "/creategroup"):
@@ -419,13 +419,24 @@ func (b *AdminBot) handle(ctx context.Context, update tgbotapi.Update) {
 		b.send(ctx, chatID, "Введіть суму в грн (наприклад 1500):")
 
 	case "pay_amount":
-		if _, err := parseAmount(text); err != nil {
+		amount, err := parseAmount(text)
+		if err != nil {
 			b.send(ctx, chatID, "Не розпізнав суму. Введіть число, наприклад 1500.")
 			return
 		}
-		caseID := fl.pay.caseID
+		fl.pay.amount = amount
+		fl.step = "pay_date"
+		b.sendPaymentDatePicker(ctx, chatID)
+
+	case "pay_custom_date":
+		paidAt, err := time.Parse("02.01.2006", text)
+		if err != nil {
+			b.send(ctx, chatID, "Не розпізнав дату. Введіть у форматі 19.08.2026:")
+			return
+		}
+		caseID, amount := fl.pay.caseID, fl.pay.amount
 		delete(b.flows, userID)
-		b.handlePay(ctx, chatID, caseID+" "+text)
+		b.applyPayment(ctx, chatID, userID, caseID, amount, paidAt)
 
 	case "caseclose_id":
 		delete(b.flows, userID)
@@ -923,7 +934,10 @@ func (b *AdminBot) finishCase(ctx context.Context, chatID, userID int64, draft c
 	))
 }
 
-func (b *AdminBot) handlePay(ctx context.Context, chatID int64, arg string) {
+// handlePay is /pay's one-shot syntax ("/pay <id> <amount>" typed as one
+// message) — no date argument, so it always means "paid today". Staff who
+// need to backdate a payment use the wizard (bare /pay), which asks.
+func (b *AdminBot) handlePay(ctx context.Context, chatID, userID int64, arg string) {
 	parts := strings.Fields(arg)
 	if len(parts) != 2 {
 		b.sendHTML(ctx, chatID, "Формат: /pay &lt;Case ID&gt; &lt;сума&gt;, наприклад /pay <code>3f0b8beb-23c2-4ad4-90fb-48064c9359d4</code> 5000")
@@ -934,15 +948,63 @@ func (b *AdminBot) handlePay(ctx context.Context, chatID int64, arg string) {
 		b.send(ctx, chatID, "Не розпізнав суму.")
 		return
 	}
-	updated, err := b.cases.AddPayment(ctx, parts[0], amount)
+	b.applyPayment(ctx, chatID, userID, parts[0], amount, time.Now())
+}
+
+// sendPaymentDatePicker is /pay's last wizard step — payment date matters
+// for reconciliation (see case_payments), but staff usually pays the same
+// day, so "today" is one tap while a backdated entry is still one text
+// message away.
+func (b *AdminBot) sendPaymentDatePicker(ctx context.Context, chatID int64) {
+	msg := tgbotapi.NewMessage(chatID, "Коли внесена оплата?")
+	msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("📅 Сьогодні", "paydate:today"),
+			tgbotapi.NewInlineKeyboardButtonData("🗓 Інша дата", "paydate:custom"),
+		),
+	)
+	if _, err := b.bot.Send(msg); err != nil {
+		b.log.ErrorContext(ctx, "telegram: send payment date picker failed", "err", err)
+	}
+}
+
+// pickPaymentDate handles sendPaymentDatePicker's tap.
+func (b *AdminBot) pickPaymentDate(ctx context.Context, cb *tgbotapi.CallbackQuery, choice string) {
+	fl := b.flows[cb.From.ID]
+	if fl == nil || fl.step != "pay_date" {
+		b.answerCallback(ctx, cb.ID, "Сесія застаріла, почніть з /pay")
+		return
+	}
+	b.answerCallback(ctx, cb.ID, "")
+	if cb.Message == nil {
+		return
+	}
+
+	if choice == "custom" {
+		fl.step = "pay_custom_date"
+		b.editCallbackMessage(ctx, cb, "Введіть дату (наприклад 19.08.2026):")
+		return
+	}
+
+	caseID, amount := fl.pay.caseID, fl.pay.amount
+	delete(b.flows, cb.From.ID)
+	b.editCallbackMessage(ctx, cb, "Оплата за сьогодні…")
+	b.applyPayment(ctx, cb.Message.Chat.ID, cb.From.ID, caseID, amount, time.Now())
+}
+
+// applyPayment records one installment — shared by the wizard (which
+// already knows caseID/amount/date) and handlePay's one-shot syntax
+// (which defaults the date to today).
+func (b *AdminBot) applyPayment(ctx context.Context, chatID, userID int64, caseID string, amount float64, paidAt time.Time) {
+	updated, err := b.cases.AddPayment(ctx, caseID, amount, paidAt, strconv.FormatInt(userID, 10))
 	if err != nil {
 		b.send(ctx, chatID, "Не вдалося зберегти оплату — перевірте Case ID.")
 		b.log.ErrorContext(ctx, "telegram: add case payment failed", "err", err)
 		return
 	}
 	b.send(ctx, chatID, fmt.Sprintf(
-		"Оплата +%s грн. Всього оплачено: %s з %s грн. Залишок: %s грн.",
-		formatAmount(amount), formatAmount(updated.PaidAmount), formatAmount(updated.Fee), formatAmount(updated.Owed()),
+		"Оплата +%s грн (%s). Всього оплачено: %s з %s грн. Залишок: %s грн.",
+		formatAmount(amount), paidAt.Format("02.01.2006"), formatAmount(updated.PaidAmount), formatAmount(updated.Fee), formatAmount(updated.Owed()),
 	))
 }
 
@@ -1333,6 +1395,8 @@ func (b *AdminBot) handleCallback(ctx context.Context, cb *tgbotapi.CallbackQuer
 		b.pickBookingStatus(ctx, cb, rest)
 	case "newclient":
 		b.pickNewClientContact(ctx, cb, rest)
+	case "paydate":
+		b.pickPaymentDate(ctx, cb, rest)
 	default:
 		b.answerCallback(ctx, cb.ID, "")
 	}
@@ -1805,6 +1869,9 @@ func buildClientInfoCard(client consultations.Client, latest consultations.Consu
 			c.ID, html.EscapeString(c.Category), html.EscapeString(advocate), advocateID,
 			formatAmount(c.PaidAmount), formatAmount(c.Fee), formatAmount(c.Owed()), caseStatusLabel(c.Status),
 		)
+		for _, p := range c.Payments {
+			fmt.Fprintf(&b, "\n  · %s — %s грн", p.PaidAt.Format("02.01.2006"), formatAmount(p.Amount))
+		}
 	}
 
 	return b.String()
