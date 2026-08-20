@@ -10,6 +10,12 @@ import (
 
 var ErrNotFound = errors.New("article not found")
 
+// ErrAlreadyPublished signals a lost race: the row was already published by
+// another concurrent Publish() call between the caller's status check and
+// this write (MarkPublished's UPDATE is conditional on status, see the
+// postgres adapter).
+var ErrAlreadyPublished = errors.New("article already published")
+
 type CreateArticle struct {
 	Keyword       string
 	SiteID        uuid.UUID

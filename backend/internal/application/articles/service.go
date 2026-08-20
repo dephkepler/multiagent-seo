@@ -828,6 +828,14 @@ func (s *Service) publish(ctx context.Context, log *slog.Logger, articleID int64
 	}
 
 	if err := s.repo.MarkPublished(ctx, articleID, postURL); err != nil {
+		if errors.Is(err, articles.ErrAlreadyPublished) {
+			// Lost the race: another concurrent Publish() call for this same
+			// article won between our status check above and this write. We
+			// already called WordPress (unavoidable — the claim can't happen
+			// before we know postURL), but at least don't silently overwrite
+			// the winner's record with a second one.
+			return articles.Article{}, ErrAlreadyPublished
+		}
 		return articles.Article{}, fmt.Errorf("mark published: %w", err)
 	}
 

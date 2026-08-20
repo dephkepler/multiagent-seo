@@ -161,17 +161,30 @@ func (r *ArticleRepository) FailOrphanedGenerating(ctx context.Context) (int64, 
 	return tag.RowsAffected(), nil
 }
 
+// MarkPublished is conditional on status (not the shared exec() helper, which
+// would map 0-rows-affected to the wrong sentinel here): two concurrent
+// Publish() calls can both pass the caller's initial status check before
+// either writes, so this is the actual point that decides the race. The
+// loser gets ErrAlreadyPublished instead of silently overwriting a real
+// publish with a second one.
 func (r *ArticleRepository) MarkPublished(ctx context.Context, id int64, postURL string) error {
 	const q = `
 		UPDATE articles
 		SET status = @status, wp_post_url = @wp_post_url, published_at = NOW(), updated_at = NOW()
-		WHERE id = @id`
+		WHERE id = @id AND status != @status`
 
-	return r.exec(ctx, "mark published", q, pgx.NamedArgs{
+	tag, err := r.db.Exec(ctx, q, pgx.NamedArgs{
 		"status":      articles.StatusPublished,
 		"wp_post_url": postURL,
 		"id":          id,
 	})
+	if err != nil {
+		return fmt.Errorf("mark published: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return articles.ErrAlreadyPublished
+	}
+	return nil
 }
 
 func (r *ArticleRepository) GeneratedKeywords(ctx context.Context, siteID uuid.UUID) ([]string, error) {
