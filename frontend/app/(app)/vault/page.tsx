@@ -4,9 +4,11 @@ import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input, Label } from '@/components/ui/input'
+import { SectionHeader } from '@/components/ui/section-header'
 
 interface VaultEntry {
   id: string
@@ -89,21 +91,26 @@ export default function VaultPage() {
   return (
     <div className='space-y-6'>
       <Card>
-        <h1 className='mb-1 text-lg font-semibold'>Add password</h1>
-        <p className='mb-4 text-xs text-gray-400'>
-          Stored as plain text — this is an internal tool, not a real vault yet. Don&apos;t put anything here you
-          wouldn&apos;t put in a shared doc.
-        </p>
+        <SectionHeader title='Add password' as='h1' />
+        <div className='mb-4 flex flex-wrap items-start gap-2'>
+          <Badge variant='warning'>Plain text</Badge>
+          <p className='text-xs text-gray-400'>
+            Stored as plain text — this is an internal tool, not a real vault yet. Don&apos;t put anything here you
+            wouldn&apos;t put in a shared doc.
+          </p>
+        </div>
         <EntryFormFields onSubmit={(body) => create.mutate(body)} busy={create.isPending} />
       </Card>
 
       <div>
-        <div className='mb-4 flex items-center justify-between'>
-          <h2 className='text-base font-semibold'>Saved passwords</h2>
-          <Button variant='secondary' size='sm' onClick={() => entries.refetch()}>
-            Refresh
-          </Button>
-        </div>
+        <SectionHeader
+          title='Saved passwords'
+          action={
+            <Button variant='secondary' size='sm' onClick={() => entries.refetch()}>
+              Refresh
+            </Button>
+          }
+        />
 
         {(entries.data || []).length === 0 && (
           <Card className='text-center text-sm text-gray-400'>
@@ -127,11 +134,11 @@ export default function VaultPage() {
               </Card>
             ) : (
               <Card key={entry.id} className='space-y-3'>
-                <div>
-                  <h3 className='font-medium text-gray-900'>{entry.title}</h3>
+                <div className='min-w-0'>
+                  <h3 className='truncate font-medium text-gray-900'>{entry.title}</h3>
                   {entry.url && (
                     <a
-                      className='text-xs text-emerald-700 hover:underline'
+                      className='block truncate text-xs text-emerald-700 hover:underline'
                       href={entry.url}
                       target='_blank'
                       rel='noreferrer'
@@ -158,7 +165,7 @@ export default function VaultPage() {
                   )}
                 </div>
 
-                {entry.notes && <p className='whitespace-pre-wrap text-xs text-gray-500'>{entry.notes}</p>}
+                {entry.notes && <p className='break-words whitespace-pre-wrap text-xs text-gray-500'>{entry.notes}</p>}
 
                 <div className='flex items-center justify-between border-t border-gray-100 pt-3'>
                   <Button variant='ghost' size='sm' onClick={() => setEditingId(entry.id)}>
@@ -203,14 +210,14 @@ function Field({
         <div className='text-[10px] uppercase tracking-wide text-gray-400'>{label}</div>
         <div className='truncate font-mono text-sm text-gray-800'>{value}</div>
       </div>
-      <div className='flex shrink-0 gap-2'>
+      <div className='flex shrink-0 gap-3'>
         {onToggle && (
-          <button type='button' onClick={onToggle} className='text-xs text-gray-500 hover:text-gray-800'>
+          <button type='button' onClick={onToggle} className='-my-1 py-1 text-xs text-gray-500 hover:text-gray-800'>
             {revealed ? 'Hide' : 'Show'}
           </button>
         )}
         {onCopy && (
-          <button type='button' onClick={onCopy} className='text-xs text-gray-500 hover:text-gray-800'>
+          <button type='button' onClick={onCopy} className='-my-1 py-1 text-xs text-gray-500 hover:text-gray-800'>
             Copy
           </button>
         )}

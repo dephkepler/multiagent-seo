@@ -4,9 +4,11 @@ import { useEffect, useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input, Label } from '@/components/ui/input'
+import { SectionHeader } from '@/components/ui/section-header'
 import { Select } from '@/components/ui/select'
 
 interface PlaceBacklinksAccepted {
@@ -176,19 +178,21 @@ export default function PlaceBacklinksPage() {
 
       {runId && (
         <Card>
-          <div className='mb-2 flex items-center justify-between text-sm'>
-            <span className='font-medium'>{canceled ? 'Canceled' : done ? 'Done' : 'Placing…'}</span>
-            <div className='flex items-center gap-3'>
-              <span className='text-gray-500'>
-                {succeeded}/{target} placed · {results.length} tried
-              </span>
-              {!done && (
-                <Button type='button' variant='secondary' size='sm' onClick={() => cancel.mutate()} disabled={cancel.isPending}>
-                  {cancel.isPending ? 'Canceling…' : 'Cancel'}
-                </Button>
-              )}
-            </div>
-          </div>
+          <SectionHeader
+            title={canceled ? 'Canceled' : done ? 'Done' : 'Placing…'}
+            action={
+              <div className='flex items-center gap-3'>
+                <span className='text-sm text-gray-500'>
+                  {succeeded}/{target} placed · {results.length} tried
+                </span>
+                {!done && (
+                  <Button type='button' variant='secondary' size='sm' onClick={() => cancel.mutate()} disabled={cancel.isPending}>
+                    {cancel.isPending ? 'Canceling…' : 'Cancel'}
+                  </Button>
+                )}
+              </div>
+            }
+          />
           <div className='mb-4 h-2 w-full overflow-hidden rounded bg-gray-100'>
             <div className='h-2 rounded bg-emerald-500 transition-all' style={{ width: `${Math.min(100, (succeeded / Math.max(1, target)) * 100)}%` }} />
           </div>
@@ -196,22 +200,24 @@ export default function PlaceBacklinksPage() {
             {results.length === 0 && <li className='text-gray-400'>Waiting for the first result…</li>}
             {results.map((p) => {
               const pending = p.outcome === 'pending'
-              const icon = p.ok ? '✅' : pending ? '⏳' : '❌'
               return (
-                <li key={p.id} className='flex items-center justify-between gap-3 border-b border-gray-50 py-1'>
-                  <span className='truncate'>
-                    {icon} <span className='text-gray-700'>{p.donor_url}</span>
-                  </span>
+                <li key={p.id} className='flex items-center justify-between gap-2 border-b border-gray-50 py-1.5'>
+                  <div className='flex min-w-0 items-center gap-2'>
+                    <Badge variant={p.ok ? 'success' : pending ? 'warning' : 'danger'}>{p.ok ? 'Placed' : pending ? 'Pending' : 'Failed'}</Badge>
+                    <span className='truncate text-gray-700' title={p.donor_url}>
+                      {p.donor_url}
+                    </span>
+                  </div>
                   {p.ok && (p.post_url || p.edit_url) ? (
                     <a href={p.post_url || p.edit_url} target='_blank' rel='noreferrer' className='shrink-0 text-sky-600 hover:underline'>
                       article ↗
                     </a>
                   ) : pending && p.edit_url ? (
                     <a href={p.edit_url} target='_blank' rel='noreferrer' className='shrink-0 text-amber-600 hover:underline' title={p.status}>
-                      pending — edit/publish ↗
+                      edit/publish ↗
                     </a>
                   ) : (
-                    <span className='shrink-0 max-w-[55%] truncate text-xs text-gray-400' title={p.status}>
+                    <span className='max-w-[45%] shrink-0 truncate text-xs text-gray-400' title={p.status}>
                       {p.status}
                     </span>
                   )}
@@ -223,10 +229,7 @@ export default function PlaceBacklinksPage() {
       )}
 
       <Card>
-        <div className='mb-3 flex items-center justify-between'>
-          <h2 className='text-base font-semibold'>Placed before</h2>
-          <span className='text-sm text-gray-500'>{total} total</span>
-        </div>
+        <SectionHeader title='Placed before' action={<span className='text-sm text-gray-500'>{total} total</span>} />
         <ul className='space-y-1 text-sm'>
           {history.isLoading && <li className='text-gray-400'>Loading…</li>}
           {!history.isLoading && (history.data?.items.length || 0) === 0 && <li className='text-gray-400'>No successful placements yet.</li>}
@@ -235,8 +238,10 @@ export default function PlaceBacklinksPage() {
             return (
               <li key={p.id} className='flex items-center justify-between gap-3 border-b border-gray-50 py-1'>
                 <span className='min-w-0'>
-                  <span className='block truncate text-gray-700'>{p.donor_url}</span>
-                  <span className='block text-xs text-gray-400'>
+                  <span className='block truncate text-gray-700' title={p.donor_url}>
+                    {p.donor_url}
+                  </span>
+                  <span className='block truncate text-xs text-gray-400' title={`${p.target_url} · ${p.created_at.slice(0, 10)}`}>
                     → {p.target_url} · {p.created_at.slice(0, 10)}
                   </span>
                 </span>

@@ -3,8 +3,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/api'
+import { Badge, type Variant as BadgeVariant } from '@/components/ui/badge'
 import { Card } from '@/components/ui/card'
+import { SectionHeader } from '@/components/ui/section-header'
 import { cx } from '@/lib/cx'
+
 
 interface LeadStats {
   range: { from: string; to: string; group_by: string }
@@ -54,17 +57,11 @@ interface LeadStats {
   by_weekday: { key: string; count: number }[]
 }
 
-const STATUS_LABEL: Record<string, string> = {
-  scheduled: 'Запланирована',
-  completed: 'Провёл',
-  cancelled: 'Отменил',
-  no_show: 'Не пришёл',
-}
-const STATUS_COLOR: Record<string, string> = {
-  scheduled: 'bg-gray-400',
-  completed: 'bg-emerald-500',
-  cancelled: 'bg-red-500',
-  no_show: 'bg-amber-500',
+const STATUS_META: Record<string, { label: string; bar: string; badge: BadgeVariant }> = {
+  scheduled: { label: 'Запланирована', bar: 'bg-gray-400', badge: 'neutral' },
+  completed: { label: 'Провёл', bar: 'bg-emerald-500', badge: 'success' },
+  cancelled: { label: 'Отменил', bar: 'bg-red-500', badge: 'danger' },
+  no_show: { label: 'Не пришёл', bar: 'bg-amber-500', badge: 'warning' },
 }
 
 function toISODate(d: Date): string {
@@ -148,7 +145,7 @@ export default function LeadsPage() {
         </p>
       </div>
 
-      <div ref={pickerRef} className='relative flex items-center gap-3'>
+      <div ref={pickerRef} className='relative flex flex-wrap items-center gap-3'>
         <button
           type='button'
           onClick={() => setPickerOpen((v) => !v)}
@@ -159,7 +156,7 @@ export default function LeadsPage() {
         >
           <span aria-hidden>📅</span>
           <span className='font-medium'>{activePreset || `${fmtDate(from)} – ${fmtDate(to)}`}</span>
-          {activePreset && <span className='text-gray-400'>{fmtDate(from)} – {fmtDate(to)}</span>}
+          {activePreset && <span className='hidden text-gray-400 sm:inline'>{fmtDate(from)} – {fmtDate(to)}</span>}
           <span className={cx('text-gray-400 transition-transform', pickerOpen && 'rotate-180')}>▾</span>
         </button>
         <span className='text-xs text-gray-400'>группировка: {groupBy === 'day' ? 'по дням' : 'по месяцам'}</span>
@@ -313,7 +310,7 @@ export default function LeadsPage() {
               })()}
             <div className='grid grid-cols-1 gap-4 md:grid-cols-2'>
               <Card className='p-4'>
-                <div className='mb-3 text-sm font-medium'>Бронирования — кто записывает</div>
+                <SectionHeader title='Бронирования — кто записывает' />
                 <p className='mb-3 text-xs text-gray-400'>
                   Сортировка по заработанному, не по числу записей — можно бронировать много и терять много. По
                   старым записям видно имя сотрудника, по новым пока только Telegram ID — имена ещё не подключены.
@@ -321,7 +318,7 @@ export default function LeadsPage() {
                 <CreatorList rows={data.by_creator} />
               </Card>
               <Card className='p-4'>
-                <div className='mb-3 text-sm font-medium'>Дела — кто реально закрывает деньги</div>
+                <SectionHeader title='Дела — кто реально закрывает деньги' />
                 <p className='mb-3 text-xs text-gray-400'>
                   Дело — на порядок больше денег, чем консультация, и не всегда его ведёт тот же человек, что
                   бронировал слева.
@@ -407,12 +404,11 @@ export default function LeadsPage() {
                 Статус ставит сотрудник кнопками под сообщением о брони в Telegram — не через админку.
               </p>
               <HBarList
-                rows={data.by_status.map((s) => ({ ...s, key: STATUS_LABEL[s.key] ?? s.key }))}
+                rows={data.by_status.map((s) => {
+                  const meta = STATUS_META[s.key]
+                  return { key: meta?.label ?? s.key, count: s.count, barColor: meta?.bar, variant: meta?.badge }
+                })}
                 emptyLabel='(без статуса)'
-                colorFor={(label) => {
-                  const entry = Object.entries(STATUS_LABEL).find(([, v]) => v === label)
-                  return entry ? STATUS_COLOR[entry[0]] : 'bg-gray-400'
-                }}
               />
             </CollapsibleChart>
           </div>
@@ -455,9 +451,9 @@ function KpiTile({
 // continuation of the one above it, so the heading says why, not just what.
 function GroupHeading({ title, subtitle }: { title: string; subtitle?: string }) {
   return (
-    <div className='pt-2 first:pt-0'>
-      <h2 className='text-sm font-semibold text-gray-700'>{title}</h2>
-      {subtitle && <p className='mt-0.5 text-xs text-gray-400'>{subtitle}</p>}
+    <div>
+      <SectionHeader title={title} />
+      {subtitle && <p className='-mt-3 text-xs text-gray-400'>{subtitle}</p>}
     </div>
   )
 }
@@ -590,16 +586,16 @@ function CollapsibleChart({
         type='button'
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        className='flex w-full items-center gap-3 p-4 text-left hover:bg-gray-50'
+        className={cx('flex w-full items-center gap-3 p-4 text-left hover:bg-gray-50 active:bg-gray-100', open && 'bg-gray-50')}
       >
         <span className='text-xl' aria-hidden>
           {icon}
         </span>
-        <span className='flex-1'>
-          <span className='block text-sm font-medium'>{title}</span>
-          {subtitle && <span className='block text-xs text-gray-400'>{subtitle}</span>}
+        <span className='min-w-0 flex-1'>
+          <span className='block truncate text-sm font-medium'>{title}</span>
+          {subtitle && <span className='block truncate text-xs text-gray-400'>{subtitle}</span>}
         </span>
-        <span className={cx('text-gray-400 transition-transform', open && 'rotate-180')} aria-hidden>
+        <span className={cx('shrink-0 text-gray-400 transition-transform', open && 'rotate-180')} aria-hidden>
           ▾
         </span>
       </button>
@@ -611,11 +607,9 @@ function CollapsibleChart({
 function HBarList({
   rows,
   emptyLabel,
-  colorFor,
 }: {
-  rows: { key: string; count: number }[]
+  rows: { key: string; count: number; barColor?: string; variant?: BadgeVariant }[]
   emptyLabel: string
-  colorFor?: (label: string) => string
 }) {
   if (!rows.length) return <div className='text-sm text-gray-400'>Нет данных за период.</div>
   const total = rows.reduce((s, r) => s + r.count, 0)
@@ -627,14 +621,17 @@ function HBarList({
         const pct = total ? ((r.count / total) * 100).toFixed(1) : '0.0'
         return (
           <div key={label} className='flex flex-col gap-1 text-sm sm:flex-row sm:items-center sm:gap-3'>
-            <div className='truncate text-gray-600 sm:w-40 sm:shrink-0 sm:text-right' title={label}>
-              {label}
+            <div className='min-w-0 sm:w-40 sm:shrink-0 sm:text-right'>
+              {r.variant ? (
+                <Badge variant={r.variant}>{label}</Badge>
+              ) : (
+                <span className='block truncate text-gray-600' title={label}>
+                  {label}
+                </span>
+              )}
             </div>
             <div className='h-4 rounded bg-gray-100 sm:flex-1'>
-              <div
-                className={cx('h-4 rounded', colorFor ? colorFor(label) : 'bg-emerald-500')}
-                style={{ width: `${Math.max(2, (r.count / max) * 100)}%` }}
-              />
+              <div className={cx('h-4 rounded', r.barColor ?? 'bg-emerald-500')} style={{ width: `${Math.max(2, (r.count / max) * 100)}%` }} />
             </div>
             <div className='tabular-nums text-gray-700 sm:w-24 sm:shrink-0'>
               {r.count} · {pct}%

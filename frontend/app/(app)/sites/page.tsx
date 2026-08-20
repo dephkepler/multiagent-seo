@@ -1,12 +1,14 @@
 'use client'
 
-import { useState } from 'react'
+import { Fragment, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input, Label } from '@/components/ui/input'
+import { SectionHeader } from '@/components/ui/section-header'
 import { Select } from '@/components/ui/select'
 
 type Provider = 'wordpress' | 'modx'
@@ -78,17 +80,19 @@ export default function SitesPage() {
   return (
     <div className='space-y-6'>
       <Card>
-        <h1 className='mb-4 text-lg font-semibold'>Add site</h1>
+        <SectionHeader title='Add site' as='h1' />
         <AddForm onSubmit={(body) => create.mutate(body)} busy={create.isPending} />
       </Card>
 
       <Card>
-        <div className='mb-4 flex items-center justify-between'>
-          <h2 className='text-base font-semibold'>Sites</h2>
-          <Button variant='secondary' size='sm' onClick={() => sites.refetch()}>
-            Refresh
-          </Button>
-        </div>
+        <SectionHeader
+          title='Sites'
+          action={
+            <Button variant='secondary' size='sm' onClick={() => sites.refetch()}>
+              Refresh
+            </Button>
+          }
+        />
         <div className='overflow-x-auto'>
           <table className='w-full text-sm'>
             <thead className='text-left text-xs uppercase text-gray-500'>
@@ -111,33 +115,56 @@ export default function SitesPage() {
                 </tr>
               )}
               {(sites.data || []).map((s) => (
-                <>
-                  <tr key={s.id} className='border-t border-gray-100'>
-                    <td className='py-2 pr-4 font-medium'>{s.alias}</td>
-                    <td className='py-2 pr-4 text-gray-500'>{s.provider}</td>
+                <Fragment key={s.id}>
+                  <tr className='border-t border-gray-100'>
+                    <td className='min-w-0 max-w-[160px] py-2 pr-4 font-medium'>
+                      <span className='block truncate' title={s.alias}>
+                        {s.alias}
+                      </span>
+                    </td>
                     <td className='py-2 pr-4'>
-                      <a className='text-emerald-700 hover:underline' href={s.url} target='_blank' rel='noreferrer'>
+                      <Badge variant={s.provider === 'wordpress' ? 'info' : 'neutral'}>{s.provider}</Badge>
+                    </td>
+                    <td className='min-w-0 max-w-[220px] py-2 pr-4'>
+                      <a
+                        className='block truncate text-emerald-700 hover:underline'
+                        href={s.url}
+                        target='_blank'
+                        rel='noreferrer'
+                        title={s.url}
+                      >
                         {s.url}
                       </a>
                     </td>
-                    <td className='py-2 pr-4 text-gray-500'>{s.username || '—'}</td>
-                    <td className='py-2 pr-4'>
+                    <td className='min-w-0 max-w-[140px] py-2 pr-4 text-gray-500'>
+                      <span className='block truncate' title={s.username || undefined}>
+                        {s.username || '—'}
+                      </span>
+                    </td>
+                    <td className='min-w-0 max-w-[160px] py-2 pr-4'>
                       <button
                         onClick={() => setLanguagesOpenFor(languagesOpenFor === s.id ? null : s.id)}
-                        className='text-sky-700 hover:underline'
+                        className='block w-full truncate text-left text-sky-700 hover:underline'
                       >
                         {Object.keys(s.languages || {}).length > 0 ? Object.keys(s.languages!).join(', ') : 'set up…'}
                       </button>
                     </td>
                     <td className='py-2 pr-4'>
-                      <button
+                      <Badge
+                        variant={s.enabled ? 'success' : 'neutral'}
+                        role='button'
+                        tabIndex={0}
+                        aria-pressed={s.enabled}
                         onClick={() => update.mutate({ id: s.id, body: { enabled: !s.enabled } })}
-                        className={`rounded px-2 py-0.5 text-xs font-medium ${
-                          s.enabled ? 'bg-emerald-100 text-emerald-800' : 'bg-gray-100 text-gray-600'
-                        }`}
+                        onKeyDown={(e) => {
+                          if (e.key !== 'Enter' && e.key !== ' ') return
+                          e.preventDefault()
+                          update.mutate({ id: s.id, body: { enabled: !s.enabled } })
+                        }}
+                        className='cursor-pointer select-none'
                       >
                         {s.enabled ? 'enabled' : 'disabled'}
-                      </button>
+                      </Badge>
                     </td>
                     <td className='py-2'>
                       <Button
@@ -153,7 +180,7 @@ export default function SitesPage() {
                     </td>
                   </tr>
                   {languagesOpenFor === s.id && (
-                    <tr key={`${s.id}-languages`} className='border-t border-gray-100 bg-gray-50/60'>
+                    <tr className='border-t border-gray-100 bg-gray-50/60'>
                       <td colSpan={7} className='p-4'>
                         <LanguagesEditor
                           site={s}
@@ -167,7 +194,7 @@ export default function SitesPage() {
                       </td>
                     </tr>
                   )}
-                </>
+                </Fragment>
               ))}
             </tbody>
           </table>
@@ -207,7 +234,12 @@ function LanguagesEditor({
         uk / web); the spreadsheet fields are optional and override the shared default keyword sheet.
       </p>
       {rows.map((row, i) => (
-        <div key={i} className='grid grid-cols-1 gap-2 rounded-md border border-gray-200 bg-white p-3 md:grid-cols-5'>
+        <div
+          key={i}
+          className={`grid grid-cols-1 gap-3 rounded-md border border-gray-200 bg-white p-3 ${
+            site.provider === 'modx' ? 'md:grid-cols-5' : 'md:grid-cols-4'
+          }`}
+        >
           <div>
             <Label>Language code</Label>
             <Input value={row.code} onChange={(e) => setRow(i, { code: e.target.value })} placeholder='uk | ru' />
@@ -226,7 +258,7 @@ function LanguagesEditor({
             <Label>Sheet (tab) name</Label>
             <Input value={row.keywordsSheet} onChange={(e) => setRow(i, { keywordsSheet: e.target.value })} placeholder='адвокат кредит' />
           </div>
-          <div className='flex items-end'>
+          <div className='flex items-end justify-end'>
             <Button type='button' variant='ghost' size='sm' onClick={() => setRows((r) => r.filter((_, idx) => idx !== i))}>
               Remove
             </Button>

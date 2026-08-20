@@ -11,8 +11,15 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { SectionHeader } from '@/components/ui/section-header'
 import { cx } from '@/lib/cx'
-
-type Segment = 'lead' | 'booked' | 'consulted' | 'client' | 'repeat' | 'lost'
+import {
+  categoryColorClass,
+  SEGMENT_COLOR,
+  SEGMENT_LABEL,
+  SEGMENT_ORDER,
+  type Segment,
+  TAG_BADGE_VARIANT,
+  TAG_LABEL,
+} from '@/lib/client-tags'
 
 interface ClientSegment {
   client_id: string
@@ -44,60 +51,6 @@ interface TagDefList {
   items: TagDef[]
 }
 
-const SEGMENT_LABEL: Record<Segment, string> = {
-  lead: 'Заявка',
-  booked: 'Забронировал',
-  consulted: 'Проконсультирован',
-  client: 'Клиент',
-  repeat: 'Повторный',
-  lost: 'Потерян',
-}
-// Порядок — как в воронке (см. backend clientsegments.Derive), не алфавитный.
-const SEGMENT_ORDER: Segment[] = ['lead', 'booked', 'consulted', 'client', 'repeat', 'lost']
-const SEGMENT_COLOR: Record<Segment, string> = {
-  lead: 'bg-gray-100 text-gray-700',
-  booked: 'bg-sky-100 text-sky-800',
-  consulted: 'bg-amber-100 text-amber-800', // самый денежный сегмент — есть кого дожимать
-  client: 'bg-emerald-100 text-emerald-800',
-  repeat: 'bg-violet-100 text-violet-800',
-  lost: 'bg-rose-100 text-rose-800',
-}
-
-const TAG_LABEL: Record<string, string> = {
-  debtor: 'Должник',
-  no_show_risk: 'Риск неявки',
-  high_value: 'Ценный клиент',
-  dormant: 'Без контакта 90+ дней',
-}
-type BadgeVariant = 'neutral' | 'success' | 'warning' | 'danger' | 'info'
-const TAG_BADGE_VARIANT: Record<string, BadgeVariant> = {
-  debtor: 'danger',
-  no_show_risk: 'warning',
-  high_value: 'success',
-  dormant: 'neutral',
-}
-
-// One color per category, assigned by position in the *alphabetically
-// sorted* category list — sorted so the assignment doesn't depend on
-// whatever order the API happens to return defs in (that's not guaranteed
-// stable), and gives manual tags a real visual "level" (which group
-// they're in) instead of all looking the same regardless of category.
-// Deliberately avoids gray/sky/amber/emerald/violet/rose/orange — every
-// hue SEGMENT_COLOR or TAG_BADGE_VARIANT already uses on this same row —
-// so a manual tag's color can't be mistaken for a segment or an auto-tag.
-const CATEGORY_PALETTE = [
-  'border-teal-200 bg-teal-50 text-teal-700',
-  'border-cyan-200 bg-cyan-50 text-cyan-700',
-  'border-fuchsia-200 bg-fuchsia-50 text-fuchsia-700',
-  'border-indigo-200 bg-indigo-50 text-indigo-700',
-  'border-lime-200 bg-lime-50 text-lime-700',
-  'border-blue-200 bg-blue-50 text-blue-700',
-]
-function categoryColorClass(category: string, categories: string[]): string {
-  const sorted = [...categories].sort()
-  const idx = Math.max(0, sorted.indexOf(category))
-  return CATEGORY_PALETTE[idx % CATEGORY_PALETTE.length]
-}
 
 const PAGE_SIZE = 25
 
@@ -234,6 +187,7 @@ export default function ClientsPage() {
       <Card>
         <SectionHeader
           title='Клиенты'
+          as='h1'
           action={
             <Button type='button' variant='secondary' size='sm' onClick={() => setManageTagsOpen((v) => !v)}>
               ⚙ Управление тегами
@@ -348,7 +302,9 @@ export default function ClientsPage() {
                       </Link>
                     </td>
                     <td className='max-w-[140px] py-2 pr-4 text-gray-500'>
-                      <span className='block truncate'>{c.phone || '—'}</span>
+                      <span className='block truncate' title={c.phone || undefined}>
+                        {c.phone || '—'}
+                      </span>
                     </td>
                     <td className='py-2 pr-4'>
                       <select

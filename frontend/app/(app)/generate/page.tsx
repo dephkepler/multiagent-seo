@@ -4,9 +4,11 @@ import { useEffect, useState } from 'react'
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input, Label } from '@/components/ui/input'
+import { SectionHeader } from '@/components/ui/section-header'
 import { Select } from '@/components/ui/select'
 
 interface GenerateRequest {
@@ -184,14 +186,14 @@ export default function GeneratePage() {
           <button
             type='button'
             onClick={() => setMassMode(false)}
-            className={`rounded px-3 py-1 ${!massMode ? 'bg-sky-100 text-sky-800 font-medium' : 'text-gray-500 hover:bg-gray-100'}`}
+            className={`rounded-full px-4 py-2 transition ${!massMode ? 'bg-sky-100 text-sky-800 font-medium' : 'text-gray-500 hover:bg-gray-100'}`}
           >
             Single
           </button>
           <button
             type='button'
             onClick={() => setMassMode(true)}
-            className={`rounded px-3 py-1 ${massMode ? 'bg-sky-100 text-sky-800 font-medium' : 'text-gray-500 hover:bg-gray-100'}`}
+            className={`rounded-full px-4 py-2 transition ${massMode ? 'bg-sky-100 text-sky-800 font-medium' : 'text-gray-500 hover:bg-gray-100'}`}
           >
             Mass
           </button>
@@ -277,26 +279,28 @@ export default function GeneratePage() {
       </Card>
 
       <Card>
-        <div className='mb-4 flex items-center justify-between'>
-          <h2 className='text-base font-semibold'>Articles</h2>
-          <div className='flex items-center gap-2'>
-            <select
-              value={pageSize}
-              onChange={(e) => {
-                setPageSize(+e.target.value)
-                setPage(0)
-              }}
-              className='rounded border border-gray-200 px-2 py-1 text-sm'
-            >
-              <option value={25}>25 / page</option>
-              <option value={50}>50 / page</option>
-              <option value={100}>100 / page</option>
-            </select>
-            <Button variant='secondary' size='sm' onClick={() => articles.refetch()}>
-              Refresh
-            </Button>
-          </div>
-        </div>
+        <SectionHeader
+          title='Articles'
+          action={
+            <div className='flex items-center gap-2'>
+              <select
+                value={pageSize}
+                onChange={(e) => {
+                  setPageSize(+e.target.value)
+                  setPage(0)
+                }}
+                className='h-9 rounded border border-gray-200 px-2 text-sm'
+              >
+                <option value={25}>25 / page</option>
+                <option value={50}>50 / page</option>
+                <option value={100}>100 / page</option>
+              </select>
+              <Button variant='secondary' size='sm' onClick={() => articles.refetch()}>
+                Refresh
+              </Button>
+            </div>
+          }
+        />
         <div className='overflow-x-auto'>
           <table className='w-full text-sm'>
             <thead className='text-left text-xs uppercase text-gray-500'>
@@ -326,14 +330,20 @@ export default function GeneratePage() {
                 return (
                   <tr key={String(a.id)} className='border-t border-gray-100'>
                     <td className='py-2 pr-4'>
-                      <button onClick={() => setInfoId(a.id)} className='text-sky-700 hover:underline' title='Info'>
+                      <button
+                        onClick={() => setInfoId(a.id)}
+                        className='rounded px-1 py-1 text-sky-700 hover:bg-sky-50 hover:underline'
+                        title='Info'
+                      >
                         {a.id}
                       </button>
                     </td>
-                    <td className='py-2 pr-4'>{a.keyword}</td>
-                    <td className='py-2 pr-4 text-gray-500'>{site?.alias || '—'}</td>
+                    <td className='max-w-[220px] truncate py-2 pr-4' title={a.keyword}>
+                      {a.keyword}
+                    </td>
+                    <td className='max-w-[140px] truncate py-2 pr-4 text-gray-500'>{site?.alias || '—'}</td>
                     <td className='py-2 pr-4'>
-                      <StatusPill status={a.status} />
+                      <Badge variant={statusVariant(a.status)}>{a.status}</Badge>
                     </td>
                     <td className='py-2 pr-4 text-gray-500'>{new Date(a.created_at).toLocaleString()}</td>
                     <td className='py-2 pr-4 text-gray-500'>{elapsed}</td>
@@ -349,13 +359,13 @@ export default function GeneratePage() {
             </tbody>
           </table>
         </div>
-        <div className='mt-4 flex items-center justify-between text-sm text-gray-500'>
+        <div className='mt-4 flex flex-wrap items-center justify-between gap-2 text-sm text-gray-500'>
           <span>{total} total</span>
-          <div className='flex items-center gap-3'>
+          <div className='flex items-center gap-1'>
             <button
               onClick={() => setPage((p) => Math.max(0, p - 1))}
               disabled={page === 0}
-              className='hover:underline disabled:opacity-40'
+              className='rounded px-3 py-2 hover:bg-gray-100 disabled:opacity-40'
             >
               ← Prev
             </button>
@@ -365,7 +375,7 @@ export default function GeneratePage() {
             <button
               onClick={() => setPage((p) => p + 1)}
               disabled={page + 1 >= totalPages}
-              className='hover:underline disabled:opacity-40'
+              className='rounded px-3 py-2 hover:bg-gray-100 disabled:opacity-40'
             >
               Next →
             </button>
@@ -379,12 +389,17 @@ export default function GeneratePage() {
             className='max-h-[85vh] w-full max-w-2xl overflow-auto rounded-lg bg-white p-6 shadow-xl'
             onClick={(e) => e.stopPropagation()}
           >
-            <div className='mb-4 flex items-center justify-between'>
-              <h3 className='text-base font-semibold'>Article #{infoId}</h3>
-              <button onClick={() => setInfoId(null)} className='text-gray-400 hover:text-gray-700'>
-                ✕
-              </button>
-            </div>
+            <SectionHeader
+              title={`Article #${infoId}`}
+              action={
+                <button
+                  onClick={() => setInfoId(null)}
+                  className='rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700'
+                >
+                  ✕
+                </button>
+              }
+            />
             {detail.isLoading ? (
               <p className='text-gray-400'>Loading…</p>
             ) : detail.data ? (
@@ -405,8 +420,8 @@ function InfoBody({ a }: { a: ArticleDetail }) {
   const Row = ({ k, v }: { k: string; v: React.ReactNode }) =>
     v == null || v === '' ? null : (
       <div className='flex justify-between gap-4 border-b border-gray-50 py-1'>
-        <span className='text-gray-500'>{k}</span>
-        <span className='text-right'>{v}</span>
+        <span className='shrink-0 text-gray-500'>{k}</span>
+        <span className='min-w-0 truncate text-right'>{v}</span>
       </div>
     )
   return (
@@ -414,7 +429,7 @@ function InfoBody({ a }: { a: ArticleDetail }) {
       <section>
         <h4 className='mb-1 font-medium text-gray-700'>Overview</h4>
         <Row k='Keyword' v={a.keyword} />
-        <Row k='Status' v={a.status} />
+        <Row k='Status' v={<Badge variant={statusVariant(a.status)}>{a.status}</Badge>} />
         <Row k='Created' v={new Date(a.created_at).toLocaleString()} />
         <Row k='Published' v={a.published_at ? new Date(a.published_at).toLocaleString() : '—'} />
         <Row k='Rating' v={a.human_rating == null ? '—' : a.human_rating ? '👍' : '👎'} />
@@ -423,7 +438,10 @@ function InfoBody({ a }: { a: ArticleDetail }) {
         <h4 className='mb-1 font-medium text-gray-700'>Metrics</h4>
         <Row k='AI score' v={a.ai_score == null ? undefined : a.ai_score.toFixed(2)} />
         <Row k='Reward' v={a.reward == null ? undefined : a.reward.toFixed(2)} />
-        <Row k='Quality floor' v={a.quality_ok == null ? '—' : a.quality_ok ? 'pass' : 'fail'} />
+        <Row
+          k='Quality floor'
+          v={a.quality_ok == null ? '—' : <Badge variant={a.quality_ok ? 'success' : 'danger'}>{a.quality_ok ? 'pass' : 'fail'}</Badge>}
+        />
         <Row k='Humanize cycles' v={a.humanize_cycles} />
         <Row k='Tokens' v={a.tokens} />
         <Row k='Images' v={`${a.images_resolved ?? 0}/${a.images_requested ?? 0} (skipped ${a.images_skipped ?? 0})`} />
@@ -480,26 +498,25 @@ function WpActions({
   onPublish: (id: number) => void
   publishing: boolean
 }) {
-  if (article.status === 'failed') return <span className='text-gray-400'>—</span>
-  if (!article.wp_edit_url) return <span className='text-gray-400'>—</span>
+  if (article.status === 'failed' || !article.wp_edit_url) return <span className='text-gray-400'>—</span>
 
   const viewUrl = siteUrl && article.wp_post_id ? `${siteUrl.replace(/\/+$/, '')}/?p=${article.wp_post_id}` : undefined
 
   return (
-    <span className='space-x-2 text-sm'>
-      <a className='text-sky-700 hover:underline' href={article.wp_edit_url} target='_blank' rel='noreferrer'>
+    <span className='inline-flex items-center gap-2 text-sm whitespace-nowrap'>
+      <a className='rounded px-1 py-1 text-sky-700 hover:bg-sky-50 hover:underline' href={article.wp_edit_url} target='_blank' rel='noreferrer'>
         edit
       </a>
       <span className='text-gray-300'>·</span>
       {article.status === 'published' && viewUrl ? (
-        <a className='text-emerald-700 hover:underline' href={viewUrl} target='_blank' rel='noreferrer'>
+        <a className='rounded px-1 py-1 text-emerald-700 hover:bg-emerald-50 hover:underline' href={viewUrl} target='_blank' rel='noreferrer'>
           view
         </a>
       ) : (
         <button
           onClick={() => onPublish(article.id)}
           disabled={publishing}
-          className='text-emerald-700 hover:underline disabled:opacity-50'
+          className='rounded px-1 py-1 text-emerald-700 hover:bg-emerald-50 hover:underline disabled:opacity-50'
         >
           publish
         </button>
@@ -518,12 +535,12 @@ function RatingButtons({
   disabled: boolean
 }) {
   return (
-    <span className='space-x-1 text-base'>
+    <span className='inline-flex items-center text-base whitespace-nowrap'>
       <button
         onClick={() => onRate(rating === true ? 'none' : 'like')}
         disabled={disabled}
         title={rating === true ? 'Remove like' : 'Like'}
-        className={`transition ${rating === true ? 'opacity-100' : 'opacity-30 hover:opacity-100'} disabled:opacity-20`}
+        className={`rounded p-1.5 transition hover:bg-gray-100 ${rating === true ? 'opacity-100' : 'opacity-30 hover:opacity-100'} disabled:opacity-20`}
       >
         👍
       </button>
@@ -531,7 +548,7 @@ function RatingButtons({
         onClick={() => onRate(rating === false ? 'none' : 'dislike')}
         disabled={disabled}
         title={rating === false ? 'Remove dislike' : 'Dislike'}
-        className={`transition ${rating === false ? 'opacity-100' : 'opacity-30 hover:opacity-100'} disabled:opacity-20`}
+        className={`rounded p-1.5 transition hover:bg-gray-100 ${rating === false ? 'opacity-100' : 'opacity-30 hover:opacity-100'} disabled:opacity-20`}
       >
         👎
       </button>
@@ -539,8 +556,9 @@ function RatingButtons({
   )
 }
 
-function StatusPill({ status }: { status: string }) {
-  const colour =
-    status === 'published' ? 'bg-emerald-100 text-emerald-800' : status === 'draft' ? 'bg-sky-100 text-sky-800' : status === 'failed' ? 'bg-rose-100 text-rose-800' : 'bg-amber-100 text-amber-800'
-  return <span className={`inline-block rounded px-2 py-0.5 text-xs font-medium ${colour}`}>{status}</span>
+function statusVariant(status: string): 'success' | 'info' | 'danger' | 'warning' {
+  if (status === 'published') return 'success'
+  if (status === 'draft') return 'info'
+  if (status === 'failed') return 'danger'
+  return 'warning'
 }

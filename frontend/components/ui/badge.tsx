@@ -1,6 +1,6 @@
 import { cx } from '@/lib/cx'
 
-type Variant = 'neutral' | 'success' | 'warning' | 'danger' | 'info'
+export type Variant = 'neutral' | 'success' | 'warning' | 'danger' | 'info'
 
 interface Props extends React.HTMLAttributes<HTMLSpanElement> {
   variant?: Variant

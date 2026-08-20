@@ -13,6 +13,15 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { SectionHeader } from '@/components/ui/section-header'
 import { cx } from '@/lib/cx'
+import {
+  categoryColorClass,
+  SEGMENT_COLOR,
+  SEGMENT_LABEL,
+  SEGMENT_ORDER,
+  type Segment,
+  TAG_BADGE_VARIANT,
+  TAG_LABEL,
+} from '@/lib/client-tags'
 
 type Gender = '' | 'male' | 'female'
 type ClientType = 'individual' | 'legal_entity'
@@ -73,7 +82,6 @@ interface ClientDetail {
   notes: ClientNote[]
 }
 
-type Segment = 'lead' | 'booked' | 'consulted' | 'client' | 'repeat' | 'lost'
 interface ClientSegment {
   client_id: string
   segment: Segment
@@ -81,67 +89,11 @@ interface ClientSegment {
   tags: string[]
   manual_tags: string[]
 }
-const SEGMENT_LABEL: Record<Segment, string> = {
-  lead: 'Заявка',
-  booked: 'Забронировал',
-  consulted: 'Проконсультирован',
-  client: 'Клиент',
-  repeat: 'Повторный',
-  lost: 'Потерян',
-}
-const SEGMENT_ORDER: Segment[] = ['lead', 'booked', 'consulted', 'client', 'repeat', 'lost']
-const SEGMENT_COLOR: Record<Segment, string> = {
-  lead: 'bg-gray-100 text-gray-700',
-  booked: 'bg-sky-100 text-sky-800',
-  consulted: 'bg-amber-100 text-amber-800',
-  client: 'bg-emerald-100 text-emerald-800',
-  repeat: 'bg-violet-100 text-violet-800',
-  lost: 'bg-rose-100 text-rose-800',
-}
-const TAG_LABEL: Record<string, string> = {
-  debtor: 'Должник',
-  no_show_risk: 'Риск неявки',
-  high_value: 'Ценный клиент',
-  dormant: 'Без контакта 90+ дней',
-}
-// Same Badge variants /clients uses for these — a hand-rolled color map
-// here used to render this same auto-tag in a different color than the
-// list page for identical data (rose/orange for no_show_risk vs the list
-// page's amber "warning"), which reads as two different signals for the
-// same client. Badge is the shared house style (see also this page's
-// status/case chips), so this is the one place that follows it, not a
-// second parallel palette.
-type BadgeVariant = 'neutral' | 'success' | 'warning' | 'danger' | 'info'
-const TAG_BADGE_VARIANT: Record<string, BadgeVariant> = {
-  debtor: 'danger',
-  no_show_risk: 'warning',
-  high_value: 'success',
-  dormant: 'neutral',
-}
 
 interface TagDef {
   label: string
   category: string
   created_at: string
-}
-// One color per category, by position in the sorted category list — same
-// scheme as the /clients list page, so a tag reads as the same "level"
-// wherever staff sees it. Deliberately avoids gray/sky/amber/emerald/
-// violet/rose/orange — every hue SEGMENT_COLOR or TAG_BADGE_VARIANT
-// already uses on this same card — so a manual tag's color can't be
-// mistaken for a segment or an auto-tag.
-const CATEGORY_PALETTE = [
-  'border-teal-200 bg-teal-50 text-teal-700',
-  'border-cyan-200 bg-cyan-50 text-cyan-700',
-  'border-fuchsia-200 bg-fuchsia-50 text-fuchsia-700',
-  'border-indigo-200 bg-indigo-50 text-indigo-700',
-  'border-lime-200 bg-lime-50 text-lime-700',
-  'border-blue-200 bg-blue-50 text-blue-700',
-]
-function categoryColorClass(category: string, categories: string[]): string {
-  const sorted = [...categories].sort()
-  const idx = Math.max(0, sorted.indexOf(category))
-  return CATEGORY_PALETTE[idx % CATEGORY_PALETTE.length]
 }
 
 const GENDER_LABEL: Record<Gender, string> = { '': 'Не вказано', male: 'Чоловіча', female: 'Жіноча' }

@@ -14,10 +14,12 @@ export default function SignInPage() {
   const [email, setEmail] = useState('verify@local.test')
   const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   async function submit(e: React.FormEvent) {
     e.preventDefault()
     setBusy(true)
+    setError(null)
     try {
       const res = await api<{ token: string }>('/auth/login', {
         method: 'POST',
@@ -26,26 +28,47 @@ export default function SignInPage() {
       setToken(res.token)
       router.push('/generate')
     } catch (e) {
-      toast.error((e as Error).message)
+      const message = (e as Error).message
+      setError(message)
+      toast.error(message)
     } finally {
       setBusy(false)
     }
   }
 
   return (
-    <div className='flex min-h-screen items-center justify-center p-6'>
+    <div className='flex min-h-screen flex-col items-center justify-center gap-6 p-4 sm:p-6'>
+      <p className='text-sm font-semibold tracking-tight text-emerald-600'>multiagent-seo</p>
       <Card className='w-full max-w-sm'>
-        <h1 className='mb-6 text-lg font-semibold'>Sign in</h1>
+        <div className='mb-6'>
+          <h1 className='text-xl font-semibold text-gray-900'>Sign in</h1>
+          <p className='mt-1 text-sm text-gray-500'>Sign in with your account credentials to continue.</p>
+        </div>
+        {error && <div className='mb-4 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700'>{error}</div>}
         <form onSubmit={submit} className='space-y-4'>
           <div>
             <Label htmlFor='email'>Email</Label>
-            <Input id='email' type='email' value={email} onChange={(e) => setEmail(e.target.value)} required />
+            <Input
+              id='email'
+              type='email'
+              autoComplete='email'
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+            />
           </div>
           <div>
             <Label htmlFor='password'>Password</Label>
-            <Input id='password' type='password' value={password} onChange={(e) => setPassword(e.target.value)} required />
+            <Input
+              id='password'
+              type='password'
+              autoComplete='current-password'
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+            />
           </div>
-          <Button type='submit' disabled={busy} className='w-full'>
+          <Button type='submit' disabled={busy} className='h-11 w-full text-base'>
             {busy ? 'Signing in…' : 'Sign in'}
           </Button>
         </form>

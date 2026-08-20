@@ -4,9 +4,11 @@ import { useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input, Label } from '@/components/ui/input'
+import { SectionHeader } from '@/components/ui/section-header'
 
 interface EmailScrapeAccepted {
   sheet: string
@@ -20,6 +22,13 @@ interface ScrapeJob {
   state: string
   total: number
   processed: number
+}
+
+const jobStateBadge: Record<string, 'success' | 'danger' | 'neutral' | 'info'> = {
+  running: 'info',
+  done: 'success',
+  canceled: 'neutral',
+  failed: 'danger',
 }
 
 export default function EmailScrapePage() {
@@ -59,7 +68,7 @@ export default function EmailScrapePage() {
   return (
     <div className='max-w-2xl space-y-6'>
       <Card>
-        <h1 className='mb-1 text-lg font-semibold'>Scrape emails from sites</h1>
+        <SectionHeader title='Scrape emails from sites' as='h1' />
         <p className='mb-6 text-sm text-gray-500'>
           Reads site URLs from column A, crawls each site (home + contact pages) and writes the found{' '}
           <code className='rounded bg-gray-100 px-1'>emails / status</code> into B–C. Already-processed rows are skipped.
@@ -83,15 +92,21 @@ export default function EmailScrapePage() {
 
       {j && (
         <Card>
-          <div className='mb-2 flex items-center justify-between'>
-            <span className='text-sm font-medium'>
-              {j.processed} / {j.total} sites · <span className='text-gray-500'>{j.state}</span>
+          <SectionHeader
+            title='Progress'
+            action={
+              running && (
+                <Button variant='secondary' size='sm' onClick={() => cancel.mutate()} disabled={cancel.isPending}>
+                  {cancel.isPending ? 'Cancelling…' : 'Cancel'}
+                </Button>
+              )
+            }
+          />
+          <div className='mb-2 flex flex-wrap items-center gap-2 text-sm font-medium'>
+            <span>
+              {j.processed} / {j.total} sites
             </span>
-            {running && (
-              <Button variant='secondary' size='sm' onClick={() => cancel.mutate()} disabled={cancel.isPending}>
-                {cancel.isPending ? 'Cancelling…' : 'Cancel'}
-              </Button>
-            )}
+            <Badge variant={jobStateBadge[j.state] ?? 'neutral'}>{j.state}</Badge>
           </div>
           <div className='h-2 w-full overflow-hidden rounded bg-gray-100'>
             <div className='h-full bg-emerald-500 transition-all' style={{ width: `${pct}%` }} />
