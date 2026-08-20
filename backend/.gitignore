@@ -38,3 +38,7 @@ coverage.html
 
 # claude code local state
 .claude/
+
+# Imported financial history: real payments, vendor and staff names. Same reason
+# credentials.json stays out — scp it to the host when running the backfill.
+data/
