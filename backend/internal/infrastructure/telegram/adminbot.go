@@ -51,6 +51,12 @@ type AdminBot struct {
 	log            *slog.Logger
 
 	flows map[int64]*flow
+	// staffLangs caches each staff member's /language choice by chat id
+	// (private-chat id equals the tapping user's id) so tr doesn't hit the
+	// DB on every message — populated lazily on first lookup, updated
+	// immediately when /language changes it. Never locked: Run() dispatches
+	// updates one at a time, same as flows.
+	staffLangs map[int64]consultations.StaffLang
 }
 
 type flow struct {
@@ -215,6 +221,7 @@ func NewAdminBot(
 		{Command: "client", Description: "Знайти клієнта (ім'я/телефон/telegram)"},
 		{Command: "edit", Description: "Редагувати дані клієнта (ім'я, телефон, email)"},
 		{Command: "intakelink", Description: "Посилання на анкету для нового клієнта"},
+		{Command: "language", Description: "Мова бота для Вас особисто (укр/рос)"},
 	}
 	for _, id := range allowedUserIDs {
 		_, _ = bot.Request(tgbotapi.NewSetMyCommandsWithScope(tgbotapi.NewBotCommandScopeChat(id), staffCommands...))
@@ -238,6 +245,7 @@ func NewAdminBot(
 		reminderBefore: reminderBefore,
 		log:            log,
 		flows:          make(map[int64]*flow),
+		staffLangs:     make(map[int64]consultations.StaffLang),
 	}, nil
 }
 
@@ -323,8 +331,15 @@ func (b *AdminBot) handle(ctx context.Context, update tgbotapi.Update) {
 	// A tapped menu button carries its label as plain text — swap it for
 	// the equivalent command so every case below (and the flows it starts)
 	// runs unchanged, whether staff typed the command or tapped a button.
+	// staffMenuCommands only knows the Ukrainian label; a button rendered
+	// in Russian (see staffMenuKeyboard) is translated back to its
+	// Ukrainian source first, via the same map tr uses to go the other way.
 	if cmd, ok := staffMenuCommands[text]; ok {
 		text = cmd
+	} else if uk, ok := ruToUk[text]; ok {
+		if cmd, ok := staffMenuCommands[uk]; ok {
+			text = cmd
+		}
 	}
 
 	switch {
@@ -442,6 +457,10 @@ func (b *AdminBot) handle(ctx context.Context, update tgbotapi.Update) {
 
 	case text == "/intakelink":
 		b.sendIntakeLink(ctx, chatID)
+		return
+
+	case text == "/language":
+		b.sendLanguagePicker(ctx, chatID)
 		return
 	}
 
@@ -566,7 +585,9 @@ func (b *AdminBot) handle(ctx context.Context, update tgbotapi.Update) {
 		}
 		fl.kase.fee = amount
 		fl.step = "case_category"
-		b.send(ctx, chatID, "Напрямок справи ("+strings.Join(cases.Categories, " / ")+") — введіть один з варіантів або свій:")
+		// Category names themselves stay Ukrainian regardless of language —
+		// they're the fixed taxonomy stored on the case, not UI chrome.
+		b.send(ctx, chatID, fmt.Sprintf(b.tr(ctx, chatID, "Напрямок справи (%s) — введіть один з варіантів або свій:"), strings.Join(cases.Categories, " / ")))
 
 	case "case_category":
 		fl.kase.category = text
@@ -674,11 +695,15 @@ const (
 	btnEditClient  = "✏️ Редагувати клієнта"
 	btnIntakeLink  = "📋 Анкета для клієнта"
 	btnHelp        = "❓ Довідка"
+	btnLanguage    = "🌐 Мова"
 )
 
 // staffMenuCommands maps a tapped button's label to the equivalent bare
 // command — handle() substitutes it before the existing switch, so every
 // button reuses that command's logic unchanged (same prompts, same flows).
+// Keyed by the Ukrainian label only; a button rendered in Russian (see
+// staffMenuKeyboard/tr) is translated back to its Ukrainian source before
+// this lookup runs, so one entry per command is enough — see handle().
 var staffMenuCommands = map[string]string{
 	btnInvoice:     "/invoice",
 	btnConsult:     "/consult",
@@ -693,20 +718,24 @@ var staffMenuCommands = map[string]string{
 	btnEditClient:  "/edit",
 	btnIntakeLink:  "/intakelink",
 	btnHelp:        "/help",
+	btnLanguage:    "/language",
 }
 
 // Two buttons per row — three squeezed Ukrainian labels onto one row on a
 // phone screen (the only place this menu is ever seen), truncating the
 // longer ones.
-func staffMenuKeyboard() tgbotapi.ReplyKeyboardMarkup {
+func (b *AdminBot) staffMenuKeyboard(ctx context.Context, chatID int64) tgbotapi.ReplyKeyboardMarkup {
+	btn := func(label string) tgbotapi.KeyboardButton {
+		return tgbotapi.NewKeyboardButton(b.tr(ctx, chatID, label))
+	}
 	kb := tgbotapi.NewReplyKeyboard(
-		tgbotapi.NewKeyboardButtonRow(tgbotapi.NewKeyboardButton(btnHelp), tgbotapi.NewKeyboardButton(btnClientInfo)),
-		tgbotapi.NewKeyboardButtonRow(tgbotapi.NewKeyboardButton(btnEditClient), tgbotapi.NewKeyboardButton(btnInvoice)),
-		tgbotapi.NewKeyboardButtonRow(tgbotapi.NewKeyboardButton(btnConsult), tgbotapi.NewKeyboardButton(btnBook)),
-		tgbotapi.NewKeyboardButtonRow(tgbotapi.NewKeyboardButton(btnCreateGroup), tgbotapi.NewKeyboardButton(btnIntakeLink)),
-		tgbotapi.NewKeyboardButtonRow(tgbotapi.NewKeyboardButton(btnCase), tgbotapi.NewKeyboardButton(btnPay)),
-		tgbotapi.NewKeyboardButtonRow(tgbotapi.NewKeyboardButton(btnCaseClose), tgbotapi.NewKeyboardButton(btnAdvocateAdd)),
-		tgbotapi.NewKeyboardButtonRow(tgbotapi.NewKeyboardButton(btnAdvocates)),
+		tgbotapi.NewKeyboardButtonRow(btn(btnHelp), btn(btnClientInfo)),
+		tgbotapi.NewKeyboardButtonRow(btn(btnEditClient), btn(btnInvoice)),
+		tgbotapi.NewKeyboardButtonRow(btn(btnConsult), btn(btnBook)),
+		tgbotapi.NewKeyboardButtonRow(btn(btnCreateGroup), btn(btnIntakeLink)),
+		tgbotapi.NewKeyboardButtonRow(btn(btnCase), btn(btnPay)),
+		tgbotapi.NewKeyboardButtonRow(btn(btnCaseClose), btn(btnAdvocateAdd)),
+		tgbotapi.NewKeyboardButtonRow(btn(btnAdvocates), btn(btnLanguage)),
 	)
 	kb.ResizeKeyboard = true
 	return kb
@@ -749,11 +778,49 @@ const helpText = `📖 <b>Довідка по командах бота</b>
 /help — ця довідка.`
 
 func (b *AdminBot) sendStaffMenu(ctx context.Context, chatID int64) {
-	msg := tgbotapi.NewMessage(chatID, "Меню:")
-	msg.ReplyMarkup = staffMenuKeyboard()
+	msg := b.newMsg(ctx, chatID, "Меню:")
+	msg.ReplyMarkup = b.staffMenuKeyboard(ctx, chatID)
 	if _, err := b.bot.Send(msg); err != nil {
 		b.log.ErrorContext(ctx, "telegram: send staff menu failed", "err", err)
 	}
+}
+
+// sendLanguagePicker offers each staff member their own bot UI language —
+// see StaffLang's doc for what this does and doesn't affect.
+func (b *AdminBot) sendLanguagePicker(ctx context.Context, chatID int64) {
+	msg := tgbotapi.NewMessage(chatID, "Оберіть мову бота для себе / Выберите язык бота для себя:")
+	msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("🇺🇦 Українська", "lang:"+string(consultations.StaffLangUK)),
+			tgbotapi.NewInlineKeyboardButtonData("🇷🇺 Русский", "lang:"+string(consultations.StaffLangRU)),
+		),
+	)
+	if _, err := b.bot.Send(msg); err != nil {
+		b.log.ErrorContext(ctx, "telegram: send language picker failed", "err", err)
+	}
+}
+
+// pickLanguage handles sendLanguagePicker's tap — persists the choice and
+// refreshes the in-memory cache immediately, so the very next message
+// (including the confirmation below) already comes back in the new language.
+func (b *AdminBot) pickLanguage(ctx context.Context, cb *tgbotapi.CallbackQuery, lang string) {
+	if !consultations.IsStaffLang(lang) {
+		b.answerCallback(ctx, cb, "")
+		return
+	}
+	l := consultations.StaffLang(lang)
+	if err := b.store.SetStaffLanguage(ctx, cb.From.ID, l); err != nil {
+		b.log.ErrorContext(ctx, "telegram: set staff language failed", "err", err)
+		b.answerCallback(ctx, cb, "Не вдалося зберегти")
+		return
+	}
+	b.staffLangs[cb.From.ID] = l
+	b.answerCallback(ctx, cb, "")
+	label := "Мову збережено: Українська ✅"
+	if l == consultations.StaffLangRU {
+		label = "Язык сохранён: Русский ✅"
+	}
+	b.editCallbackMessage(ctx, cb, label)
 }
 
 func (b *AdminBot) sendRequestPrompt(ctx context.Context, chatID int64) {
@@ -968,7 +1035,7 @@ func (b *AdminBot) sendCaseAdvocatePicker(ctx context.Context, chatID, userID in
 			tgbotapi.NewInlineKeyboardButtonData(a.FullName, "caseadv:"+a.ID),
 		))
 	}
-	msg := tgbotapi.NewMessage(chatID, "Оберіть адвоката, який веде справу:")
+	msg := b.newMsg(ctx, chatID, "Оберіть адвоката, який веде справу:")
 	msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(rows...)
 	if _, err := b.bot.Send(msg); err != nil {
 		b.log.ErrorContext(ctx, "telegram: send case advocate picker failed", "err", err)
@@ -978,19 +1045,19 @@ func (b *AdminBot) sendCaseAdvocatePicker(ctx context.Context, chatID, userID in
 func (b *AdminBot) pickCaseAdvocate(ctx context.Context, cb *tgbotapi.CallbackQuery, advocateID string) {
 	fl := b.flows[cb.From.ID]
 	if fl == nil || fl.step != "case_advocate_pick" {
-		b.answerCallback(ctx, cb.ID, "Сесія застаріла, почніть з /case")
+		b.answerCallback(ctx, cb, "Сесія застаріла, почніть з /case")
 		return
 	}
 	advocate, err := b.findAdvocate(ctx, advocateID)
 	if err != nil {
 		b.log.WarnContext(ctx, "telegram: case: find advocate failed", "advocate_id", advocateID, "err", err)
-		b.answerCallback(ctx, cb.ID, "Адвоката не знайдено")
+		b.answerCallback(ctx, cb, "Адвоката не знайдено")
 		return
 	}
 	fl.kase.advocateID = advocateID
 	fl.kase.advocateName = advocate.FullName
 	fl.step = "case_description"
-	b.answerCallback(ctx, cb.ID, "")
+	b.answerCallback(ctx, cb, "")
 	b.editCallbackMessage(ctx, cb, "Адвокат: "+advocate.FullName)
 	if cb.Message != nil {
 		b.send(ctx, cb.Message.Chat.ID, "Опишіть справу (наприклад: клопотання про відстрочку):")
@@ -1025,8 +1092,10 @@ func (b *AdminBot) finishCase(ctx context.Context, chatID, userID int64, draft c
 		return
 	}
 
+	// tr on the template, before Sprintf bakes in dynamic data — see
+	// sendNewClientContactPicker for why the order matters.
 	b.sendHTML(ctx, chatID, fmt.Sprintf(
-		"Готово. Справа <code>%s</code> (%s, %s), сума %s грн.\n\nЩоб додати оплату: /pay <code>%s</code> &lt;сума&gt;\nЩоб позначити виконаною: /caseclose <code>%s</code>",
+		b.tr(ctx, chatID, "Готово. Справа <code>%s</code> (%s, %s), сума %s грн.\n\nЩоб додати оплату: /pay <code>%s</code> &lt;сума&gt;\nЩоб позначити виконаною: /caseclose <code>%s</code>"),
 		saved.ID, html.EscapeString(draft.advocateName), html.EscapeString(draft.category), formatAmount(draft.fee), saved.ID, saved.ID,
 	))
 }
@@ -1053,11 +1122,11 @@ func (b *AdminBot) handlePay(ctx context.Context, chatID, userID int64, arg stri
 // day, so "today" is one tap while a backdated entry is still one text
 // message away.
 func (b *AdminBot) sendPaymentDatePicker(ctx context.Context, chatID int64) {
-	msg := tgbotapi.NewMessage(chatID, "Коли внесена оплата?")
+	msg := b.newMsg(ctx, chatID, "Коли внесена оплата?")
 	msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("📅 Сьогодні", "paydate:today"),
-			tgbotapi.NewInlineKeyboardButtonData("🗓 Інша дата", "paydate:custom"),
+			tgbotapi.NewInlineKeyboardButtonData(b.tr(ctx, chatID, "📅 Сьогодні"), "paydate:today"),
+			tgbotapi.NewInlineKeyboardButtonData(b.tr(ctx, chatID, "🗓 Інша дата"), "paydate:custom"),
 		),
 	)
 	if _, err := b.bot.Send(msg); err != nil {
@@ -1069,10 +1138,10 @@ func (b *AdminBot) sendPaymentDatePicker(ctx context.Context, chatID int64) {
 func (b *AdminBot) pickPaymentDate(ctx context.Context, cb *tgbotapi.CallbackQuery, choice string) {
 	fl := b.flows[cb.From.ID]
 	if fl == nil || fl.step != "pay_date" {
-		b.answerCallback(ctx, cb.ID, "Сесія застаріла, почніть з /pay")
+		b.answerCallback(ctx, cb, "Сесія застаріла, почніть з /pay")
 		return
 	}
-	b.answerCallback(ctx, cb.ID, "")
+	b.answerCallback(ctx, cb, "")
 	if cb.Message == nil {
 		return
 	}
@@ -1100,7 +1169,7 @@ func (b *AdminBot) applyPayment(ctx context.Context, chatID, userID int64, caseI
 		return
 	}
 	b.send(ctx, chatID, fmt.Sprintf(
-		"Оплата +%s грн (%s). Всього оплачено: %s з %s грн. Залишок: %s грн.",
+		b.tr(ctx, chatID, "Оплата +%s грн (%s). Всього оплачено: %s з %s грн. Залишок: %s грн."),
 		formatAmount(amount), paidAt.Format("02.01.2006"), formatAmount(updated.PaidAmount), formatAmount(updated.Fee), formatAmount(updated.Owed()),
 	))
 }
@@ -1131,7 +1200,7 @@ func (b *AdminBot) registerAdvocate(ctx context.Context, chatID int64, fullName 
 		return
 	}
 	link := fmt.Sprintf("https://t.me/%s?start=%s%s", b.bot.Self.UserName, advocateStartPrefix, advocate.ID)
-	b.send(ctx, chatID, "Адвоката збережено. Перешліть йому одноразове посилання:\n\n"+link)
+	b.send(ctx, chatID, b.tr(ctx, chatID, "Адвоката збережено. Перешліть йому одноразове посилання:")+"\n\n"+link)
 }
 
 // listAdvocates shows every active advocate with a "деактивувати" button —
@@ -1154,7 +1223,7 @@ func (b *AdminBot) listAdvocates(ctx context.Context, chatID int64) {
 			tgbotapi.NewInlineKeyboardButtonData("❌ "+a.FullName, "advdeact:"+a.ID),
 		))
 	}
-	msg := tgbotapi.NewMessage(chatID, "Активні адвокати (тап — деактивувати):")
+	msg := b.newMsg(ctx, chatID, "Активні адвокати (тап — деактивувати):")
 	msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(rows...)
 	if _, err := b.bot.Send(msg); err != nil {
 		b.log.ErrorContext(ctx, "telegram: send advocate list failed", "err", err)
@@ -1164,10 +1233,10 @@ func (b *AdminBot) listAdvocates(ctx context.Context, chatID int64) {
 func (b *AdminBot) deactivateAdvocate(ctx context.Context, cb *tgbotapi.CallbackQuery, advocateID string) {
 	if err := b.store.DeactivateAdvocate(ctx, advocateID); err != nil {
 		b.log.ErrorContext(ctx, "telegram: deactivate advocate failed", "advocate_id", advocateID, "err", err)
-		b.answerCallback(ctx, cb.ID, "Не вдалося деактивувати")
+		b.answerCallback(ctx, cb, "Не вдалося деактивувати")
 		return
 	}
-	b.answerCallback(ctx, cb.ID, "Деактивовано")
+	b.answerCallback(ctx, cb, "Деактивовано")
 	b.editCallbackMessage(ctx, cb, "Деактивовано ✅ (старі справи не змінились)")
 }
 
@@ -1221,7 +1290,7 @@ func (b *AdminBot) resolveClientOrCreate(ctx context.Context, chatID, userID int
 			tgbotapi.NewInlineKeyboardButtonData(label, "clientpick:"+string(mode)+":"+c.ID),
 		))
 	}
-	msg := tgbotapi.NewMessage(chatID, "Кілька збігів, оберіть клієнта:")
+	msg := b.newMsg(ctx, chatID, "Кілька збігів, оберіть клієнта:")
 	msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(rows...)
 	if _, err := b.bot.Send(msg); err != nil {
 		b.log.ErrorContext(ctx, "telegram: send client picker failed", "err", err)
@@ -1234,15 +1303,18 @@ func (b *AdminBot) resolveClientOrCreate(ctx context.Context, chatID, userID int
 // Telegram handle, or nothing at all yet, and none of that should block
 // getting them into the system.
 func (b *AdminBot) sendNewClientContactPicker(ctx context.Context, chatID int64, name string) {
-	msg := tgbotapi.NewMessage(chatID, fmt.Sprintf("Клієнта не знайдено. Створити нового на ім'я «%s»? Що є з контактів?", name))
+	// Sprintf'd before tr, not after — tr matches whole strings, and a name
+	// baked in first would never match the (name-free) map key.
+	text := fmt.Sprintf(b.tr(ctx, chatID, "Клієнта не знайдено. Створити нового на ім'я «%s»? Що є з контактів?"), name)
+	msg := tgbotapi.NewMessage(chatID, text)
 	msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("📞 Телефон", "newclient:phone"),
-			tgbotapi.NewInlineKeyboardButtonData("✉️ Email", "newclient:email"),
+			tgbotapi.NewInlineKeyboardButtonData(b.tr(ctx, chatID, "📞 Телефон"), "newclient:phone"),
+			tgbotapi.NewInlineKeyboardButtonData(b.tr(ctx, chatID, "✉️ Email"), "newclient:email"),
 		),
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("💬 Telegram", "newclient:telegram"),
-			tgbotapi.NewInlineKeyboardButtonData("⏭ Нічого немає", "newclient:skip"),
+			tgbotapi.NewInlineKeyboardButtonData(b.tr(ctx, chatID, "💬 Telegram"), "newclient:telegram"),
+			tgbotapi.NewInlineKeyboardButtonData(b.tr(ctx, chatID, "⏭ Нічого немає"), "newclient:skip"),
 		),
 	)
 	if _, err := b.bot.Send(msg); err != nil {
@@ -1256,10 +1328,10 @@ func (b *AdminBot) sendNewClientContactPicker(ctx context.Context, chatID int64,
 func (b *AdminBot) pickNewClientContact(ctx context.Context, cb *tgbotapi.CallbackQuery, kind string) {
 	fl := b.flows[cb.From.ID]
 	if fl == nil || fl.step != "new_client_contact" {
-		b.answerCallback(ctx, cb.ID, "Сесія застаріла, почніть заново")
+		b.answerCallback(ctx, cb, "Сесія застаріла, почніть заново")
 		return
 	}
-	b.answerCallback(ctx, cb.ID, "")
+	b.answerCallback(ctx, cb, "")
 
 	switch kind {
 	case "phone":
@@ -1301,13 +1373,13 @@ func (b *AdminBot) continueWithClient(ctx context.Context, chatID, userID int64,
 	case lookupForBooking:
 		b.flows[userID] = &flow{step: "book_date", book: bookDraft{client: client}}
 		b.send(ctx, chatID, fmt.Sprintf(
-			"Клієнт: %s (%s). Введіть дату консультації (наприклад 29.07.2026):",
+			b.tr(ctx, chatID, "Клієнт: %s (%s). Введіть дату консультації (наприклад 29.07.2026):"),
 			client.Name, client.Phone,
 		))
 	case lookupForCase:
 		b.flows[userID] = &flow{step: "case_fee", kase: caseDraft{client: client}}
 		b.send(ctx, chatID, fmt.Sprintf(
-			"Клієнт: %s (%s). Введіть суму договору в грн (наприклад 15000):",
+			b.tr(ctx, chatID, "Клієнт: %s (%s). Введіть суму договору в грн (наприклад 15000):"),
 			client.Name, client.Phone,
 		))
 	}
@@ -1319,10 +1391,10 @@ func (b *AdminBot) pickClientForFlow(ctx context.Context, cb *tgbotapi.CallbackQ
 	client, err := b.store.FindClient(ctx, clientID)
 	if err != nil {
 		b.log.WarnContext(ctx, "telegram: pick client: find client failed", "client_id", clientID, "err", err)
-		b.answerCallback(ctx, cb.ID, "Клієнта не знайдено")
+		b.answerCallback(ctx, cb, "Клієнта не знайдено")
 		return
 	}
-	b.answerCallback(ctx, cb.ID, "")
+	b.answerCallback(ctx, cb, "")
 	b.editCallbackMessage(ctx, cb, "Клієнт: "+client.Name)
 	if cb.Message != nil {
 		b.continueWithClient(ctx, cb.Message.Chat.ID, cb.From.ID, client, mode)
@@ -1336,11 +1408,11 @@ func (b *AdminBot) pickClientForFlow(ctx context.Context, cb *tgbotapi.CallbackQ
 // happened and already paid, so there's no advocate to notify about news
 // that isn't news, and no pending outcome left to decide.
 func (b *AdminBot) sendBookingStatusPicker(ctx context.Context, chatID int64) {
-	msg := tgbotapi.NewMessage(chatID, "Це майбутній запис чи консультація вже відбулася (заводите заднім числом)?")
+	msg := b.newMsg(ctx, chatID, "Це майбутній запис чи консультація вже відбулася (заводите заднім числом)?")
 	msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("📅 Майбутня", "bookstatus:"+consultations.StatusScheduled),
-			tgbotapi.NewInlineKeyboardButtonData("✅ Вже відбулася, оплачена", "bookstatus:"+consultations.StatusCompleted),
+			tgbotapi.NewInlineKeyboardButtonData(b.tr(ctx, chatID, "📅 Майбутня"), "bookstatus:"+consultations.StatusScheduled),
+			tgbotapi.NewInlineKeyboardButtonData(b.tr(ctx, chatID, "✅ Вже відбулася, оплачена"), "bookstatus:"+consultations.StatusCompleted),
 		),
 	)
 	if _, err := b.bot.Send(msg); err != nil {
@@ -1352,10 +1424,10 @@ func (b *AdminBot) sendBookingStatusPicker(ctx context.Context, chatID int64) {
 func (b *AdminBot) pickBookingStatus(ctx context.Context, cb *tgbotapi.CallbackQuery, status string) {
 	fl := b.flows[cb.From.ID]
 	if fl == nil || fl.step != "book_status" {
-		b.answerCallback(ctx, cb.ID, "Сесія застаріла, почніть з /book")
+		b.answerCallback(ctx, cb, "Сесія застаріла, почніть з /book")
 		return
 	}
-	b.answerCallback(ctx, cb.ID, "")
+	b.answerCallback(ctx, cb, "")
 	if cb.Message == nil {
 		return
 	}
@@ -1368,7 +1440,7 @@ func (b *AdminBot) finishBooking(ctx context.Context, chatID, userID int64, draf
 
 	scheduledAt, err := time.Parse("02.01.2006 15:04", draft.date+" "+draft.time)
 	if err != nil {
-		b.sendHTML(ctx, chatID, "Не розпізнав дату/час. Спробуйте ще раз: /book <code>"+draft.client.ID+"</code>")
+		b.sendHTML(ctx, chatID, fmt.Sprintf(b.tr(ctx, chatID, "Не розпізнав дату/час. Спробуйте ще раз: /book <code>%s</code>"), draft.client.ID))
 		return
 	}
 
@@ -1406,10 +1478,11 @@ func (b *AdminBot) finishBooking(ctx context.Context, chatID, userID int64, draf
 		} else {
 			b.sendHTML(ctx, advocate.TelegramChatID, buildConsultationCard("📅 Нова консультація заброньована", c, draft.client, consultations.Advocate{}, false))
 		}
-		msg = tgbotapi.NewMessage(chatID, "Готово. Перешліть клієнту:\n\n"+link)
-		msg.ReplyMarkup = statusKeyboard(c.ID)
+		msg = tgbotapi.NewMessage(chatID, b.tr(ctx, chatID, "Готово. Перешліть клієнту:")+"\n\n"+link)
+		msg.ReplyMarkup = b.statusKeyboard(ctx, chatID, c.ID)
 	} else {
-		msg = tgbotapi.NewMessage(chatID, "Додано заднім числом ("+statusLabel(status)+"). За бажанням перешліть клієнту:\n\n"+link)
+		label := b.tr(ctx, chatID, statusLabel(status))
+		msg = tgbotapi.NewMessage(chatID, fmt.Sprintf(b.tr(ctx, chatID, "Додано заднім числом (%s). За бажанням перешліть клієнту:\n\n%s"), label, link))
 	}
 	if _, err := b.bot.Send(msg); err != nil {
 		b.log.ErrorContext(ctx, "telegram: send booking confirmation failed", "err", err)
@@ -1420,12 +1493,12 @@ func (b *AdminBot) finishBooking(ctx context.Context, chatID, userID int64, draf
 // can record the outcome later (after the consultation date has passed)
 // without hunting for a command — just tap the button under the message
 // they already have.
-func statusKeyboard(consultationID string) tgbotapi.InlineKeyboardMarkup {
+func (b *AdminBot) statusKeyboard(ctx context.Context, chatID int64, consultationID string) tgbotapi.InlineKeyboardMarkup {
 	return tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("✅ Провів", "cstatus:"+consultationID+":"+consultations.StatusCompleted),
-			tgbotapi.NewInlineKeyboardButtonData("❌ Скасував", "cstatus:"+consultationID+":"+consultations.StatusCancelled),
-			tgbotapi.NewInlineKeyboardButtonData("🚫 Не прийшов", "cstatus:"+consultationID+":"+consultations.StatusNoShow),
+			tgbotapi.NewInlineKeyboardButtonData(b.tr(ctx, chatID, "✅ Провів"), "cstatus:"+consultationID+":"+consultations.StatusCompleted),
+			tgbotapi.NewInlineKeyboardButtonData(b.tr(ctx, chatID, "❌ Скасував"), "cstatus:"+consultationID+":"+consultations.StatusCancelled),
+			tgbotapi.NewInlineKeyboardButtonData(b.tr(ctx, chatID, "🚫 Не прийшов"), "cstatus:"+consultationID+":"+consultations.StatusNoShow),
 		),
 	)
 }
@@ -1451,13 +1524,13 @@ func statusLabel(status string) string {
 // button ends up forwarded.
 func (b *AdminBot) handleCallback(ctx context.Context, cb *tgbotapi.CallbackQuery) {
 	if cb.From == nil || !b.allowedUsers[cb.From.ID] {
-		b.answerCallback(ctx, cb.ID, "")
+		b.answerCallback(ctx, cb, "")
 		return
 	}
 
 	prefix, rest, ok := strings.Cut(cb.Data, ":")
 	if !ok {
-		b.answerCallback(ctx, cb.ID, "")
+		b.answerCallback(ctx, cb, "")
 		return
 	}
 
@@ -1465,7 +1538,7 @@ func (b *AdminBot) handleCallback(ctx context.Context, cb *tgbotapi.CallbackQuer
 	case "cstatus":
 		consultationID, status, ok := strings.Cut(rest, ":")
 		if !ok {
-			b.answerCallback(ctx, cb.ID, "")
+			b.answerCallback(ctx, cb, "")
 			return
 		}
 		b.handleStatusCallback(ctx, cb, consultationID, status)
@@ -1486,14 +1559,14 @@ func (b *AdminBot) handleCallback(ctx context.Context, cb *tgbotapi.CallbackQuer
 	case "editfield":
 		field, clientID, ok := strings.Cut(rest, ":")
 		if !ok {
-			b.answerCallback(ctx, cb.ID, "")
+			b.answerCallback(ctx, cb, "")
 			return
 		}
 		b.startEditField(ctx, cb, editableField(field), clientID)
 	case "clientpick":
 		mode, clientID, ok := strings.Cut(rest, ":")
 		if !ok {
-			b.answerCallback(ctx, cb.ID, "")
+			b.answerCallback(ctx, cb, "")
 			return
 		}
 		b.pickClientForFlow(ctx, cb, clientLookupMode(mode), clientID)
@@ -1503,23 +1576,27 @@ func (b *AdminBot) handleCallback(ctx context.Context, cb *tgbotapi.CallbackQuer
 		b.pickNewClientContact(ctx, cb, rest)
 	case "paydate":
 		b.pickPaymentDate(ctx, cb, rest)
+	case "lang":
+		b.pickLanguage(ctx, cb, rest)
 	default:
-		b.answerCallback(ctx, cb.ID, "")
+		b.answerCallback(ctx, cb, "")
 	}
 }
 
 func (b *AdminBot) handleStatusCallback(ctx context.Context, cb *tgbotapi.CallbackQuery, consultationID, status string) {
 	if err := b.store.UpdateStatus(ctx, consultationID, status); err != nil {
 		b.log.ErrorContext(ctx, "telegram: update consultation status failed", "err", err)
-		b.answerCallback(ctx, cb.ID, "Не вдалося зберегти")
+		b.answerCallback(ctx, cb, "Не вдалося зберегти")
 		return
 	}
-	b.answerCallback(ctx, cb.ID, "Статус: "+statusLabel(status))
+	label := b.tr(ctx, cb.From.ID, statusLabel(status))
+	b.answerCallback(ctx, cb, fmt.Sprintf(b.tr(ctx, cb.From.ID, "Статус: %s"), label))
 
 	if cb.Message == nil {
 		return
 	}
-	edited := tgbotapi.NewEditMessageText(cb.Message.Chat.ID, cb.Message.MessageID, cb.Message.Text+"\n\nСтатус: "+statusLabel(status))
+	suffix := fmt.Sprintf(b.tr(ctx, cb.Message.Chat.ID, "\n\nСтатус: %s"), label)
+	edited := tgbotapi.NewEditMessageText(cb.Message.Chat.ID, cb.Message.MessageID, cb.Message.Text+suffix)
 	if _, err := b.bot.Send(edited); err != nil {
 		b.log.WarnContext(ctx, "telegram: edit booking confirmation failed", "err", err)
 	}
@@ -1553,7 +1630,7 @@ func (b *AdminBot) searchForGroup(ctx context.Context, chatID int64, query strin
 			tgbotapi.NewInlineKeyboardButtonData(label, "crgrp:pick:"+c.ID),
 		))
 	}
-	msg := tgbotapi.NewMessage(chatID, "Оберіть клієнта:")
+	msg := b.newMsg(ctx, chatID, "Оберіть клієнта:")
 	msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(rows...)
 	if _, err := b.bot.Send(msg); err != nil {
 		b.log.ErrorContext(ctx, "telegram: send client picker failed", "err", err)
@@ -1584,7 +1661,7 @@ func (b *AdminBot) searchClientInfo(ctx context.Context, chatID int64, query str
 	// name to type. Try it as an exact id first; a query that isn't one
 	// simply won't match here and falls through to the search below.
 	if client, err := b.store.FindClient(ctx, query); err == nil {
-		card, err := b.buildFullClientCard(ctx, client)
+		card, err := b.buildFullClientCard(ctx, chatID, client)
 		if err != nil {
 			b.log.ErrorContext(ctx, "telegram: client info: build card failed", "client_id", client.ID, "err", err)
 			b.send(ctx, chatID, "Помилка отримання справ.")
@@ -1618,7 +1695,7 @@ func (b *AdminBot) searchClientInfo(ctx context.Context, chatID int64, query str
 			tgbotapi.NewInlineKeyboardButtonData(label, "clinfo:"+c.ID),
 		))
 	}
-	msg := tgbotapi.NewMessage(chatID, "Оберіть клієнта:")
+	msg := b.newMsg(ctx, chatID, "Оберіть клієнта:")
 	msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(rows...)
 	if _, err := b.bot.Send(msg); err != nil {
 		b.log.ErrorContext(ctx, "telegram: send client-info picker failed", "err", err)
@@ -1633,25 +1710,26 @@ func (b *AdminBot) showClientInfo(ctx context.Context, cb *tgbotapi.CallbackQuer
 	client, err := b.store.FindClient(ctx, clientID)
 	if err != nil {
 		b.log.WarnContext(ctx, "telegram: client info: find client failed", "client_id", clientID, "err", err)
-		b.answerCallback(ctx, cb.ID, "Клієнта не знайдено")
+		b.answerCallback(ctx, cb, "Клієнта не знайдено")
 		return
 	}
-	card, err := b.buildFullClientCard(ctx, client)
+	card, err := b.buildFullClientCard(ctx, cb.From.ID, client)
 	if err != nil {
 		b.log.ErrorContext(ctx, "telegram: client info: build card failed", "client_id", clientID, "err", err)
-		b.answerCallback(ctx, cb.ID, "Помилка отримання справ")
+		b.answerCallback(ctx, cb, "Помилка отримання справ")
 		return
 	}
 
-	b.answerCallback(ctx, cb.ID, "")
+	b.answerCallback(ctx, cb, "")
 	b.editCallbackMessageHTML(ctx, cb, card)
 }
 
 // buildFullClientCard fetches the rest of what buildClientInfoCard needs
 // (latest consultation, every case) and renders the card — shared by the
 // picker (showClientInfo) and the exact-Client-ID fast path
-// (searchClientInfo), which don't share a caller further up.
-func (b *AdminBot) buildFullClientCard(ctx context.Context, client consultations.Client) (string, error) {
+// (searchClientInfo), which don't share a caller further up. chatID picks
+// which staff member's language the card's own labels render in — see tr.
+func (b *AdminBot) buildFullClientCard(ctx context.Context, chatID int64, client consultations.Client) (string, error) {
 	// No consultation yet is the normal case for a client who only just
 	// left a request — not an error worth logging.
 	latest, err := b.store.LatestConsultation(ctx, client.ID)
@@ -1662,7 +1740,8 @@ func (b *AdminBot) buildFullClientCard(ctx context.Context, client consultations
 		return "", fmt.Errorf("list cases for client %q: %w", client.ID, err)
 	}
 
-	return buildClientInfoCard(client, latest, hasConsultation, clientCases, b.adminURL), nil
+	tr := func(s string) string { return b.tr(ctx, chatID, s) }
+	return buildClientInfoCard(client, latest, hasConsultation, clientCases, b.adminURL, tr), nil
 }
 
 // searchClientForEdit is /edit's entry point — same lookup as
@@ -1700,7 +1779,7 @@ func (b *AdminBot) searchClientForEdit(ctx context.Context, chatID int64, query 
 			tgbotapi.NewInlineKeyboardButtonData(label, "editpick:"+c.ID),
 		))
 	}
-	msg := tgbotapi.NewMessage(chatID, "Оберіть клієнта:")
+	msg := b.newMsg(ctx, chatID, "Оберіть клієнта:")
 	msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(rows...)
 	if _, err := b.bot.Send(msg); err != nil {
 		b.log.ErrorContext(ctx, "telegram: send edit client picker failed", "err", err)
@@ -1712,10 +1791,10 @@ func (b *AdminBot) pickClientForEdit(ctx context.Context, cb *tgbotapi.CallbackQ
 	client, err := b.store.FindClient(ctx, clientID)
 	if err != nil {
 		b.log.WarnContext(ctx, "telegram: edit client: find failed", "client_id", clientID, "err", err)
-		b.answerCallback(ctx, cb.ID, "Клієнта не знайдено")
+		b.answerCallback(ctx, cb, "Клієнта не знайдено")
 		return
 	}
-	b.answerCallback(ctx, cb.ID, "")
+	b.answerCallback(ctx, cb, "")
 	if cb.Message == nil {
 		return
 	}
@@ -1732,10 +1811,10 @@ func (b *AdminBot) sendEditFieldPicker(ctx context.Context, chatID int64, client
 	rows := make([][]tgbotapi.InlineKeyboardButton, 0, len(fields))
 	for _, f := range fields {
 		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData(editFieldLabel[f], "editfield:"+string(f)+":"+client.ID),
+			tgbotapi.NewInlineKeyboardButtonData(b.tr(ctx, chatID, editFieldLabel[f]), "editfield:"+string(f)+":"+client.ID),
 		))
 	}
-	msg := tgbotapi.NewMessage(chatID, "Що змінити?")
+	msg := b.newMsg(ctx, chatID, "Що змінити?")
 	msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(rows...)
 	if _, err := b.bot.Send(msg); err != nil {
 		b.log.ErrorContext(ctx, "telegram: send edit field picker failed", "err", err)
@@ -1747,13 +1826,15 @@ func (b *AdminBot) sendEditFieldPicker(ctx context.Context, chatID int64, client
 func (b *AdminBot) startEditField(ctx context.Context, cb *tgbotapi.CallbackQuery, field editableField, clientID string) {
 	label, ok := editFieldLabel[field]
 	if !ok {
-		b.answerCallback(ctx, cb.ID, "")
+		b.answerCallback(ctx, cb, "")
 		return
 	}
-	b.answerCallback(ctx, cb.ID, "")
+	b.answerCallback(ctx, cb, "")
 	b.flows[cb.From.ID] = &flow{step: "edit_field_value", editClient: editClientDraft{clientID: clientID, field: field}}
 	if cb.Message != nil {
-		b.editCallbackMessage(ctx, cb, "Введіть нове значення для «"+label+"»:")
+		chatID := cb.Message.Chat.ID
+		prompt := fmt.Sprintf(b.tr(ctx, chatID, "Введіть нове значення для «%s»:"), b.tr(ctx, chatID, label))
+		b.editCallbackMessage(ctx, cb, prompt)
 	}
 }
 
@@ -1801,10 +1882,10 @@ func (b *AdminBot) handleCreateGroupCallback(ctx context.Context, cb *tgbotapi.C
 		b.doCreateGroup(ctx, cb)
 	case "cancel":
 		delete(b.flows, cb.From.ID)
-		b.answerCallback(ctx, cb.ID, "Скасовано")
+		b.answerCallback(ctx, cb, "Скасовано")
 		b.editCallbackMessage(ctx, cb, "Скасовано")
 	default:
-		b.answerCallback(ctx, cb.ID, "")
+		b.answerCallback(ctx, cb, "")
 	}
 }
 
@@ -1813,22 +1894,22 @@ func (b *AdminBot) handleCreateGroupCallback(ctx context.Context, cb *tgbotapi.C
 func (b *AdminBot) pickAdvocateForGroup(ctx context.Context, cb *tgbotapi.CallbackQuery, clientID string) {
 	if _, err := b.store.FindClient(ctx, clientID); err != nil {
 		b.log.WarnContext(ctx, "telegram: creategroup: find client failed", "client_id", clientID, "err", err)
-		b.answerCallback(ctx, cb.ID, "Клієнта не знайдено")
+		b.answerCallback(ctx, cb, "Клієнта не знайдено")
 		return
 	}
 	advocates, err := b.store.ListAdvocates(ctx, true)
 	if err != nil {
 		b.log.ErrorContext(ctx, "telegram: creategroup: list advocates failed", "err", err)
-		b.answerCallback(ctx, cb.ID, "Помилка отримання адвокатів")
+		b.answerCallback(ctx, cb, "Помилка отримання адвокатів")
 		return
 	}
 	if len(advocates) == 0 {
-		b.answerCallback(ctx, cb.ID, "Немає активних адвокатів")
+		b.answerCallback(ctx, cb, "Немає активних адвокатів")
 		b.editCallbackMessage(ctx, cb, "Немає жодного активного адвоката — спочатку /advocate")
 		return
 	}
 	b.flows[cb.From.ID] = &flow{step: "creategroup_advocate", creategroup: creategroupDraft{clientID: clientID}}
-	b.answerCallback(ctx, cb.ID, "")
+	b.answerCallback(ctx, cb, "")
 
 	rows := make([][]tgbotapi.InlineKeyboardButton, 0, len(advocates))
 	for _, a := range advocates {
@@ -1839,7 +1920,7 @@ func (b *AdminBot) pickAdvocateForGroup(ctx context.Context, cb *tgbotapi.Callba
 	if cb.Message == nil {
 		return
 	}
-	edited := tgbotapi.NewEditMessageTextAndMarkup(cb.Message.Chat.ID, cb.Message.MessageID, "Оберіть адвоката:", tgbotapi.NewInlineKeyboardMarkup(rows...))
+	edited := tgbotapi.NewEditMessageTextAndMarkup(cb.Message.Chat.ID, cb.Message.MessageID, b.tr(ctx, cb.Message.Chat.ID, "Оберіть адвоката:"), tgbotapi.NewInlineKeyboardMarkup(rows...))
 	if _, err := b.bot.Send(edited); err != nil {
 		b.log.WarnContext(ctx, "telegram: edit advocate-picker message failed", "err", err)
 	}
@@ -1850,7 +1931,7 @@ func (b *AdminBot) pickAdvocateForGroup(ctx context.Context, cb *tgbotapi.Callba
 func (b *AdminBot) confirmCreateGroup(ctx context.Context, cb *tgbotapi.CallbackQuery, advocateID string) {
 	fl := b.flows[cb.From.ID]
 	if fl == nil || fl.step != "creategroup_advocate" {
-		b.answerCallback(ctx, cb.ID, "Сесія застаріла, почніть з /creategroup")
+		b.answerCallback(ctx, cb, "Сесія застаріла, почніть з /creategroup")
 		return
 	}
 	clientID := fl.creategroup.clientID
@@ -1858,28 +1939,29 @@ func (b *AdminBot) confirmCreateGroup(ctx context.Context, cb *tgbotapi.Callback
 	client, err := b.store.FindClient(ctx, clientID)
 	if err != nil {
 		b.log.WarnContext(ctx, "telegram: creategroup: find client failed", "client_id", clientID, "err", err)
-		b.answerCallback(ctx, cb.ID, "Клієнта не знайдено")
+		b.answerCallback(ctx, cb, "Клієнта не знайдено")
 		return
 	}
 	advocate, err := b.findAdvocate(ctx, advocateID)
 	if err != nil {
 		b.log.WarnContext(ctx, "telegram: creategroup: find advocate failed", "advocate_id", advocateID, "err", err)
-		b.answerCallback(ctx, cb.ID, "Адвоката не знайдено")
+		b.answerCallback(ctx, cb, "Адвоката не знайдено")
 		return
 	}
 	fl.creategroup.advocateID = advocateID
-	b.answerCallback(ctx, cb.ID, "")
+	b.answerCallback(ctx, cb, "")
 
-	text := fmt.Sprintf("Створити групу: %s + %s?", client.Name, advocate.FullName)
-	keyboard := tgbotapi.NewInlineKeyboardMarkup(
-		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("✅ Створити", "crgrp:confirm"),
-			tgbotapi.NewInlineKeyboardButtonData("❌ Скасувати", "crgrp:cancel"),
-		),
-	)
 	if cb.Message == nil {
 		return
 	}
+	chatID := cb.Message.Chat.ID
+	text := fmt.Sprintf(b.tr(ctx, chatID, "Створити групу: %s + %s?"), client.Name, advocate.FullName)
+	keyboard := tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(b.tr(ctx, chatID, "✅ Створити"), "crgrp:confirm"),
+			tgbotapi.NewInlineKeyboardButtonData(b.tr(ctx, chatID, "❌ Скасувати"), "crgrp:cancel"),
+		),
+	)
 	edited := tgbotapi.NewEditMessageTextAndMarkup(cb.Message.Chat.ID, cb.Message.MessageID, text, keyboard)
 	if _, err := b.bot.Send(edited); err != nil {
 		b.log.WarnContext(ctx, "telegram: edit group-confirm message failed", "err", err)
@@ -1905,7 +1987,7 @@ func (b *AdminBot) findAdvocate(ctx context.Context, advocateID string) (consult
 func (b *AdminBot) doCreateGroup(ctx context.Context, cb *tgbotapi.CallbackQuery) {
 	fl := b.flows[cb.From.ID]
 	if fl == nil || fl.step != "creategroup_advocate" || fl.creategroup.advocateID == "" {
-		b.answerCallback(ctx, cb.ID, "Сесія застаріла, почніть з /creategroup")
+		b.answerCallback(ctx, cb, "Сесія застаріла, почніть з /creategroup")
 		return
 	}
 	clientID, advocateID := fl.creategroup.clientID, fl.creategroup.advocateID
@@ -1914,32 +1996,32 @@ func (b *AdminBot) doCreateGroup(ctx context.Context, cb *tgbotapi.CallbackQuery
 	client, err := b.store.FindClient(ctx, clientID)
 	if err != nil {
 		b.log.WarnContext(ctx, "telegram: creategroup: find client failed", "client_id", clientID, "err", err)
-		b.answerCallback(ctx, cb.ID, "Клієнта не знайдено")
+		b.answerCallback(ctx, cb, "Клієнта не знайдено")
 		return
 	}
 	advocate, err := b.findAdvocate(ctx, advocateID)
 	if err != nil {
 		b.log.WarnContext(ctx, "telegram: creategroup: find advocate failed", "advocate_id", advocateID, "err", err)
-		b.answerCallback(ctx, cb.ID, "Адвоката не знайдено")
+		b.answerCallback(ctx, cb, "Адвоката не знайдено")
 		return
 	}
 
 	clientUsername, ok := publicUsername(client.TelegramName)
 	if !ok {
 		b.log.WarnContext(ctx, "telegram: creategroup: client has no public username", "client_id", clientID, "telegram_name", client.TelegramName)
-		b.answerCallback(ctx, cb.ID, "У клієнта немає публічного юзернейму")
+		b.answerCallback(ctx, cb, "У клієнта немає публічного юзернейму")
 		b.editCallbackMessage(ctx, cb, "Не можу створити групу: у клієнта немає публічного @username в Telegram (лише ім'я/телефон). Попросіть клієнта встановити юзернейм в налаштуваннях Telegram.")
 		return
 	}
 	if advocate.TelegramUsername == "" {
 		b.log.WarnContext(ctx, "telegram: creategroup: advocate has no username", "advocate_id", advocate.ID)
-		b.answerCallback(ctx, cb.ID, "У адвоката немає юзернейму")
+		b.answerCallback(ctx, cb, "У адвоката немає юзернейму")
 		b.editCallbackMessage(ctx, cb, "Не можу створити групу: у адвоката немає @username.")
 		return
 	}
 
 	b.log.InfoContext(ctx, "telegram: creategroup: creating group", "client_id", clientID, "client_username", clientUsername, "advocate_username", advocate.TelegramUsername)
-	b.answerCallback(ctx, cb.ID, "Створюю групу...")
+	b.answerCallback(ctx, cb, "Створюю групу...")
 
 	title := "Абаліс: " + client.Name
 	if _, err := b.groups.CreateGroup(ctx, title, []string{clientUsername, advocate.TelegramUsername}); err != nil {
@@ -1948,7 +2030,7 @@ func (b *AdminBot) doCreateGroup(ctx context.Context, cb *tgbotapi.CallbackQuery
 		return
 	}
 	b.log.InfoContext(ctx, "telegram: creategroup: group created", "client_id", clientID)
-	b.editCallbackMessage(ctx, cb, fmt.Sprintf("Групу створено ✅ (%s + %s)", client.Name, advocate.FullName))
+	b.editCallbackMessage(ctx, cb, fmt.Sprintf(b.tr(ctx, cb.From.ID, "Групу створено ✅ (%s + %s)"), client.Name, advocate.FullName))
 }
 
 // publicUsername extracts the bare @username telegramName carries — it's
@@ -1963,7 +2045,7 @@ func (b *AdminBot) editCallbackMessage(ctx context.Context, cb *tgbotapi.Callbac
 	if cb.Message == nil {
 		return
 	}
-	edited := tgbotapi.NewEditMessageText(cb.Message.Chat.ID, cb.Message.MessageID, text)
+	edited := tgbotapi.NewEditMessageText(cb.Message.Chat.ID, cb.Message.MessageID, b.tr(ctx, cb.Message.Chat.ID, text))
 	if _, err := b.bot.Send(edited); err != nil {
 		b.log.WarnContext(ctx, "telegram: edit callback message failed", "err", err)
 	}
@@ -1976,15 +2058,19 @@ func (b *AdminBot) editCallbackMessageHTML(ctx context.Context, cb *tgbotapi.Cal
 	if cb.Message == nil {
 		return
 	}
-	edited := tgbotapi.NewEditMessageText(cb.Message.Chat.ID, cb.Message.MessageID, text)
+	edited := tgbotapi.NewEditMessageText(cb.Message.Chat.ID, cb.Message.MessageID, b.tr(ctx, cb.Message.Chat.ID, text))
 	edited.ParseMode = tgbotapi.ModeHTML
 	if _, err := b.bot.Send(edited); err != nil {
 		b.log.WarnContext(ctx, "telegram: edit callback message failed", "err", err)
 	}
 }
 
-func (b *AdminBot) answerCallback(ctx context.Context, callbackID, text string) {
-	if _, err := b.bot.Request(tgbotapi.NewCallback(callbackID, text)); err != nil {
+// answerCallback takes the whole CallbackQuery (not just its id) so the
+// toast text can be translated via tr against cb.From.ID — every caller
+// already has cb in hand.
+func (b *AdminBot) answerCallback(ctx context.Context, cb *tgbotapi.CallbackQuery, text string) {
+	text = b.tr(ctx, cb.From.ID, text)
+	if _, err := b.bot.Request(tgbotapi.NewCallback(cb.ID, text)); err != nil {
 		b.log.WarnContext(ctx, "telegram: answer callback failed", "err", err)
 	}
 }
@@ -2056,30 +2142,33 @@ Client ID: <code>%s</code>
 // buildClientInfoCard is /client's result — every ID staff might need to
 // paste into another command, plus a link to the full card in the CRM
 // (client-facing fields like address/tax ID live there, not here).
-func buildClientInfoCard(client consultations.Client, latest consultations.Consultation, hasConsultation bool, clientCases []cases.Case, adminURL string) string {
+// tr translates each static label individually — the card as a whole is
+// built from live client/case data, so there's no fixed full-card string
+// tr (the AdminBot method) could ever match; see buildFullClientCard.
+func buildClientInfoCard(client consultations.Client, latest consultations.Consultation, hasConsultation bool, clientCases []cases.Case, adminURL string, tr func(string) string) string {
 	telegram := client.TelegramName
 	if telegram == "" {
 		telegram = "—"
 	}
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "🔎 <b>Картка клієнта</b>\n\nClient ID: <code>%s</code>\nІм'я: %s\nТелефон: %s\nTelegram: %s\nCRM: %s/clients/%s",
+	fmt.Fprintf(&b, tr("🔎 <b>Картка клієнта</b>\n\nClient ID: <code>%s</code>\nІм'я: %s\nТелефон: %s\nTelegram: %s\nCRM: %s/clients/%s"),
 		client.ID, html.EscapeString(client.Name), html.EscapeString(client.Phone), html.EscapeString(telegram),
 		adminURL, client.ID,
 	)
 
-	b.WriteString("\n\n<b>📅 Консультація</b>\n")
+	b.WriteString(tr("\n\n<b>📅 Консультація</b>\n"))
 	if hasConsultation {
 		fmt.Fprintf(&b, "ID: <code>%s</code>\n%s %s · %s",
-			latest.ID, latest.ScheduledAt.Format("02.01.2006"), latest.ScheduledAt.Format("15:04"), statusLabel(latest.Status),
+			latest.ID, latest.ScheduledAt.Format("02.01.2006"), latest.ScheduledAt.Format("15:04"), tr(statusLabel(latest.Status)),
 		)
 	} else {
-		b.WriteString("ще не було")
+		b.WriteString(tr("ще не було"))
 	}
 
-	fmt.Fprintf(&b, "\n\n<b>📁 Справи (%d)</b>", len(clientCases))
+	fmt.Fprintf(&b, tr("\n\n<b>📁 Справи (%d)</b>"), len(clientCases))
 	if len(clientCases) == 0 {
-		fmt.Fprintf(&b, "\nще нема — /case <code>%s</code>", client.ID)
+		fmt.Fprintf(&b, tr("\nще нема — /case <code>%s</code>"), client.ID)
 	}
 	// Each case is its own block (blank line between them) — packed onto
 	// one line, this used to run off a phone screen with everything from
@@ -2093,9 +2182,9 @@ func buildClientInfoCard(client consultations.Client, latest consultations.Consu
 		if advocateID == "" {
 			advocateID = "—"
 		}
-		fmt.Fprintf(&b, "\n\n<code>%s</code>\n%s\nАдвокат: %s (<code>%s</code>)\n%s/%s грн · залишок %s\nСтатус: %s",
+		fmt.Fprintf(&b, tr("\n\n<code>%s</code>\n%s\nАдвокат: %s (<code>%s</code>)\n%s/%s грн · залишок %s\nСтатус: %s"),
 			c.ID, html.EscapeString(c.Category), html.EscapeString(advocate), advocateID,
-			formatAmount(c.PaidAmount), formatAmount(c.Fee), formatAmount(c.Owed()), caseStatusLabel(c.Status),
+			formatAmount(c.PaidAmount), formatAmount(c.Fee), formatAmount(c.Owed()), tr(caseStatusLabel(c.Status)),
 		)
 		for _, p := range c.Payments {
 			fmt.Fprintf(&b, "\n  · %s — %s грн", p.PaidAt.Format("02.01.2006"), formatAmount(p.Amount))
@@ -2137,18 +2226,265 @@ func (b *AdminBot) sendInvoice(ctx context.Context, chatID int64, amount float64
 }
 
 func (b *AdminBot) send(ctx context.Context, chatID int64, text string) {
-	if _, err := b.bot.Send(tgbotapi.NewMessage(chatID, text)); err != nil {
+	if _, err := b.bot.Send(tgbotapi.NewMessage(chatID, b.tr(ctx, chatID, text))); err != nil {
 		b.log.ErrorContext(ctx, "telegram: admin bot send failed", "err", err)
 	}
 }
 
 func (b *AdminBot) sendHTML(ctx context.Context, chatID int64, text string) {
-	msg := tgbotapi.NewMessage(chatID, text)
+	msg := tgbotapi.NewMessage(chatID, b.tr(ctx, chatID, text))
 	msg.ParseMode = tgbotapi.ModeHTML
 	if _, err := b.bot.Send(msg); err != nil {
 		b.log.ErrorContext(ctx, "telegram: admin bot send failed", "err", err)
 	}
 }
+
+// newMsg is send's counterpart for callers that need to set their own
+// ReplyMarkup (a picker, an inline keyboard) and so can't go through send —
+// same tr translation, just returning the MessageConfig instead of sending
+// it right away.
+func (b *AdminBot) newMsg(ctx context.Context, chatID int64, text string) tgbotapi.MessageConfig {
+	return tgbotapi.NewMessage(chatID, b.tr(ctx, chatID, text))
+}
+
+// tr translates a Ukrainian staff-facing string to Russian if chatID's
+// staff member has picked that language via /language — anything not in
+// ukToRu (every client/advocate-facing string: the offer text, self-booking
+// prompts, invoice/intake text meant to be forwarded as-is) passes through
+// unchanged by construction, so it's safe to route even mixed-audience
+// helpers through this without auditing every caller.
+func (b *AdminBot) tr(ctx context.Context, chatID int64, uk string) string {
+	lang, ok := b.staffLangs[chatID]
+	if !ok {
+		var err error
+		lang, err = b.store.GetStaffLanguage(ctx, chatID)
+		if err != nil {
+			b.log.WarnContext(ctx, "telegram: get staff language failed", "err", err)
+			lang = consultations.StaffLangUK
+		}
+		b.staffLangs[chatID] = lang
+	}
+	if lang != consultations.StaffLangRU {
+		return uk
+	}
+	if ru, ok := ukToRu[uk]; ok {
+		return ru
+	}
+	return uk
+}
+
+// ukToRu is the staff-facing translation dictionary — see tr. Keyed by the
+// exact Ukrainian source string (including Sprintf verbs, where the string
+// is a template translated before its dynamic data is filled in — see e.g.
+// applyPayment). Deliberately excludes anything client/advocate-facing:
+// the offer text (buildConsultText), self-booking/intake prompts, the
+// invoice and intake-link text meant to be forwarded to a client verbatim,
+// and buildConsultationCard — those always stay Ukrainian, see each
+// caller's own comment for why.
+var ukToRu = map[string]string{
+	// Staff menu buttons (staffMenuKeyboard) — also doubles as the source
+	// for staffMenuCommands' reverse lookup via ruToUk below.
+	btnInvoice:     "🧾 Счёт",
+	btnConsult:     "📋 Подтверждение записи",
+	btnBook:        "📌 Записать клиента",
+	btnAdvocateAdd: "👤 Добавить адвоката",
+	btnAdvocates:   "👥 Список адвокатов",
+	btnCase:        "📁 Завести дело",
+	btnPay:         "💰 Оплата по делу",
+	btnCaseClose:   "✅ Закрыть дело",
+	btnCreateGroup: "👨‍👩‍👧 Создать группу",
+	btnClientInfo:  "🔎 Карточка клиента",
+	btnEditClient:  "✏️ Редактировать клиента",
+	btnIntakeLink:  "📋 Анкета для клиента",
+	btnHelp:        "❓ Справка",
+	btnLanguage:    "🌐 Язык",
+
+	// /edit field picker.
+	"Прізвище":    "Фамилия",
+	"Ім'я":        "Имя",
+	"По батькові": "Отчество",
+	"Телефон":     "Телефон",
+	"Email":       "Email",
+
+	// Consultation/case status labels (statusLabel/caseStatusLabel).
+	"Заплановано":  "Запланировано",
+	"Провів ✅":     "Провёл ✅",
+	"Скасував ❌":   "Отменил ❌",
+	"Не прийшов 🚫": "Не пришёл 🚫",
+	"В роботі":     "В работе",
+	"Виконано ✅":   "Выполнено ✅",
+	"Скасовано ❌":  "Отменено ❌",
+
+	// /help.
+	helpText: `📖 <b>Справка по командам бота</b>
+
+Типовой сценарий: клиент обратился → найти/завести его → записать на консультацию или сразу завести дело → фиксировать оплаты → закрыть дело.
+
+<b>👤 Клиенты</b>
+/client &lt;имя/телефон/ID&gt; — найти клиента: карточка со всеми ID (клиент/консультация/дела), история оплат, ссылка на CRM.
+/edit — исправить имя/телефон/email клиента пошагово, кнопками.
+/book &lt;имя/телефон/ID&gt; — записать на консультацию. Клиента нет в базе — бот сам предложит завести нового.
+
+<b>📁 Дела</b>
+/case &lt;имя/телефон/ID&gt; — завести дело (ходатайство/иск/сопровождение). Так же заводит нового клиента, если нужно.
+/pay — записать оплату по делу: Case ID → сумма → дата (сегодня или вручную). Или одной строкой: /pay &lt;Case ID&gt; &lt;сумма&gt; — тогда дата = сегодня.
+/caseclose &lt;Case ID&gt; — отметить дело выполненным.
+
+<b>👨‍⚖️ Адвокаты</b>
+/advocate &lt;ФИО&gt; — добавить в ростер, даёт одноразовую ссылку для адвоката (перешлите ему).
+/advocates — список активных, можно деактивировать (старые дела не исчезнут).
+
+<b>💳 Другое</b>
+/invoice &lt;сумма&gt; — счёт на оплату с номером карты, для клиента.
+/consult — текст-подтверждение записи на консультацию (с условиями оферты), для клиента.
+/creategroup — Telegram-группа клиент+адвокат (нужен связанный личный аккаунт).
+/intakelink — универсальная ссылка на анкету для нового клиента (без бронирования конкретной даты) — скиньте в смс/мессенджер.
+
+Команда без аргументов сама спросит, что нужно, шаг за шагом — не обязательно помнить точный синтаксис.
+
+/menu — кнопки вместо команд.
+/help — эта справка.`,
+
+	// finishCase.
+	"Готово. Справа <code>%s</code> (%s, %s), сума %s грн.\n\nЩоб додати оплату: /pay <code>%s</code> &lt;сума&gt;\nЩоб позначити виконаною: /caseclose <code>%s</code>": "Готово. Дело <code>%s</code> (%s, %s), сумма %s грн.\n\nЧтобы добавить оплату: /pay <code>%s</code> &lt;сумма&gt;\nЧтобы отметить выполненным: /caseclose <code>%s</code>",
+
+	// /pay wizard + one-shot.
+	"📅 Сьогодні":  "📅 Сегодня",
+	"🗓 Інша дата": "🗓 Другая дата",
+	"Оплата +%s грн (%s). Всього оплачено: %s з %s грн. Залишок: %s грн.":                                              "Оплата +%s грн (%s). Всего оплачено: %s из %s грн. Остаток: %s грн.",
+	"Формат: /pay &lt;Case ID&gt; &lt;сума&gt;, наприклад /pay <code>3f0b8beb-23c2-4ad4-90fb-48064c9359d4</code> 5000": "Формат: /pay &lt;Case ID&gt; &lt;сумма&gt;, например /pay <code>3f0b8beb-23c2-4ad4-90fb-48064c9359d4</code> 5000",
+
+	// /advocate, /advocates.
+	"Адвоката збережено. Перешліть йому одноразове посилання:":                 "Адвокат сохранён. Перешлите ему одноразовую ссылку:",
+	"Активні адвокати (тап — деактивувати):":                                   "Активные адвокаты (тап — деактивировать):",
+	"Немає активних адвокатів — спочатку /advocate <ПІБ>, потім заново /case.": "Нет активных адвокатов — сначала /advocate <ФИО>, потом заново /case.",
+	"Не вдалося зберегти справу, спробуйте ще раз.":                            "Не удалось сохранить дело, попробуйте ещё раз.",
+	"Не вдалося зберегти адвоката, спробуйте ще раз.":                          "Не удалось сохранить адвоката, попробуйте ещё раз.",
+	"Не вдалося отримати список адвокатів.":                                    "Не удалось получить список адвокатов.",
+	"Активних адвокатів немає. Додати: /advocate <ПІБ>":                        "Активных адвокатов нет. Добавить: /advocate <ФИО>",
+	"Помилка отримання адвокатів, спробуйте ще раз.":                           "Ошибка получения адвокатов, попробуйте ещё раз.",
+	"Оберіть адвоката, який веде справу:":                                      "Выберите адвоката, который ведёт дело:",
+	"Оберіть адвоката:":                                                        "Выберите адвоката:",
+	"Адвоката не знайдено":                                                     "Адвоката не найдено",
+	"Немає активних адвокатів":                                                 "Нет активных адвокатов",
+	"У адвоката немає юзернейму":                                               "У адвоката нет юзернейма",
+	"Не можу створити групу: у адвоката немає @username.":                      "Не могу создать группу: у адвоката нет @username.",
+	"Немає жодного активного адвоката — спочатку /advocate":                    "Нет ни одного активного адвоката — сначала /advocate",
+	"Деактивовано":                               "Деактивировано",
+	"Не вдалося деактивувати":                    "Не удалось деактивировать",
+	"Деактивовано ✅ (старі справи не змінились)": "Деактивировано ✅ (старые дела не изменились)",
+
+	// /book, /case shared client lookup.
+	"Кілька збігів, оберіть клієнта:":                                      "Несколько совпадений, выберите клиента:",
+	"Клієнта не знайдено. Створити нового на ім'я «%s»? Що є з контактів?": "Клиента не найдено. Создать нового на имя «%s»? Что есть из контактов?",
+	"📞 Телефон":           "📞 Телефон",
+	"✉️ Email":            "✉️ Email",
+	"💬 Telegram":          "💬 Telegram",
+	"⏭ Нічого немає":      "⏭ Ничего нет",
+	"Клієнта не знайдено": "Клиента не найдено",
+	"Клієнт: %s (%s). Введіть дату консультації (наприклад 29.07.2026):": "Клиент: %s (%s). Введите дату консультации (например 29.07.2026):",
+	"Клієнт: %s (%s). Введіть суму договору в грн (наприклад 15000):":    "Клиент: %s (%s). Введите сумму договора в грн (например 15000):",
+	"Не вдалося створити клієнта, спробуйте ще раз.":                     "Не удалось создать клиента, попробуйте ещё раз.",
+
+	// /book status + finish.
+	"Це майбутній запис чи консультація вже відбулася (заводите заднім числом)?": "Это будущая запись или консультация уже состоялась (заводите задним числом)?",
+	"📅 Майбутня":                 "📅 Будущая",
+	"✅ Вже відбулася, оплачена":  "✅ Уже состоялась, оплачена",
+	"Готово. Перешліть клієнту:": "Готово. Перешлите клиенту:",
+	"Додано заднім числом (%s). За бажанням перешліть клієнту:\n\n%s": "Добавлено задним числом (%s). При желании перешлите клиенту:\n\n%s",
+	"✅ Провів":       "✅ Провёл",
+	"❌ Скасував":     "❌ Отменил",
+	"🚫 Не прийшов":   "🚫 Не пришёл",
+	"Статус: %s":     "Статус: %s",
+	"\n\nСтатус: %s": "\n\nСтатус: %s",
+	"Не розпізнав дату/час. Спробуйте ще раз: /book <code>%s</code>": "Не распознал дату/время. Попробуйте ещё раз: /book <code>%s</code>",
+	"Не вдалося зберегти консультацію, спробуйте ще раз.":            "Не удалось сохранить консультацию, попробуйте ещё раз.",
+
+	// /creategroup.
+	"Оберіть клієнта:":                     "Выберите клиента:",
+	"Створити групу: %s + %s?":             "Создать группу: %s + %s?",
+	"✅ Створити":                           "✅ Создать",
+	"❌ Скасувати":                          "❌ Отменить",
+	"Скасовано":                            "Отменено",
+	"Групу створено ✅ (%s + %s)":           "Группа создана ✅ (%s + %s)",
+	"Створюю групу...":                     "Создаю группу...",
+	"У клієнта немає публічного юзернейму": "У клиента нет публичного юзернейма",
+	"Не можу створити групу: у клієнта немає публічного @username в Telegram (лише ім'я/телефон). Попросіть клієнта встановити юзернейм в налаштуваннях Telegram.": "Не могу создать группу: у клиента нет публичного @username в Telegram (только имя/телефон). Попросите клиента установить юзернейм в настройках Telegram.",
+	"Не вдалося створити групу. Деталі — в логах сервера.":               "Не удалось создать группу. Детали — в логах сервера.",
+	"Нічого не знайдено. Спробуйте /creategroup ще раз з іншим запитом.": "Ничего не найдено. Попробуйте /creategroup ещё раз с другим запросом.",
+
+	// /client, /edit.
+	"Помилка отримання справ.":                                      "Ошибка получения дел.",
+	"Помилка отримання справ":                                       "Ошибка получения дел",
+	"Нічого не знайдено. Спробуйте /client ще раз з іншим запитом.": "Ничего не найдено. Попробуйте /client ещё раз с другим запросом.",
+	"Нічого не знайдено. Спробуйте /edit ще раз з іншим запитом.":   "Ничего не найдено. Попробуйте /edit ещё раз с другим запросом.",
+	"Введіть нове значення для «%s»:":                               "Введите новое значение для «%s»:",
+	"Не вдалося оновити дані клієнта, спробуйте ще раз.":            "Не удалось обновить данные клиента, попробуйте ещё раз.",
+	"Оновлено ✅":                             "Обновлено ✅",
+	"Введіть телефон:":                       "Введите телефон:",
+	"Введіть email:":                         "Введите email:",
+	"Введіть Telegram (@username або ім'я):": "Введите Telegram (@username или имя):",
+	"Клієнта створюю без контактів…":         "Создаю клиента без контактов…",
+
+	// /client card (buildClientInfoCard) — templates translated before the
+	// dynamic client/case data is filled in, see buildFullClientCard.
+	"🔎 <b>Картка клієнта</b>\n\nClient ID: <code>%s</code>\nІм'я: %s\nТелефон: %s\nTelegram: %s\nCRM: %s/clients/%s": "🔎 <b>Карточка клиента</b>\n\nClient ID: <code>%s</code>\nИмя: %s\nТелефон: %s\nTelegram: %s\nCRM: %s/clients/%s",
+	"\n\n<b>📅 Консультація</b>\n":       "\n\n<b>📅 Консультация</b>\n",
+	"ще не було":                        "ещё не было",
+	"\n\n<b>📁 Справи (%d)</b>":          "\n\n<b>📁 Дела (%d)</b>",
+	"\nще нема — /case <code>%s</code>": "\nещё нет — /case <code>%s</code>",
+	"\n\n<code>%s</code>\n%s\nАдвокат: %s (<code>%s</code>)\n%s/%s грн · залишок %s\nСтатус: %s": "\n\n<code>%s</code>\n%s\nАдвокат: %s (<code>%s</code>)\n%s/%s грн · остаток %s\nСтатус: %s",
+
+	// Bare-command wizard prompts (handle()'s switch/flow steps).
+	"Введіть суму в грн (наприклад 1500):": "Введите сумму в грн (например 1500):",
+	"Введіть ПІБ клієнта:":                 "Введите ФИО клиента:",
+	"Введіть Client ID, ім'я або телефон клієнта (якщо не знайдеться — запропоную завести нового):": "Введите Client ID, имя или телефон клиента (если не найдётся — предложу завести нового):",
+	"Введіть ПІБ адвоката:":                                                      "Введите ФИО адвоката:",
+	"Введіть Case ID:":                                                           "Введите Case ID:",
+	"Введіть ім'я, юзернейм або телефон клієнта:":                                "Введите имя, юзернейм или телефон клиента:",
+	"Введіть ім'я, телефон або Client ID клієнта:":                               "Введите имя, телефон или Client ID клиента:",
+	"Не розпізнав суму. Введіть число, наприклад 1500.":                          "Не распознал сумму. Введите число, например 1500.",
+	"Не розпізнав дату. Введіть у форматі 19.08.2026:":                           "Не распознал дату. Введите в формате 19.08.2026:",
+	"Введіть дату консультації (наприклад 29.07.2026):":                          "Введите дату консультации (например 29.07.2026):",
+	"Введіть час консультації (наприклад 15:00):":                                "Введите время консультации (например 15:00):",
+	"Введіть вартість консультації в грн (наприклад 800):":                       "Введите стоимость консультации в грн (например 800):",
+	"Не розпізнав суму. Введіть число, наприклад 800.":                           "Не распознал сумму. Введите число, например 800.",
+	"Введіть справу/коментар (наприклад: справа про мікрокредити, треба позов):": "Введите дело/комментарий (например: дело о микрокредитах, нужен иск):",
+	"Не розпізнав суму. Введіть число, наприклад 15000.":                         "Не распознал сумму. Введите число, например 15000.",
+	"Напрямок справи (%s) — введіть один з варіантів або свій:":                  "Направление дела (%s) — введите один из вариантов или свой:",
+	"Не розпізнав суму.":                                                         "Не распознал сумму.",
+	"Формат: /caseclose <Case ID>":                                               "Формат: /caseclose <Case ID>",
+	"Не вдалося оновити справу — перевірте Case ID.":                             "Не удалось обновить дело — проверьте Case ID.",
+	"Справу позначено виконаною ✅":                                               "Дело отмечено выполненным ✅",
+	"Не вдалося зберегти оплату — перевірте Case ID.":                            "Не удалось сохранить оплату — проверьте Case ID.",
+	"ПІБ не може бути порожнім.":                                                 "ФИО не может быть пустым.",
+	"Помилка пошуку, спробуйте ще раз.":                                          "Ошибка поиска, попробуйте ещё раз.",
+	"Коли внесена оплата?":                                                       "Когда внесена оплата?",
+	"Введіть дату (наприклад 19.08.2026):":                                       "Введите дату (например 19.08.2026):",
+	"Оплата за сьогодні…":                                                        "Оплата за сегодня…",
+	"Сесія застаріла, почніть з /book":                                           "Сессия устарела, начните с /book",
+	"Сесія застаріла, почніть з /case":                                           "Сессия устарела, начните с /case",
+	"Сесія застаріла, почніть з /pay":                                            "Сессия устарела, начните с /pay",
+	"Сесія застаріла, почніть з /creategroup":                                    "Сессия устарела, начните с /creategroup",
+	"Сесія застаріла, почніть заново":                                            "Сессия устарела, начните заново",
+	"Не вдалося зберегти":                                                        "Не удалось сохранить",
+
+	// /menu, staff self-tap detection.
+	"Меню:": "Меню:",
+	"Це посилання для клієнта — перешліть його, не переходьте самі.": "Эта ссылка для клиента — перешлите её, не переходите сами.",
+	"Що змінити?": "Что изменить?",
+}
+
+// ruToUk is ukToRu's inverse — lets handle() recognize a menu button that
+// was rendered in Russian and translate its label back before looking it
+// up in staffMenuCommands (which only knows the Ukrainian source labels).
+var ruToUk = func() map[string]string {
+	m := make(map[string]string, len(ukToRu))
+	for uk, ru := range ukToRu {
+		m[ru] = uk
+	}
+	return m
+}()
 
 const offerURL = "https://abalis.com.ua/publichnyij-dogovor-oferta/"
 

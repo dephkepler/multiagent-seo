@@ -129,6 +129,21 @@ func SplitName(raw string) (lastName, firstName, patronymic string) {
 	}
 }
 
+// StaffLang is a staff member's own bot UI language — set per person via
+// /language, never inferred. Client-facing text (offer/self-booking/intake)
+// ignores this entirely and always stays Ukrainian; see AdminBot.tr.
+type StaffLang string
+
+const (
+	StaffLangUK StaffLang = "uk"
+	StaffLangRU StaffLang = "ru"
+)
+
+// IsStaffLang reports whether s is a known StaffLang value.
+func IsStaffLang(s string) bool {
+	return s == string(StaffLangUK) || s == string(StaffLangRU)
+}
+
 type ReminderTarget struct {
 	Consultation Consultation
 	Client       Client

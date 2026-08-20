@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -432,6 +433,29 @@ func (r *ConsultationRepository) MarkReminderSent(ctx context.Context, consultat
 	}
 	if tag.RowsAffected() == 0 {
 		return fmt.Errorf("mark advocate reminder sent: no consultation with id %q", consultationID)
+	}
+	return nil
+}
+
+func (r *ConsultationRepository) GetStaffLanguage(ctx context.Context, telegramUserID int64) (consultations.StaffLang, error) {
+	const q = `SELECT language FROM staff_prefs WHERE telegram_user_id = @id`
+	var lang string
+	err := r.db.QueryRow(ctx, q, pgx.NamedArgs{"id": telegramUserID}).Scan(&lang)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return consultations.StaffLangUK, nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("get staff language for %d: %w", telegramUserID, err)
+	}
+	return consultations.StaffLang(lang), nil
+}
+
+func (r *ConsultationRepository) SetStaffLanguage(ctx context.Context, telegramUserID int64, lang consultations.StaffLang) error {
+	const q = `INSERT INTO staff_prefs (telegram_user_id, language) VALUES (@id, @lang)
+		ON CONFLICT (telegram_user_id) DO UPDATE SET language = @lang, updated_at = now()`
+	_, err := r.db.Exec(ctx, q, pgx.NamedArgs{"id": telegramUserID, "lang": string(lang)})
+	if err != nil {
+		return fmt.Errorf("set staff language for %d: %w", telegramUserID, err)
 	}
 	return nil
 }

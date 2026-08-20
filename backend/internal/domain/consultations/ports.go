@@ -63,6 +63,10 @@ type Store interface {
 	DueAdvocateReminders(ctx context.Context, before time.Duration) ([]ReminderTarget, error)
 	MarkClientReminderSent(ctx context.Context, consultationID string) error
 	MarkReminderSent(ctx context.Context, consultationID string) error
+	// GetStaffLanguage returns telegramUserID's saved bot UI language, or
+	// StaffLangUK if they've never set one (staff_prefs has no row yet).
+	GetStaffLanguage(ctx context.Context, telegramUserID int64) (StaffLang, error)
+	SetStaffLanguage(ctx context.Context, telegramUserID int64, lang StaffLang) error
 }
 
 type SheetWriter interface {
