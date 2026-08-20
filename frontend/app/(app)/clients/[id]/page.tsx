@@ -368,16 +368,6 @@ export default function ClientDetailPage() {
                 <span className='text-sm text-gray-400'>—</span>
               )}
             </div>
-            {segment?.overridden && (
-              <button
-                type='button'
-                disabled={setOverride.isPending}
-                onClick={() => setOverride.mutate(null)}
-                className='mt-1 text-[10px] whitespace-nowrap text-gray-400 underline hover:text-gray-600'
-              >
-                вручную · сброс
-              </button>
-            )}
           </div>
           <div className='rounded-md border border-gray-100 bg-gray-50/60 p-3'>
             <div className='mb-1 text-xs text-gray-500'>Теги</div>
