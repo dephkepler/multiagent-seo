@@ -27,6 +27,15 @@ type Store interface {
 	// instead); calling UpdateClient with everything else blank would wipe
 	// the name/phone that call just set.
 	SetClientEmail(ctx context.Context, clientID, email string) error
+	// SetClientNamePart writes exactly one of last_name/first_name/
+	// patronymic and recomputes the composed Name from it plus the other
+	// two already on the row — same "narrow setter" reasoning as
+	// SetClientEmail: /edit in the bot lets staff fix one part (see
+	// SplitName's known limitation on a single free-text name), and a
+	// blind UpdateClient would blank the other two.
+	SetClientNamePart(ctx context.Context, clientID string, part ClientNamePart, value string) error
+	// SetClientPhone sets a single field, same reasoning as SetClientEmail.
+	SetClientPhone(ctx context.Context, clientID, phone string) error
 	// UpdateClient edits a client's own contact details — typed in through
 	// the admin UI's client card, not anything the bot or a lead form
 	// fills in.

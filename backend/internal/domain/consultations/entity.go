@@ -95,6 +95,17 @@ func ComposeName(lastName, firstName, patronymic string) string {
 	return strings.Join(parts, " ")
 }
 
+// ClientNamePart selects which structured name column SetClientNamePart
+// writes — see SplitName/ComposeName for how the three combine into the
+// single display Name.
+type ClientNamePart string
+
+const (
+	NamePartLast       ClientNamePart = "last_name"
+	NamePartFirst      ClientNamePart = "first_name"
+	NamePartPatronymic ClientNamePart = "patronymic"
+)
+
 // SplitName is ComposeName's inverse — every place a name arrives as one
 // free-text field (client typed "ПІБ" in /request or /intake, staff typed
 // it while creating a client in /book) but needs to land in the structured

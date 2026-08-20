@@ -141,6 +141,55 @@ func (r *ConsultationRepository) SetClientEmail(ctx context.Context, clientID, e
 	return nil
 }
 
+// SetClientNamePart writes one column and recomputes name from it plus
+// whatever is already in the other two -- a literal SQL statement per part
+// (not a dynamic column name built from user input) so the query stays a
+// fixed, reviewable string. Each piece goes through nullif first, turning
+// a blank value into SQL NULL, before concat_ws: unlike ComposeName in Go
+// (which only joins non-blank parts), plain concat_ws does not skip blank
+// arguments, only NULLs -- a blank part would otherwise leave a double
+// space in name (concat_ws still places a separator around a blank piece,
+// just not around a NULL one).
+func (r *ConsultationRepository) SetClientNamePart(ctx context.Context, clientID string, part consultations.ClientNamePart, value string) error {
+	var q string
+	switch part {
+	case consultations.NamePartLast:
+		q = `UPDATE clients SET last_name = @value,
+			name = concat_ws(' ', nullif(@value, ''), nullif(first_name, ''), nullif(patronymic, ''))
+			WHERE id = @id`
+	case consultations.NamePartFirst:
+		q = `UPDATE clients SET first_name = @value,
+			name = concat_ws(' ', nullif(last_name, ''), nullif(@value, ''), nullif(patronymic, ''))
+			WHERE id = @id`
+	case consultations.NamePartPatronymic:
+		q = `UPDATE clients SET patronymic = @value,
+			name = concat_ws(' ', nullif(last_name, ''), nullif(first_name, ''), nullif(@value, ''))
+			WHERE id = @id`
+	default:
+		return fmt.Errorf("set client name part: unknown part %q", part)
+	}
+	tag, err := r.db.Exec(ctx, q, pgx.NamedArgs{"value": value, "id": clientID})
+	if err != nil {
+		return fmt.Errorf("set client name part %q for %q: %w", part, clientID, err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("set client name part: no client with id %q", clientID)
+	}
+	return nil
+}
+
+func (r *ConsultationRepository) SetClientPhone(ctx context.Context, clientID, phone string) error {
+	const q = `UPDATE clients SET phone = @phone WHERE id = @id`
+	tag, err := r.db.Exec(ctx, q, pgx.NamedArgs{"phone": phone, "id": clientID})
+	if err != nil {
+		return fmt.Errorf("set client phone %q: %w", clientID, err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("set client phone: no client with id %q", clientID)
+	}
+	return nil
+}
+
 // UpdateClient writes every field the client card can edit. Address/
 // Birthdate/TaxID go in encrypted (pgp_sym_encrypt, keyed by
 // r.encryptionKey) — an empty value stores NULL rather than encrypting an

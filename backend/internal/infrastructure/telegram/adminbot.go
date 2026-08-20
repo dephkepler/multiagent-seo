@@ -61,7 +61,38 @@ type flow struct {
 	kase        caseDraft
 	pay         payDraft
 	newClient   newClientDraft
+	editClient  editClientDraft
 	creategroup creategroupDraft
+}
+
+// editClientDraft holds which client and which field /edit is waiting on
+// a new value for.
+type editClientDraft struct {
+	clientID string
+	field    editableField
+}
+
+// editableField is which client field /edit's picker offers — a superset
+// of consultations.ClientNamePart (which only knows about the three name
+// columns): /edit also lets staff fix phone and email, the two other
+// plain-text fields worth a quick bot round-trip instead of the full web
+// CRM form.
+type editableField string
+
+const (
+	editFieldLastName   editableField = "last_name"
+	editFieldFirstName  editableField = "first_name"
+	editFieldPatronymic editableField = "patronymic"
+	editFieldPhone      editableField = "phone"
+	editFieldEmail      editableField = "email"
+)
+
+var editFieldLabel = map[editableField]string{
+	editFieldLastName:   "Прізвище",
+	editFieldFirstName:  "Ім'я",
+	editFieldPatronymic: "По батькові",
+	editFieldPhone:      "Телефон",
+	editFieldEmail:      "Email",
 }
 
 // newClientDraft holds what resolveClientOrCreate already knows (the typed
@@ -181,6 +212,7 @@ func NewAdminBot(
 		{Command: "caseclose", Description: "Позначити справу виконаною: /caseclose <Case ID>"},
 		{Command: "creategroup", Description: "Створити групу з клієнтом і адвокатом"},
 		{Command: "client", Description: "Знайти клієнта (ім'я/телефон/telegram)"},
+		{Command: "edit", Description: "Редагувати дані клієнта (ім'я, телефон, email)"},
 		{Command: "intakelink", Description: "Посилання на анкету для нового клієнта"},
 	}
 	for _, id := range allowedUserIDs {
@@ -393,6 +425,16 @@ func (b *AdminBot) handle(ctx context.Context, update tgbotapi.Update) {
 		b.searchClientInfo(ctx, chatID, query)
 		return
 
+	case strings.HasPrefix(text, "/edit"):
+		query := strings.TrimSpace(strings.TrimPrefix(text, "/edit"))
+		if query == "" {
+			b.flows[userID] = &flow{step: "edit_client_query"}
+			b.send(ctx, chatID, "Введіть ім'я, телефон або Client ID клієнта:")
+			return
+		}
+		b.searchClientForEdit(ctx, chatID, query)
+		return
+
 	case text == "/intakelink":
 		b.sendIntakeLink(ctx, chatID)
 		return
@@ -535,6 +577,15 @@ func (b *AdminBot) handle(ctx context.Context, update tgbotapi.Update) {
 	case "client_query":
 		delete(b.flows, userID)
 		b.searchClientInfo(ctx, chatID, text)
+
+	case "edit_client_query":
+		delete(b.flows, userID)
+		b.searchClientForEdit(ctx, chatID, text)
+
+	case "edit_field_value":
+		clientID, field := fl.editClient.clientID, fl.editClient.field
+		delete(b.flows, userID)
+		b.applyClientFieldEdit(ctx, chatID, clientID, field, text)
 	}
 }
 
@@ -615,6 +666,7 @@ const (
 	btnCaseClose   = "✅ Закрити справу"
 	btnCreateGroup = "👨‍👩‍👧 Створити групу"
 	btnClientInfo  = "🔎 Картка клієнта"
+	btnEditClient  = "✏️ Редагувати клієнта"
 	btnIntakeLink  = "📋 Анкета для клієнта"
 )
 
@@ -632,6 +684,7 @@ var staffMenuCommands = map[string]string{
 	btnCaseClose:   "/caseclose",
 	btnCreateGroup: "/creategroup",
 	btnClientInfo:  "/client",
+	btnEditClient:  "/edit",
 	btnIntakeLink:  "/intakelink",
 }
 
@@ -640,12 +693,12 @@ var staffMenuCommands = map[string]string{
 // longer ones.
 func staffMenuKeyboard() tgbotapi.ReplyKeyboardMarkup {
 	kb := tgbotapi.NewReplyKeyboard(
-		tgbotapi.NewKeyboardButtonRow(tgbotapi.NewKeyboardButton(btnClientInfo), tgbotapi.NewKeyboardButton(btnInvoice)),
-		tgbotapi.NewKeyboardButtonRow(tgbotapi.NewKeyboardButton(btnConsult), tgbotapi.NewKeyboardButton(btnBook)),
-		tgbotapi.NewKeyboardButtonRow(tgbotapi.NewKeyboardButton(btnCreateGroup), tgbotapi.NewKeyboardButton(btnIntakeLink)),
-		tgbotapi.NewKeyboardButtonRow(tgbotapi.NewKeyboardButton(btnCase), tgbotapi.NewKeyboardButton(btnPay)),
-		tgbotapi.NewKeyboardButtonRow(tgbotapi.NewKeyboardButton(btnCaseClose), tgbotapi.NewKeyboardButton(btnAdvocateAdd)),
-		tgbotapi.NewKeyboardButtonRow(tgbotapi.NewKeyboardButton(btnAdvocates)),
+		tgbotapi.NewKeyboardButtonRow(tgbotapi.NewKeyboardButton(btnClientInfo), tgbotapi.NewKeyboardButton(btnEditClient)),
+		tgbotapi.NewKeyboardButtonRow(tgbotapi.NewKeyboardButton(btnInvoice), tgbotapi.NewKeyboardButton(btnConsult)),
+		tgbotapi.NewKeyboardButtonRow(tgbotapi.NewKeyboardButton(btnBook), tgbotapi.NewKeyboardButton(btnCreateGroup)),
+		tgbotapi.NewKeyboardButtonRow(tgbotapi.NewKeyboardButton(btnIntakeLink), tgbotapi.NewKeyboardButton(btnCase)),
+		tgbotapi.NewKeyboardButtonRow(tgbotapi.NewKeyboardButton(btnPay), tgbotapi.NewKeyboardButton(btnCaseClose)),
+		tgbotapi.NewKeyboardButtonRow(tgbotapi.NewKeyboardButton(btnAdvocateAdd), tgbotapi.NewKeyboardButton(btnAdvocates)),
 	)
 	kb.ResizeKeyboard = true
 	return kb
@@ -1384,6 +1437,15 @@ func (b *AdminBot) handleCallback(ctx context.Context, cb *tgbotapi.CallbackQuer
 		b.pickCaseAdvocate(ctx, cb, rest)
 	case "clinfo":
 		b.showClientInfo(ctx, cb, rest)
+	case "editpick":
+		b.pickClientForEdit(ctx, cb, rest)
+	case "editfield":
+		field, clientID, ok := strings.Cut(rest, ":")
+		if !ok {
+			b.answerCallback(ctx, cb.ID, "")
+			return
+		}
+		b.startEditField(ctx, cb, editableField(field), clientID)
 	case "clientpick":
 		mode, clientID, ok := strings.Cut(rest, ":")
 		if !ok {
@@ -1557,6 +1619,128 @@ func (b *AdminBot) buildFullClientCard(ctx context.Context, client consultations
 	}
 
 	return buildClientInfoCard(client, latest, hasConsultation, clientCases, b.adminURL), nil
+}
+
+// searchClientForEdit is /edit's entry point — same lookup as
+// searchClientInfo (exact id first, then name/phone search), but landing
+// on the edit field picker instead of the read-only card.
+func (b *AdminBot) searchClientForEdit(ctx context.Context, chatID int64, query string) {
+	query = strings.TrimSpace(query)
+
+	if client, err := b.store.FindClient(ctx, query); err == nil {
+		b.sendEditFieldPicker(ctx, chatID, client)
+		return
+	}
+
+	clients, err := b.store.SearchClients(ctx, query)
+	if err != nil {
+		b.log.ErrorContext(ctx, "telegram: edit client: search failed", "err", err)
+		b.send(ctx, chatID, "Помилка пошуку, спробуйте ще раз.")
+		return
+	}
+	if len(clients) == 0 {
+		b.send(ctx, chatID, "Нічого не знайдено. Спробуйте /edit ще раз з іншим запитом.")
+		return
+	}
+
+	rows := make([][]tgbotapi.InlineKeyboardButton, 0, len(clients))
+	for _, c := range clients {
+		label := c.Name
+		if label == "" {
+			label = c.TelegramName
+		}
+		if c.Phone != "" {
+			label += " (" + c.Phone + ")"
+		}
+		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(label, "editpick:"+c.ID),
+		))
+	}
+	msg := tgbotapi.NewMessage(chatID, "Оберіть клієнта:")
+	msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(rows...)
+	if _, err := b.bot.Send(msg); err != nil {
+		b.log.ErrorContext(ctx, "telegram: send edit client picker failed", "err", err)
+	}
+}
+
+// pickClientForEdit is searchClientForEdit's picker tap handler.
+func (b *AdminBot) pickClientForEdit(ctx context.Context, cb *tgbotapi.CallbackQuery, clientID string) {
+	client, err := b.store.FindClient(ctx, clientID)
+	if err != nil {
+		b.log.WarnContext(ctx, "telegram: edit client: find failed", "client_id", clientID, "err", err)
+		b.answerCallback(ctx, cb.ID, "Клієнта не знайдено")
+		return
+	}
+	b.answerCallback(ctx, cb.ID, "")
+	if cb.Message == nil {
+		return
+	}
+	b.editCallbackMessage(ctx, cb, "Клієнт: "+client.Name)
+	b.sendEditFieldPicker(ctx, cb.Message.Chat.ID, client)
+}
+
+// sendEditFieldPicker offers the editable fields as buttons — client.ID
+// rides along in each button's callback_data since the next step (typing
+// the new value) needs to know which client and which field without
+// re-asking.
+func (b *AdminBot) sendEditFieldPicker(ctx context.Context, chatID int64, client consultations.Client) {
+	fields := []editableField{editFieldLastName, editFieldFirstName, editFieldPatronymic, editFieldPhone, editFieldEmail}
+	rows := make([][]tgbotapi.InlineKeyboardButton, 0, len(fields))
+	for _, f := range fields {
+		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(editFieldLabel[f], "editfield:"+string(f)+":"+client.ID),
+		))
+	}
+	msg := tgbotapi.NewMessage(chatID, "Що змінити?")
+	msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(rows...)
+	if _, err := b.bot.Send(msg); err != nil {
+		b.log.ErrorContext(ctx, "telegram: send edit field picker failed", "err", err)
+	}
+}
+
+// startEditField handles sendEditFieldPicker's tap — moves to the
+// text-input step that collects the new value.
+func (b *AdminBot) startEditField(ctx context.Context, cb *tgbotapi.CallbackQuery, field editableField, clientID string) {
+	label, ok := editFieldLabel[field]
+	if !ok {
+		b.answerCallback(ctx, cb.ID, "")
+		return
+	}
+	b.answerCallback(ctx, cb.ID, "")
+	b.flows[cb.From.ID] = &flow{step: "edit_field_value", editClient: editClientDraft{clientID: clientID, field: field}}
+	if cb.Message != nil {
+		b.editCallbackMessage(ctx, cb, "Введіть нове значення для «"+label+"»:")
+	}
+}
+
+// applyClientFieldEdit writes the one field /edit collected — always
+// through a narrow single-column setter (see SetClientNamePart/
+// SetClientEmail/SetClientPhone), never the broad UpdateClient, so an edit
+// here can't blank out the rest of the card.
+func (b *AdminBot) applyClientFieldEdit(ctx context.Context, chatID int64, clientID string, field editableField, value string) {
+	value = strings.TrimSpace(value)
+
+	var err error
+	switch field {
+	case editFieldLastName:
+		err = b.store.SetClientNamePart(ctx, clientID, consultations.NamePartLast, value)
+	case editFieldFirstName:
+		err = b.store.SetClientNamePart(ctx, clientID, consultations.NamePartFirst, value)
+	case editFieldPatronymic:
+		err = b.store.SetClientNamePart(ctx, clientID, consultations.NamePartPatronymic, value)
+	case editFieldPhone:
+		err = b.store.SetClientPhone(ctx, clientID, domainleads.NormalizePhone(value))
+	case editFieldEmail:
+		err = b.store.SetClientEmail(ctx, clientID, value)
+	default:
+		return
+	}
+	if err != nil {
+		b.send(ctx, chatID, "Не вдалося оновити дані клієнта, спробуйте ще раз.")
+		b.log.ErrorContext(ctx, "telegram: update client field failed", "field", field, "err", err)
+		return
+	}
+	b.send(ctx, chatID, "Оновлено ✅")
 }
 
 // handleCreateGroupCallback drives /creategroup's pick client → pick
