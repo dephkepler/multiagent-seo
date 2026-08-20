@@ -21,8 +21,8 @@ type clientSegmentsService interface {
 	AddTag(ctx context.Context, clientID, tag, createdBy string) error
 	RemoveTag(ctx context.Context, clientID, tag string) error
 	ListTagDefs(ctx context.Context) ([]domain.TagDef, error)
-	CreateTagDef(ctx context.Context, label, createdBy string) error
-	RenameTagDef(ctx context.Context, oldLabel, newLabel string) error
+	CreateTagDef(ctx context.Context, label, category, createdBy string) error
+	UpdateTagDef(ctx context.Context, label string, newLabel, newCategory *string) error
 	DeleteTagDef(ctx context.Context, label string) error
 }
 
@@ -162,7 +162,7 @@ func (h *ClientSegmentsHandler) ListClientTagDefs(w http.ResponseWriter, r *http
 	}
 	items := make([]oapigen.TagDef, len(defs))
 	for i, d := range defs {
-		items[i] = oapigen.TagDef{Label: d.Label, CreatedAt: d.CreatedAt}
+		items[i] = oapigen.TagDef{Label: d.Label, Category: d.Category, CreatedAt: d.CreatedAt}
 	}
 	response.WriteJSON(r.Context(), w, http.StatusOK, oapigen.TagDefList{Items: items})
 }
@@ -183,30 +183,30 @@ func (h *ClientSegmentsHandler) CreateClientTagDef(w http.ResponseWriter, r *htt
 	}
 
 	createdBy, _ := middleware.UserIDFromContext(r.Context())
-	if err := h.svc.CreateTagDef(r.Context(), body.Label, createdBy); err != nil {
+	if err := h.svc.CreateTagDef(r.Context(), body.Label, body.Category, createdBy); err != nil {
 		h.writeError(r.Context(), w, "create_client_tag_def", err)
 		return
 	}
 	response.NoContent(w)
 }
 
-func (h *ClientSegmentsHandler) RenameClientTagDef(w http.ResponseWriter, r *http.Request, label string) {
+func (h *ClientSegmentsHandler) UpdateClientTagDef(w http.ResponseWriter, r *http.Request, label string) {
 	if isNil(h.svc) {
 		problem.Write(w, http.StatusServiceUnavailable, "client segments unavailable")
 		return
 	}
 
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
-	var body oapigen.RenameTagDefRequest
+	var body oapigen.UpdateTagDefRequest
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		log := logger.New(r.Context(), "handlers.clientsegments")
-		log.Debug().Err(err).Msg("decode rename tag def body")
+		log.Debug().Err(err).Msg("decode update tag def body")
 		problem.Write(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 
-	if err := h.svc.RenameTagDef(r.Context(), label, body.Label); err != nil {
-		h.writeError(r.Context(), w, "rename_client_tag_def", err)
+	if err := h.svc.UpdateTagDef(r.Context(), label, body.Label, body.Category); err != nil {
+		h.writeError(r.Context(), w, "update_client_tag_def", err)
 		return
 	}
 	response.NoContent(w)

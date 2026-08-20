@@ -33,8 +33,7 @@ type ClientTagger interface {
 	AddTag(ctx context.Context, clientID, tag, createdBy string) error
 	RemoveTag(ctx context.Context, clientID, tag string) error
 	Tags(ctx context.Context, clientID string) ([]string, error)
-	// ListTagDefs returns the curated tag vocabulary — /tags' "add" picker
-	// only ever offers these, never a free-text prompt (see sendAddTagPicker).
+	// curated vocabulary — /tags' add picker only offers these, never free text (see sendAddTagPicker)
 	ListTagDefs(ctx context.Context) ([]clientsegments.TagDef, error)
 }
 
@@ -53,7 +52,7 @@ type AdminBot struct {
 	log            *slog.Logger
 
 	flows map[int64]*flow
-	// caches /language choice by chat id; unlocked — Run() dispatches updates one at a time, same as flows
+	// caches /language choice; unlocked — Run() dispatches updates serially, like flows
 	staffLangs map[int64]consultations.StaffLang
 }
 
@@ -75,7 +74,7 @@ type editClientDraft struct {
 	field    editableField
 }
 
-// clientID lives here, not callback_data — a tag's own text can contain ':' and exceed the 64-byte limit
+// clientID lives here, not callback_data — a tag's text can hold ':' and exceed 64 bytes
 type tagsDraft struct {
 	clientID   string
 	clientName string
@@ -147,13 +146,13 @@ type requestDraft struct {
 	date             string
 	time             string
 	telegramUsername string
-	// true only for the booking entry point — gates whether continueRequestFlow asks for date/time
+	// true only for the booking entry point — gates date/time prompts in continueRequestFlow
 	wantsBooking bool
 }
 
 const advocateStartPrefix = "advocate_"
 
-// fixed payload, not per-client like advocateStartPrefix/a Client ID — nothing is on file yet to attach an id to
+// fixed payload, unlike advocateStartPrefix/client IDs — no id exists yet to attach one to
 const intakeStartPayload = "intake"
 
 func NewAdminBot(
@@ -178,7 +177,7 @@ func NewAdminBot(
 		log = slog.Default()
 	}
 
-	// shown before the user's first tap on Telegram's own Start button — a bot can't restyle that button
+	// shown before the user's first tap on Telegram's Start button; a bot can't restyle it
 	_, _ = bot.MakeRequest("setMyDescription", tgbotapi.Params{
 		"description": "Бот ТОВ «Абаліс». Натисніть Start, щоб залишити заявку на консультацію з адвокатом.",
 	})
@@ -233,8 +232,7 @@ func NewAdminBot(
 	}, nil
 }
 
-// polls manually instead of GetUpdatesChan, which logs every failure via stdlib log regardless of cause
-// 409 means another instance (usually prod) already holds the poll slot — expected locally, not an error
+// polls manually — GetUpdatesChan logs every failure via stdlib log regardless of cause
 func (b *AdminBot) Run(ctx context.Context) {
 	offset := 0
 	for {
@@ -250,6 +248,7 @@ func (b *AdminBot) Run(ctx context.Context) {
 		updates, err := b.bot.GetUpdates(u)
 		if err != nil {
 			var tgErr *tgbotapi.Error
+			// 409 means another instance (usually prod) already holds the poll slot — expected locally
 			if !errors.As(err, &tgErr) || tgErr.Code != http.StatusConflict {
 				b.log.WarnContext(ctx, "telegram getUpdates failed", "error", err)
 			}
@@ -278,8 +277,7 @@ func (b *AdminBot) handle(ctx context.Context, update tgbotapi.Update) {
 	}
 	text := strings.TrimSpace(msg.Text)
 
-	// must run before the admin gate below — /start comes from clients, who are never in allowedUsers
-	// staff get their menu here first, else a bare /start falls into handleStart's client-facing branch
+	// runs before the admin gate — staff get their menu here, else /start falls into the client flow
 	if strings.HasPrefix(text, "/start") {
 		payload := strings.TrimSpace(strings.TrimPrefix(text, "/start"))
 		if payload == "" && b.allowedUsers[msg.From.ID] {
@@ -291,7 +289,7 @@ func (b *AdminBot) handle(ctx context.Context, update tgbotapi.Update) {
 	}
 	userID, chatID := msg.From.ID, msg.Chat.ID
 
-	// must run before the admin gate too — self-booking is for any client, not just allowedUsers
+	// must run before the admin gate too — self-booking is open to any client, not just staff
 	if text == "/request" || text == requestButtonLabel {
 		b.startRequestFlow(ctx, chatID, userID, msg.From)
 		return
@@ -305,8 +303,7 @@ func (b *AdminBot) handle(ctx context.Context, update tgbotapi.Update) {
 		return
 	}
 
-	// a tapped button carries its label as plain text — map it to the command below before the switch
-	// staffMenuCommands only knows Ukrainian labels; a Russian-rendered one is mapped back via ruToUk first
+	// button label text must map to a command first — ruToUk covers Russian-rendered labels
 	if cmd, ok := staffMenuCommands[text]; ok {
 		text = cmd
 	} else if uk, ok := ruToUk[text]; ok {
@@ -364,8 +361,7 @@ func (b *AdminBot) handle(ctx context.Context, update tgbotapi.Update) {
 		b.registerAdvocate(ctx, chatID, arg)
 		return
 
-	// must come before /case — "/caseclose ..." also starts with "/case" and would be
-	// swallowed by the shorter prefix if checked after it
+	// must come before /case — /caseclose shares that prefix and would be swallowed otherwise
 	case strings.HasPrefix(text, "/caseclose"):
 		caseID := strings.TrimSpace(strings.TrimPrefix(text, "/caseclose"))
 		if caseID == "" {
@@ -619,8 +615,7 @@ func (b *AdminBot) handleStart(ctx context.Context, chatID int64, payload string
 		return
 	}
 
-	// private-chat id equals the tapping user's id, so this catches staff opening a client link themselves
-	// checked before the branches below; advocate links are exempt — tapping one's own is the intended flow
+	// catches staff opening a client link (chatID = tapping user); advocate links are exempt by design
 	if b.allowedUsers[chatID] {
 		b.send(ctx, chatID, "Це посилання для клієнта — перешліть його, не переходьте самі.")
 		return
@@ -655,7 +650,7 @@ func (b *AdminBot) handleStart(ctx context.Context, chatID int64, payload string
 
 const requestButtonLabel = "📅 Забронювати консультацію"
 
-// label text must never collide with requestButtonLabel — that's checked before the staff gate in handle()
+// label text must never collide with requestButtonLabel, checked before the staff gate in handle()
 const (
 	btnInvoice     = "🧾 Рахунок"
 	btnConsult     = "📋 Підтвердження запису"
@@ -780,7 +775,7 @@ func (b *AdminBot) pickLanguage(ctx context.Context, cb *tgbotapi.CallbackQuery,
 	}
 	b.editCallbackMessage(ctx, cb, label)
 
-	// Telegram never re-renders an already-sent reply keyboard — resend the menu or buttons stay stale
+	// Telegram never re-renders a sent reply keyboard — resend the menu or buttons stay stale
 	if cb.Message != nil {
 		b.sendStaffMenu(ctx, cb.Message.Chat.ID)
 	}
@@ -815,7 +810,7 @@ func (b *AdminBot) startRequestFlow(ctx context.Context, chatID, userID int64, u
 // mirrors startRequestFlow's req_* steps but skips date/time (wantsBooking stays false)
 func (b *AdminBot) startIntakeFlow(ctx context.Context, chatID int64, user *tgbotapi.User) {
 	var username string
-	userID := chatID // private-chat id equals the tapping user's id; user is the fallback below
+	userID := chatID // private-chat id == tapping user's id; user param is just a fallback
 	if user != nil {
 		username = user.UserName
 		userID = user.ID
@@ -890,7 +885,7 @@ func (b *AdminBot) sendEmailPrompt(ctx context.Context, chatID int64) {
 	}
 }
 
-// same category list /case uses — no translation needed when this becomes the case's category
+// same category list /case uses — no translation needed since it becomes the case's category
 func (b *AdminBot) sendCategoryPrompt(ctx context.Context, chatID int64) {
 	rows := make([][]tgbotapi.KeyboardButton, 0, len(cases.Categories)+1)
 	for _, category := range cases.Categories {
@@ -907,8 +902,7 @@ func (b *AdminBot) sendCategoryPrompt(ctx context.Context, chatID int64) {
 	}
 }
 
-// shares the email-lead pipeline (SubmitLead); email set separately since Lead has no field for it
-// and UpdateClient would overwrite the name/phone just set — use SetClientEmail instead
+// email goes via SetClientEmail — Lead lacks the field, and UpdateClient would clobber name/phone
 func (b *AdminBot) submitRequest(ctx context.Context, chatID int64, d requestDraft, question string) {
 	message := question
 	if d.category != "" {
@@ -1034,7 +1028,7 @@ func (b *AdminBot) finishCase(ctx context.Context, chatID, userID int64, draft c
 		return
 	}
 
-	// tr on the template before Sprintf fills it — see sendNewClientContactPicker for why order matters
+	// tr the template before Sprintf fills it — see sendNewClientContactPicker for why order matters
 	b.sendHTML(ctx, chatID, fmt.Sprintf(
 		b.tr(ctx, chatID, "Готово. Справа <code>%s</code> (%s, %s), сума %s грн.\n\nЩоб додати оплату: /pay <code>%s</code> &lt;сума&gt;\nЩоб позначити виконаною: /caseclose <code>%s</code>"),
 		saved.ID, html.EscapeString(draft.advocateName), html.EscapeString(draft.category), formatAmount(draft.fee), saved.ID, saved.ID,
@@ -1192,8 +1186,7 @@ func (b *AdminBot) resolveClientOrCreate(ctx context.Context, chatID, userID int
 		return
 	}
 	if len(matches) == 0 {
-		// a phone-looking query used as the name would corrupt last_name/patronymic too —
-		// CreateClient's SplitName reads a multi-word phone as three name parts
+		// a phone-looking query as name would corrupt fields — SplitName reads it as 3 name parts
 		if looksLikePhone(query) {
 			b.flows[userID] = &flow{step: "new_client_name_known_phone", newClient: newClientDraft{phone: domainleads.NormalizePhone(query), mode: mode}}
 			b.send(ctx, chatID, fmt.Sprintf(b.tr(ctx, chatID, "Клієнта не знайдено. Телефон %s. Введіть ім'я нового клієнта:"), query))
@@ -1225,7 +1218,7 @@ func (b *AdminBot) resolveClientOrCreate(ctx context.Context, chatID, userID int
 }
 
 func (b *AdminBot) sendNewClientContactPicker(ctx context.Context, chatID int64, name string) {
-	// tr runs on the raw template before Sprintf fills it — a name baked in first won't match ukToRu's key
+	// tr runs on the raw template first — a name baked in early won't match ukToRu's key
 	text := fmt.Sprintf(b.tr(ctx, chatID, "Клієнта не знайдено. Створити нового на ім'я «%s»? Що є з контактів?"), name)
 	msg := tgbotapi.NewMessage(chatID, text)
 	msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
@@ -1471,10 +1464,14 @@ func (b *AdminBot) handleCallback(ctx context.Context, cb *tgbotapi.CallbackQuer
 		b.pickRemoveTag(ctx, cb, rest)
 	case "tagadd":
 		b.pickShowAddTagPicker(ctx, cb)
+	case "tagcat":
+		b.pickShowCategoryTags(ctx, cb, rest)
 	case "tagset":
 		b.pickSetTag(ctx, cb, rest)
 	case "tagback":
 		b.pickTagsBack(ctx, cb)
+	case "tagcatback":
+		b.pickCategoryBack(ctx, cb)
 	default:
 		b.answerCallback(ctx, cb, "")
 	}
@@ -1500,7 +1497,7 @@ func (b *AdminBot) handleStatusCallback(ctx context.Context, cb *tgbotapi.Callba
 }
 
 func (b *AdminBot) searchForGroup(ctx context.Context, chatID, userID int64, query string) {
-	// exact-id fast path — SearchClients matches name/phone/telegram, never id, so this would 404 otherwise
+	// exact-id fast path — SearchClients never matches on id, so this would 404 otherwise
 	if client, err := b.store.FindClient(ctx, query); err == nil {
 		b.sendGroupAdvocatePicker(ctx, chatID, userID, client.ID)
 		return
@@ -1733,7 +1730,7 @@ func (b *AdminBot) startEditField(ctx context.Context, cb *tgbotapi.CallbackQuer
 	}
 }
 
-// always through a narrow single-column setter, never UpdateClient — can't blank the rest of the client
+// uses a single-column setter, never UpdateClient — that could blank the rest of the client
 func (b *AdminBot) applyClientFieldEdit(ctx context.Context, chatID int64, clientID string, field editableField, value string) {
 	value = strings.TrimSpace(value)
 
@@ -1813,10 +1810,7 @@ func (b *AdminBot) pickClientForTags(ctx context.Context, cb *tgbotapi.CallbackQ
 	b.sendTagsMenu(ctx, cb.Message.Chat.ID, cb.From.ID, client.ID, client.Name)
 }
 
-// renderTagsMenu builds /tags' main screen (current tags as "❌ <tag>"
-// removal buttons, plus "➕ Додати тег") — shared by sendTagsMenu (first
-// send) and refreshTagsMenu (edit-in-place after remove/add/back), so the
-// two can't drift apart.
+// shared by sendTagsMenu and refreshTagsMenu so the two screens can't drift apart
 func (b *AdminBot) renderTagsMenu(ctx context.Context, chatID int64, clientID, clientName string) (string, tgbotapi.InlineKeyboardMarkup, error) {
 	tags, err := b.tags.Tags(ctx, clientID)
 	if err != nil {
@@ -1859,10 +1853,7 @@ func (b *AdminBot) sendTagsMenu(ctx context.Context, chatID, userID int64, clien
 	}
 }
 
-// refreshTagsMenu redraws sendTagsMenu's message in place — used after
-// remove, after add, and after "‹ Назад" — clientID/clientName come from
-// the flow, not re-fetched, since /tags never leaves "tags_menu" for this
-// client once started (see pickShowAddTagPicker/pickSetTag).
+// clientID/clientName come from the flow, not re-fetched — /tags stays on tags_menu for this client
 func (b *AdminBot) refreshTagsMenu(ctx context.Context, cb *tgbotapi.CallbackQuery, clientID, clientName string) {
 	chatID := cb.Message.Chat.ID
 	text, markup, err := b.renderTagsMenu(ctx, chatID, clientID, clientName)
@@ -1894,23 +1885,43 @@ func (b *AdminBot) pickRemoveTag(ctx context.Context, cb *tgbotapi.CallbackQuery
 	b.refreshTagsMenu(ctx, cb, fl.tags.clientID, fl.tags.clientName)
 }
 
-// pickShowAddTagPicker handles "➕ Додати тег" — offers every tag from the
-// curated vocabulary (client_tag_defs) the client doesn't already have, as
-// buttons. No text prompt: the whole point of a closed vocabulary is that
-// staff picks, never types, a tag.
+// remainingTagsByCategory groups the vocabulary's not-yet-applied labels by
+// category, in ListTagDefs' order (category, then label) — shared by
+// pickShowAddTagPicker (which only needs the category names) and
+// pickShowCategoryTags (which needs one category's labels).
+func (b *AdminBot) remainingTagsByCategory(ctx context.Context, clientID string) ([]string, map[string][]string, error) {
+	defs, err := b.tags.ListTagDefs(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	current, err := b.tags.Tags(ctx, clientID)
+	if err != nil {
+		return nil, nil, err
+	}
+	var categories []string
+	byCategory := make(map[string][]string)
+	for _, d := range defs {
+		if slices.Contains(current, d.Label) {
+			continue
+		}
+		if _, ok := byCategory[d.Category]; !ok {
+			categories = append(categories, d.Category)
+		}
+		byCategory[d.Category] = append(byCategory[d.Category], d.Label)
+	}
+	return categories, byCategory, nil
+}
+
+// pickShowAddTagPicker handles "➕ Додати тег" — the vocabulary's first
+// level: which category. Staff picks, never types, a tag — see
+// pickShowCategoryTags for the second level (tags within one category).
 func (b *AdminBot) pickShowAddTagPicker(ctx context.Context, cb *tgbotapi.CallbackQuery) {
 	fl := b.flows[cb.From.ID]
 	if fl == nil || fl.step != "tags_menu" || b.tags == nil {
 		b.answerCallback(ctx, cb, "Сесія застаріла, почніть з /tags")
 		return
 	}
-	defs, err := b.tags.ListTagDefs(ctx)
-	if err != nil {
-		b.log.ErrorContext(ctx, "telegram: list tag defs failed", "err", err)
-		b.answerCallback(ctx, cb, "Помилка отримання списку міток")
-		return
-	}
-	current, err := b.tags.Tags(ctx, fl.tags.clientID)
+	categories, _, err := b.remainingTagsByCategory(ctx, fl.tags.clientID)
 	if err != nil {
 		b.log.ErrorContext(ctx, "telegram: tags: list failed", "client_id", fl.tags.clientID, "err", err)
 		b.answerCallback(ctx, cb, "Помилка отримання міток")
@@ -1922,31 +1933,64 @@ func (b *AdminBot) pickShowAddTagPicker(ctx context.Context, cb *tgbotapi.Callba
 	}
 	chatID := cb.Message.Chat.ID
 
-	rows := make([][]tgbotapi.InlineKeyboardButton, 0, len(defs)+1)
-	for _, d := range defs {
-		if slices.Contains(current, d.Label) {
-			continue
-		}
+	rows := make([][]tgbotapi.InlineKeyboardButton, 0, len(categories)+1)
+	for _, category := range categories {
 		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData(d.Label, "tagset:"+d.Label),
+			tgbotapi.NewInlineKeyboardButtonData(category, "tagcat:"+category),
 		))
 	}
 	rows = append(rows, tgbotapi.NewInlineKeyboardRow(
 		tgbotapi.NewInlineKeyboardButtonData(b.tr(ctx, chatID, "‹ Назад"), "tagback"),
 	))
 
-	text := b.tr(ctx, chatID, "Оберіть мітку:")
-	if len(rows) == 1 {
+	text := b.tr(ctx, chatID, "Оберіть категорію:")
+	if len(categories) == 0 {
 		text = b.tr(ctx, chatID, "Усі мітки вже додані клієнту.")
 	}
 	edited := tgbotapi.NewEditMessageTextAndMarkup(chatID, cb.Message.MessageID, text, tgbotapi.NewInlineKeyboardMarkup(rows...))
 	if _, err := b.bot.Send(edited); err != nil {
-		b.log.WarnContext(ctx, "telegram: edit add-tag picker failed", "err", err)
+		b.log.WarnContext(ctx, "telegram: edit add-tag category picker failed", "err", err)
 	}
 }
 
-// pickSetTag handles a tap on one vocabulary entry from
-// pickShowAddTagPicker — applies it and returns to the main tags menu.
+// pickShowCategoryTags is the vocabulary's second level — every
+// not-yet-applied tag within the tapped category.
+func (b *AdminBot) pickShowCategoryTags(ctx context.Context, cb *tgbotapi.CallbackQuery, category string) {
+	fl := b.flows[cb.From.ID]
+	if fl == nil || fl.step != "tags_menu" || b.tags == nil {
+		b.answerCallback(ctx, cb, "Сесія застаріла, почніть з /tags")
+		return
+	}
+	_, byCategory, err := b.remainingTagsByCategory(ctx, fl.tags.clientID)
+	if err != nil {
+		b.log.ErrorContext(ctx, "telegram: tags: list failed", "client_id", fl.tags.clientID, "err", err)
+		b.answerCallback(ctx, cb, "Помилка отримання міток")
+		return
+	}
+	b.answerCallback(ctx, cb, "")
+	if cb.Message == nil {
+		return
+	}
+	chatID := cb.Message.Chat.ID
+
+	labels := byCategory[category]
+	rows := make([][]tgbotapi.InlineKeyboardButton, 0, len(labels)+1)
+	for _, label := range labels {
+		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(label, "tagset:"+label),
+		))
+	}
+	rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+		tgbotapi.NewInlineKeyboardButtonData(b.tr(ctx, chatID, "‹ Назад"), "tagcatback"),
+	))
+
+	text := fmt.Sprintf(b.tr(ctx, chatID, "Категорія «%s» — оберіть мітку:"), category)
+	edited := tgbotapi.NewEditMessageTextAndMarkup(chatID, cb.Message.MessageID, text, tgbotapi.NewInlineKeyboardMarkup(rows...))
+	if _, err := b.bot.Send(edited); err != nil {
+		b.log.WarnContext(ctx, "telegram: edit category tags picker failed", "err", err)
+	}
+}
+
 func (b *AdminBot) pickSetTag(ctx context.Context, cb *tgbotapi.CallbackQuery, label string) {
 	fl := b.flows[cb.From.ID]
 	if fl == nil || fl.step != "tags_menu" || b.tags == nil {
@@ -1965,7 +2009,7 @@ func (b *AdminBot) pickSetTag(ctx context.Context, cb *tgbotapi.CallbackQuery, l
 	b.refreshTagsMenu(ctx, cb, fl.tags.clientID, fl.tags.clientName)
 }
 
-// pickTagsBack handles "‹ Назад" out of the add-tag picker.
+// pickTagsBack returns from the category picker to the main tags menu.
 func (b *AdminBot) pickTagsBack(ctx context.Context, cb *tgbotapi.CallbackQuery) {
 	fl := b.flows[cb.From.ID]
 	if fl == nil || fl.step != "tags_menu" {
@@ -1977,6 +2021,12 @@ func (b *AdminBot) pickTagsBack(ctx context.Context, cb *tgbotapi.CallbackQuery)
 		return
 	}
 	b.refreshTagsMenu(ctx, cb, fl.tags.clientID, fl.tags.clientName)
+}
+
+// pickCategoryBack returns from one category's tag list to the category
+// picker — one level up, not all the way to the main menu.
+func (b *AdminBot) pickCategoryBack(ctx context.Context, cb *tgbotapi.CallbackQuery) {
+	b.pickShowAddTagPicker(ctx, cb)
 }
 
 func (b *AdminBot) handleCreateGroupCallback(ctx context.Context, cb *tgbotapi.CallbackQuery, action, arg string) {
@@ -2071,7 +2121,7 @@ func (b *AdminBot) confirmCreateGroup(ctx context.Context, cb *tgbotapi.Callback
 	}
 }
 
-// scans ListAdvocates instead of a repo lookup — roster is small, not worth a method used once
+// scans ListAdvocates instead of a dedicated repo method — roster is small, used once
 func (b *AdminBot) findAdvocate(ctx context.Context, advocateID string) (consultations.Advocate, error) {
 	advocates, err := b.store.ListAdvocates(ctx, false)
 	if err != nil {
@@ -2134,7 +2184,7 @@ func (b *AdminBot) doCreateGroup(ctx context.Context, cb *tgbotapi.CallbackQuery
 	b.editCallbackMessage(ctx, cb, fmt.Sprintf(b.tr(ctx, cb.From.ID, "Групу створено ✅ (%s + %s)"), client.Name, advocate.FullName))
 }
 
-// ok is false when there's no public username — MTProto can't resolve/invite by display name alone
+// ok is false with no public username — MTProto can't invite by display name alone
 func publicUsername(telegramName string) (string, bool) {
 	return strings.CutPrefix(telegramName, "@")
 }
@@ -2149,7 +2199,7 @@ func (b *AdminBot) editCallbackMessage(ctx context.Context, cb *tgbotapi.Callbac
 	}
 }
 
-// use when text has <code>/<b> — editCallbackMessage would send them as literal angle brackets
+// use when text has <code>/<b> — editCallbackMessage sends them as literal brackets
 func (b *AdminBot) editCallbackMessageHTML(ctx context.Context, cb *tgbotapi.CallbackQuery, text string) {
 	if cb.Message == nil {
 		return
@@ -2201,7 +2251,7 @@ func (b *AdminBot) SendReminders(ctx context.Context) {
 	}
 }
 
-// showPrice is false for the advocate's own card — advocate isn't billing, just doing the legal work
+// showPrice false = advocate's own card; advocate doesn't bill, just does the work
 func buildConsultationCard(header string, c consultations.Consultation, client consultations.Client, advocate consultations.Advocate, showPrice bool) string {
 	card := fmt.Sprintf(
 		`%s
@@ -2231,7 +2281,7 @@ Client ID: <code>%s</code>
 	return card
 }
 
-// tr is applied per label, not to the whole card — live client/case data means no fixed template to key against
+// tr applied per label, not to the whole card — live data means no fixed template to key against
 func buildClientInfoCard(client consultations.Client, latest consultations.Consultation, hasConsultation bool, clientCases []cases.Case, adminURL string, tr func(string) string) string {
 	telegram := client.TelegramName
 	if telegram == "" {
@@ -2327,8 +2377,7 @@ func (b *AdminBot) newMsg(ctx context.Context, chatID int64, text string) tgbota
 	return tgbotapi.NewMessage(chatID, b.tr(ctx, chatID, text))
 }
 
-// unknown strings pass through unchanged — client/advocate-facing text is never in ukToRu by design,
-// so it's safe to route mixed-audience helpers through tr without auditing every caller
+// missing keys pass through unchanged — client-facing text is deliberately absent from ukToRu, so that's safe
 func (b *AdminBot) tr(ctx context.Context, chatID int64, uk string) string {
 	lang, ok := b.staffLangs[chatID]
 	if !ok {
@@ -2349,8 +2398,8 @@ func (b *AdminBot) tr(ctx context.Context, chatID int64, uk string) string {
 	return uk
 }
 
-// keyed by the exact untranslated template (Sprintf verbs included) — translate before formatting, not after
-// excludes client/advocate-facing strings (offer text, intake/invoice text, buildConsultationCard) — those stay Ukrainian
+// keyed by the untranslated template, Sprintf verbs included — translate before formatting, not after
+// excludes client-facing text (offers, intake/invoice, consultation cards) — stays Ukrainian
 var ukToRu = map[string]string{
 	btnInvoice:     "🧾 Счёт",
 	btnConsult:     "📋 Подтверждение записи",
@@ -2544,13 +2593,15 @@ var ukToRu = map[string]string{
 	"Додано":                           "Добавлено",
 	"‹ Назад":                          "‹ Назад",
 	"Оберіть мітку:":                   "Выберите метку:",
+	"Оберіть категорію:":               "Выберите категорию:",
+	"Категорія «%s» — оберіть мітку:":  "Категория «%s» — выберите метку:",
 	"Усі мітки вже додані клієнту.":    "Все метки уже добавлены клиенту.",
 	"Помилка отримання списку міток":   "Ошибка получения списка меток",
 	"Помилка отримання міток":          "Ошибка получения меток",
 	"Не вдалося додати мітку":          "Не удалось добавить метку",
 }
 
-// inverse of ukToRu — lets handle() match a Russian-rendered button back to its Ukrainian source
+// inverse of ukToRu — lets handle() map a Russian-rendered button back to Ukrainian
 var ruToUk = func() map[string]string {
 	m := make(map[string]string, len(ukToRu))
 	for uk, ru := range ukToRu {

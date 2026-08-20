@@ -109,6 +109,27 @@ const TAG_COLOR: Record<string, string> = {
   dormant: 'border border-gray-200 bg-gray-50 text-gray-500',
 }
 
+interface TagDef {
+  label: string
+  category: string
+  created_at: string
+}
+// One color per category, by position in the sorted category list — same
+// scheme as the /clients list page, so a tag reads as the same "level"
+// wherever staff sees it.
+const CATEGORY_PALETTE = [
+  'border-violet-200 bg-violet-50 text-violet-700',
+  'border-cyan-200 bg-cyan-50 text-cyan-700',
+  'border-amber-200 bg-amber-50 text-amber-700',
+  'border-pink-200 bg-pink-50 text-pink-700',
+  'border-lime-200 bg-lime-50 text-lime-700',
+  'border-indigo-200 bg-indigo-50 text-indigo-700',
+]
+function categoryColorClass(category: string, categories: string[]): string {
+  const idx = Math.max(0, categories.indexOf(category))
+  return CATEGORY_PALETTE[idx % CATEGORY_PALETTE.length]
+}
+
 const GENDER_LABEL: Record<Gender, string> = { '': 'Не вказано', male: 'Чоловіча', female: 'Жіноча' }
 const CLIENT_TYPE_LABEL: Record<ClientType, string> = { individual: 'Фізична особа', legal_entity: 'Юридична особа' }
 
@@ -257,13 +278,18 @@ export default function ClientDetailPage() {
     onError: (e: Error) => toast.error(e.message),
   })
   // The manual-tag vocabulary — same source /clients uses for its "+ тег"
-  // dropdown; managing the list itself (add/rename/delete) lives there, not
-  // on this page.
+  // dropdown; managing the list itself (add/rename/delete/categories) lives
+  // there, not on this page.
   const tagDefs = useQuery({
     queryKey: ['client-tag-defs'],
-    queryFn: () => api<{ items: { label: string }[] }>('/clients/tag-defs'),
+    queryFn: () => api<{ items: TagDef[] }>('/clients/tag-defs'),
   })
-  const tagDefLabels = (tagDefs.data?.items ?? []).map((d) => d.label)
+  const defs = tagDefs.data?.items ?? []
+  const categories = [...new Set(defs.map((d) => d.category))]
+  const defsByCategory = new Map<string, TagDef[]>()
+  for (const d of defs) {
+    defsByCategory.set(d.category, [...(defsByCategory.get(d.category) ?? []), d])
+  }
 
   // Editable draft, seeded from the loaded client — re-seeded whenever a
   // fresh fetch lands (loadedFor tracks which one we've already synced
@@ -394,7 +420,8 @@ export default function ClientDetailPage() {
             <TagsEditor
               tags={segment?.tags ?? []}
               manualTags={segment?.manual_tags ?? []}
-              availableTags={tagDefLabels}
+              categories={categories}
+              defsByCategory={defsByCategory}
               pending={addTag.isPending || removeTag.isPending}
               onAdd={(tag) => addTag.mutate(tag)}
               onRemove={(tag) => removeTag.mutate(tag)}
@@ -634,29 +661,38 @@ export default function ClientDetailPage() {
 }
 
 // TagsEditor renders the four auto-computed tags read-only, every manual
-// tag as a removable chip, and a dropdown to add one more — same curated
-// vocabulary as the /clients list page (see there for the "Управление
+// tag as a chip colored by its category, and a grouped dropdown (one
+// <optgroup> per category) to add one more — same curated vocabulary and
+// coloring as the /clients list page (see there for the "Управление
 // тегами" panel that actually manages the list).
 function TagsEditor({
   tags,
   manualTags,
-  availableTags,
+  categories,
+  defsByCategory,
   onAdd,
   onRemove,
   pending,
 }: {
   tags: string[]
   manualTags: string[]
-  availableTags: string[]
+  categories: string[]
+  defsByCategory: Map<string, TagDef[]>
   onAdd: (tag: string) => void
   onRemove: (tag: string) => void
   pending: boolean
 }) {
-  const remaining = availableTags.filter((t) => !manualTags.includes(t))
+  const labelToCategory = new Map<string, string>()
+  for (const [category, defs] of defsByCategory) {
+    for (const d of defs) labelToCategory.set(d.label, category)
+  }
+  const hasRemaining = categories.some((category) =>
+    (defsByCategory.get(category) ?? []).some((d) => !manualTags.includes(d.label))
+  )
 
   return (
     <div className='flex flex-wrap items-center gap-1'>
-      {tags.length === 0 && manualTags.length === 0 && remaining.length === 0 && (
+      {tags.length === 0 && manualTags.length === 0 && !hasRemaining && (
         <span className='text-sm text-gray-400'>—</span>
       )}
       {tags.map((t) => (
@@ -667,7 +703,10 @@ function TagsEditor({
       {manualTags.map((t) => (
         <span
           key={t}
-          className='inline-flex items-center gap-1 rounded border border-dashed border-gray-300 bg-white px-1.5 py-0.5 text-[11px] font-medium text-gray-600'
+          className={cx(
+            'inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[11px] font-medium',
+            categoryColorClass(labelToCategory.get(t) ?? '', categories)
+          )}
         >
           {t}
           <button
@@ -675,28 +714,40 @@ function TagsEditor({
             disabled={pending}
             onClick={() => onRemove(t)}
             aria-label={`Убрать тег ${t}`}
-            className='leading-none text-gray-400 hover:text-rose-600 disabled:cursor-wait'
+            className='leading-none opacity-60 hover:text-rose-600 hover:opacity-100 disabled:cursor-wait'
           >
             ×
           </button>
         </span>
       ))}
-      {remaining.length > 0 && (
-        <select
-          value=''
-          disabled={pending}
-          onChange={(e) => {
-            if (e.target.value) onAdd(e.target.value)
-          }}
-          className='rounded border border-dashed border-gray-300 bg-white px-1 py-0.5 text-[11px] text-gray-400 outline-none disabled:cursor-wait'
-        >
-          <option value=''>+ тег</option>
-          {remaining.map((t) => (
-            <option key={t} value={t}>
-              {t}
-            </option>
-          ))}
-        </select>
+      {hasRemaining && (
+        <div className='relative'>
+          <select
+            value=''
+            disabled={pending}
+            onChange={(e) => {
+              if (e.target.value) onAdd(e.target.value)
+            }}
+            aria-label='Добавить тег'
+            className='cursor-pointer appearance-none rounded-full border border-gray-200 bg-gray-50 py-0.5 pr-4 pl-2 text-[11px] font-medium text-gray-500 outline-none hover:bg-gray-100 disabled:cursor-wait'
+          >
+            <option value=''>+ тег</option>
+            {categories.map((category) => {
+              const remaining = (defsByCategory.get(category) ?? []).filter((d) => !manualTags.includes(d.label))
+              if (remaining.length === 0) return null
+              return (
+                <optgroup key={category} label={category}>
+                  {remaining.map((d) => (
+                    <option key={d.label} value={d.label}>
+                      {d.label}
+                    </option>
+                  ))}
+                </optgroup>
+              )
+            })}
+          </select>
+          <span className='pointer-events-none absolute top-1/2 right-1 -translate-y-1/2 text-[9px] text-gray-400'>▾</span>
+        </div>
       )}
     </div>
   )

@@ -34,6 +34,7 @@ interface ClientList {
 
 interface TagDef {
   label: string
+  category: string
   created_at: string
 }
 interface TagDefList {
@@ -72,6 +73,23 @@ const TAG_COLOR: Record<string, string> = {
   dormant: 'border border-gray-200 bg-gray-50 text-gray-500',
 }
 
+// One color per category, assigned by position in the sorted category list
+// — stable as long as the set of categories doesn't change, and gives
+// manual tags a real visual "level" (which group they're in) instead of
+// all looking the same regardless of category.
+const CATEGORY_PALETTE = [
+  'border-violet-200 bg-violet-50 text-violet-700',
+  'border-cyan-200 bg-cyan-50 text-cyan-700',
+  'border-amber-200 bg-amber-50 text-amber-700',
+  'border-pink-200 bg-pink-50 text-pink-700',
+  'border-lime-200 bg-lime-50 text-lime-700',
+  'border-indigo-200 bg-indigo-50 text-indigo-700',
+]
+function categoryColorClass(category: string, categories: string[]): string {
+  const idx = Math.max(0, categories.indexOf(category))
+  return CATEGORY_PALETTE[idx % CATEGORY_PALETTE.length]
+}
+
 const PAGE_SIZE = 25
 
 function fmtMoney(n: number): string {
@@ -92,6 +110,7 @@ export default function ClientsPage() {
   // request per pause in typing, not one per keystroke.
   const [debouncedQuery, setDebouncedQuery] = useState('')
   const [segmentFilter, setSegmentFilter] = useState<Segment | 'all'>('all')
+  const [tagFilter, setTagFilter] = useState<string>('all')
   const [page, setPage] = useState(1)
   const [sortKey, setSortKey] = useState<SortKey>('activity')
   const [manageTagsOpen, setManageTagsOpen] = useState(false)
@@ -103,6 +122,7 @@ export default function ClientsPage() {
 
   const params = new URLSearchParams()
   if (segmentFilter !== 'all') params.set('segment', segmentFilter)
+  if (tagFilter !== 'all') params.set('tag', tagFilter)
   if (debouncedQuery) params.set('search', debouncedQuery)
   params.set('sort', sortKey)
   params.set('limit', String(PAGE_SIZE))
@@ -136,21 +156,30 @@ export default function ClientsPage() {
   })
 
   // The manual-tag vocabulary — a small curated list, so one query shared
-  // across every row's dropdown and the "Управление тегами" panel below.
+  // across every row's dropdown, the filter row, and the management panel.
   const tagDefs = useQuery({
     queryKey: ['client-tag-defs'],
     queryFn: () => api<TagDefList>('/clients/tag-defs'),
   })
-  const tagDefLabels = (tagDefs.data?.items ?? []).map((d) => d.label)
+  const defs = tagDefs.data?.items ?? []
+  const categories = [...new Set(defs.map((d) => d.category))]
+  const defsByCategory = new Map<string, TagDef[]>()
+  for (const d of defs) {
+    defsByCategory.set(d.category, [...(defsByCategory.get(d.category) ?? []), d])
+  }
 
   const createTagDef = useMutation({
-    mutationFn: (label: string) => api('/clients/tag-defs', { method: 'POST', body: JSON.stringify({ label }) }),
+    mutationFn: ({ label, category }: { label: string; category: string }) =>
+      api('/clients/tag-defs', { method: 'POST', body: JSON.stringify({ label, category }) }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['client-tag-defs'] }),
     onError: (e: Error) => toast.error(e.message),
   })
-  const renameTagDef = useMutation({
-    mutationFn: ({ oldLabel, newLabel }: { oldLabel: string; newLabel: string }) =>
-      api(`/clients/tag-defs/${encodeURIComponent(oldLabel)}`, { method: 'PATCH', body: JSON.stringify({ label: newLabel }) }),
+  const updateTagDef = useMutation({
+    mutationFn: ({ label, newLabel, newCategory }: { label: string; newLabel?: string; newCategory?: string }) =>
+      api(`/clients/tag-defs/${encodeURIComponent(label)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ label: newLabel, category: newCategory }),
+      }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['client-tag-defs'] })
       qc.invalidateQueries({ queryKey: ['client-segments'] })
@@ -159,9 +188,12 @@ export default function ClientsPage() {
   })
   const deleteTagDef = useMutation({
     mutationFn: (label: string) => api(`/clients/tag-defs/${encodeURIComponent(label)}`, { method: 'DELETE' }),
-    onSuccess: () => {
+    onSuccess: (_data, deletedLabel) => {
       qc.invalidateQueries({ queryKey: ['client-tag-defs'] })
       qc.invalidateQueries({ queryKey: ['client-segments'] })
+      // A filter stuck on a now-gone label would silently match nothing —
+      // reset it instead of leaving staff staring at an empty table.
+      setTagFilter((f) => (f === deletedLabel ? 'all' : f))
     },
     onError: (e: Error) => toast.error(e.message),
   })
@@ -181,6 +213,7 @@ export default function ClientsPage() {
   }
   const onQueryChange = resetToFirstPage(setQuery)
   const onSegmentFilterChange = resetToFirstPage(setSegmentFilter)
+  const onTagFilterChange = resetToFirstPage(setTagFilter)
   const onSortKeyChange = resetToFirstPage(setSortKey)
 
   return (
@@ -204,15 +237,16 @@ export default function ClientsPage() {
 
         {manageTagsOpen && (
           <ManageTagsPanel
-            defs={tagDefs.data?.items ?? []}
-            loading={tagDefs.isLoading}
-            onCreate={(label) => createTagDef.mutate(label)}
-            onRename={(oldLabel, newLabel) => renameTagDef.mutate({ oldLabel, newLabel })}
+            categories={categories}
+            defsByCategory={defsByCategory}
+            onCreate={(label, category) => createTagDef.mutate({ label, category })}
+            onRenameLabel={(label, newLabel) => updateTagDef.mutate({ label, newLabel })}
+            onMoveCategory={(label, newCategory) => updateTagDef.mutate({ label, newCategory })}
             onDelete={(label) => deleteTagDef.mutate(label)}
           />
         )}
 
-        <div className='mb-4 flex flex-wrap gap-2'>
+        <div className='mb-3 flex flex-wrap gap-2'>
           <SegmentPill active={segmentFilter === 'all'} onClick={() => onSegmentFilterChange('all')}>
             Все ({totalAll})
           </SegmentPill>
@@ -227,6 +261,29 @@ export default function ClientsPage() {
             </SegmentPill>
           ))}
         </div>
+
+        {defs.length > 0 && (
+          <div className='mb-4 flex flex-wrap items-center gap-x-4 gap-y-1.5 border-t border-gray-100 pt-3'>
+            <TagFilterPill active={tagFilter === 'all'} onClick={() => onTagFilterChange('all')}>
+              Все теги
+            </TagFilterPill>
+            {categories.map((category) => (
+              <div key={category} className='flex items-center gap-1.5'>
+                <span className='text-[11px] whitespace-nowrap text-gray-400'>{category}:</span>
+                {(defsByCategory.get(category) ?? []).map((d) => (
+                  <TagFilterPill
+                    key={d.label}
+                    active={tagFilter === d.label}
+                    onClick={() => onTagFilterChange(d.label)}
+                    colorClass={categoryColorClass(category, categories)}
+                  >
+                    {d.label}
+                  </TagFilterPill>
+                ))}
+              </div>
+            ))}
+          </div>
+        )}
 
         <div className='mb-4 flex items-center justify-between gap-4'>
           <Input
@@ -301,7 +358,8 @@ export default function ClientsPage() {
                       <TagsCell
                         tags={c.tags}
                         manualTags={c.manual_tags}
-                        availableTags={tagDefLabels}
+                        categories={categories}
+                        defsByCategory={defsByCategory}
                         pending={addTag.isPending || removeTag.isPending}
                         onAdd={(tag) => addTag.mutate({ id: c.client_id, tag })}
                         onRemove={(tag) => removeTag.mutate({ id: c.client_id, tag })}
@@ -384,26 +442,37 @@ function SortableHeader({
 }
 
 // TagsCell renders the four auto-computed tags read-only, every manual tag
-// as a removable chip, and a dropdown to add one more — the dropdown only
-// ever offers labels from the curated vocabulary (client_tag_defs), never
-// free text, so a tag can't drift into a one-off spelling. The vocabulary
-// itself is managed separately, see ManageTagsPanel.
+// as a chip colored by its category, and a grouped dropdown (native
+// <select> with one <optgroup> per category — keeps the picker inside the
+// browser's own floating layer, so it can't be clipped by the table's
+// horizontal scroll container the way a hand-built popover could) to add
+// one more. The dropdown only ever offers labels from the curated
+// vocabulary, never free text — see ManageTagsPanel for managing the list
+// itself.
 function TagsCell({
   tags,
   manualTags,
-  availableTags,
+  categories,
+  defsByCategory,
   onAdd,
   onRemove,
   pending,
 }: {
   tags: string[]
   manualTags: string[]
-  availableTags: string[]
+  categories: string[]
+  defsByCategory: Map<string, TagDef[]>
   onAdd: (tag: string) => void
   onRemove: (tag: string) => void
   pending: boolean
 }) {
-  const remaining = availableTags.filter((t) => !manualTags.includes(t))
+  const labelToCategory = new Map<string, string>()
+  for (const [category, defs] of defsByCategory) {
+    for (const d of defs) labelToCategory.set(d.label, category)
+  }
+  const hasRemaining = categories.some((category) =>
+    (defsByCategory.get(category) ?? []).some((d) => !manualTags.includes(d.label))
+  )
 
   return (
     <div className='flex flex-wrap items-center gap-1'>
@@ -415,7 +484,10 @@ function TagsCell({
       {manualTags.map((t) => (
         <span
           key={t}
-          className='inline-flex items-center gap-1 rounded border border-dashed border-gray-300 bg-white px-1.5 py-0.5 text-[11px] font-medium text-gray-600'
+          className={cx(
+            'inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[11px] font-medium',
+            categoryColorClass(labelToCategory.get(t) ?? '', categories)
+          )}
         >
           {t}
           <button
@@ -423,135 +495,203 @@ function TagsCell({
             disabled={pending}
             onClick={() => onRemove(t)}
             aria-label={`Убрать тег ${t}`}
-            className='leading-none text-gray-400 hover:text-rose-600 disabled:cursor-wait'
+            className='leading-none opacity-60 hover:text-rose-600 hover:opacity-100 disabled:cursor-wait'
           >
             ×
           </button>
         </span>
       ))}
-      {remaining.length > 0 && (
-        <select
-          value=''
-          disabled={pending}
-          onChange={(e) => {
-            if (e.target.value) onAdd(e.target.value)
-          }}
-          className='rounded border border-dashed border-gray-300 bg-white px-1 py-0.5 text-[11px] text-gray-400 outline-none disabled:cursor-wait'
-        >
-          <option value=''>+ тег</option>
-          {remaining.map((t) => (
-            <option key={t} value={t}>
-              {t}
-            </option>
-          ))}
-        </select>
+      {hasRemaining && (
+        <div className='relative'>
+          <select
+            value=''
+            disabled={pending}
+            onChange={(e) => {
+              if (e.target.value) onAdd(e.target.value)
+            }}
+            aria-label='Добавить тег'
+            className='cursor-pointer appearance-none rounded-full border border-gray-200 bg-gray-50 py-0.5 pr-4 pl-2 text-[11px] font-medium text-gray-500 outline-none hover:bg-gray-100 disabled:cursor-wait'
+          >
+            <option value=''>+ тег</option>
+            {categories.map((category) => {
+              const remaining = (defsByCategory.get(category) ?? []).filter((d) => !manualTags.includes(d.label))
+              if (remaining.length === 0) return null
+              return (
+                <optgroup key={category} label={category}>
+                  {remaining.map((d) => (
+                    <option key={d.label} value={d.label}>
+                      {d.label}
+                    </option>
+                  ))}
+                </optgroup>
+              )
+            })}
+          </select>
+          <span className='pointer-events-none absolute top-1/2 right-1 -translate-y-1/2 text-[9px] text-gray-400'>▾</span>
+        </div>
       )}
     </div>
   )
 }
 
-// ManageTagsPanel is the vocabulary's own CRUD — separate from TagsCell,
-// which only ever picks from it. Rename cascades to every client carrying
-// the old label (see backend clientsegments.RenameTagDef); delete removes
-// it from every client too.
+// ManageTagsPanel is the vocabulary's own CRUD, grouped by category —
+// separate from TagsCell, which only ever picks from it. Renaming a label
+// cascades to every client carrying it (see backend
+// clientsegments.UpdateTagDef); deleting one removes it from every client
+// too.
 function ManageTagsPanel({
-  defs,
-  loading,
+  categories,
+  defsByCategory,
   onCreate,
-  onRename,
+  onRenameLabel,
+  onMoveCategory,
   onDelete,
 }: {
-  defs: TagDef[]
-  loading: boolean
-  onCreate: (label: string) => void
-  onRename: (oldLabel: string, newLabel: string) => void
+  categories: string[]
+  defsByCategory: Map<string, TagDef[]>
+  onCreate: (label: string, category: string) => void
+  onRenameLabel: (label: string, newLabel: string) => void
+  onMoveCategory: (label: string, newCategory: string) => void
   onDelete: (label: string) => void
 }) {
   const [newLabel, setNewLabel] = useState('')
+  const [newCategory, setNewCategory] = useState('')
+  const [customCategory, setCustomCategory] = useState(false)
   const [editing, setEditing] = useState<string | null>(null)
   const [editValue, setEditValue] = useState('')
 
   function submitCreate() {
     const label = newLabel.trim()
+    const category = newCategory.trim()
+    if (label && category) onCreate(label, category)
     setNewLabel('')
-    if (label) onCreate(label)
+    setNewCategory('')
+    setCustomCategory(false)
   }
 
-  function submitRename(oldLabel: string) {
-    const label = editValue.trim()
+  function submitRename(label: string) {
+    const value = editValue.trim()
     setEditing(null)
-    if (label && label !== oldLabel) onRename(oldLabel, label)
+    if (value && value !== label) onRenameLabel(label, value)
   }
 
   return (
     <div className='mb-4 rounded-md border border-gray-200 bg-gray-50/60 p-3'>
-      <div className='mb-2 text-xs font-medium text-gray-500'>
-        Список тегов — переименование применяется сразу ко всем клиентам с этим тегом
+      <div className='mb-3 text-xs font-medium text-gray-500'>
+        Словарь тегов, по категориям — переименование или смена категории применяется сразу ко всем клиентам с этим
+        тегом
       </div>
-      {loading ? (
-        <p className='text-sm text-gray-400'>Загрузка…</p>
-      ) : defs.length === 0 ? (
-        <p className='mb-2 text-sm text-gray-400'>Тегов ещё нет.</p>
+
+      {categories.length === 0 ? (
+        <p className='mb-3 text-sm text-gray-400'>Тегов ещё нет.</p>
       ) : (
-        <div className='mb-2 flex flex-wrap gap-2'>
-          {defs.map((d) =>
-            editing === d.label ? (
-              <input
-                key={d.label}
-                autoFocus
-                value={editValue}
-                onChange={(e) => setEditValue(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') submitRename(d.label)
-                  if (e.key === 'Escape') setEditing(null)
-                }}
-                onBlur={() => submitRename(d.label)}
-                maxLength={40}
-                className='w-32 rounded border border-emerald-300 px-1.5 py-0.5 text-xs outline-none'
-              />
-            ) : (
-              <span
-                key={d.label}
-                className='inline-flex items-center gap-1.5 rounded border border-gray-200 bg-white px-1.5 py-0.5 text-xs text-gray-700'
-              >
-                <button
-                  type='button'
-                  onClick={() => {
-                    setEditing(d.label)
-                    setEditValue(d.label)
-                  }}
-                  className='hover:underline'
-                  title='Переименовать'
-                >
-                  {d.label}
-                </button>
-                <button
-                  type='button'
-                  onClick={() => onDelete(d.label)}
-                  aria-label={`Удалить тег ${d.label}`}
-                  className='leading-none text-gray-400 hover:text-rose-600'
-                >
-                  ×
-                </button>
-              </span>
-            )
-          )}
+        <div className='mb-3 space-y-2'>
+          {categories.map((category) => (
+            <div key={category} className='flex flex-wrap items-center gap-1.5'>
+              <span className='w-28 shrink-0 text-xs font-medium text-gray-500'>{category}</span>
+              {(defsByCategory.get(category) ?? []).map((d) =>
+                editing === d.label ? (
+                  <input
+                    key={d.label}
+                    autoFocus
+                    value={editValue}
+                    onChange={(e) => setEditValue(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') submitRename(d.label)
+                      if (e.key === 'Escape') setEditing(null)
+                    }}
+                    onBlur={() => submitRename(d.label)}
+                    maxLength={40}
+                    className='w-32 rounded border border-emerald-300 px-1.5 py-0.5 text-xs outline-none'
+                  />
+                ) : (
+                  <span
+                    key={d.label}
+                    className={cx(
+                      'inline-flex items-center gap-1.5 rounded border px-1.5 py-0.5 text-xs',
+                      categoryColorClass(category, categories)
+                    )}
+                  >
+                    <button
+                      type='button'
+                      onClick={() => {
+                        setEditing(d.label)
+                        setEditValue(d.label)
+                      }}
+                      className='hover:underline'
+                      title='Переименовать'
+                    >
+                      {d.label}
+                    </button>
+                    <select
+                      value={category}
+                      onChange={(e) => onMoveCategory(d.label, e.target.value)}
+                      title='Переместить в другую категорию'
+                      className='cursor-pointer appearance-none bg-transparent pr-2 text-xs opacity-60 outline-none hover:opacity-100'
+                    >
+                      {categories.map((c) => (
+                        <option key={c} value={c}>
+                          {c}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type='button'
+                      onClick={() => onDelete(d.label)}
+                      aria-label={`Удалить тег ${d.label}`}
+                      className='leading-none opacity-60 hover:text-rose-600 hover:opacity-100'
+                    >
+                      ×
+                    </button>
+                  </span>
+                )
+              )}
+            </div>
+          ))}
         </div>
       )}
-      <div className='flex items-center gap-2'>
+
+      <div className='flex flex-wrap items-center gap-2 border-t border-gray-200 pt-2'>
         <input
           value={newLabel}
           onChange={(e) => setNewLabel(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') submitCreate()
-          }}
           maxLength={40}
           placeholder='Новый тег…'
-          className='w-40 rounded border border-gray-200 px-1.5 py-1 text-xs outline-none focus:border-emerald-400'
+          className='w-36 rounded border border-gray-200 px-1.5 py-1 text-xs outline-none focus:border-emerald-400'
         />
+        {customCategory || categories.length === 0 ? (
+          <input
+            value={newCategory}
+            onChange={(e) => setNewCategory(e.target.value)}
+            maxLength={40}
+            placeholder='Новая категория…'
+            className='w-36 rounded border border-gray-200 px-1.5 py-1 text-xs outline-none focus:border-emerald-400'
+          />
+        ) : (
+          <select
+            value={newCategory}
+            onChange={(e) => {
+              if (e.target.value === '__new__') {
+                setCustomCategory(true)
+                setNewCategory('')
+              } else {
+                setNewCategory(e.target.value)
+              }
+            }}
+            className='rounded border border-gray-200 px-1.5 py-1 text-xs text-gray-600 outline-none'
+          >
+            <option value=''>Категория…</option>
+            {categories.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+            <option value='__new__'>+ новая категория</option>
+          </select>
+        )}
         <button
           type='button'
-          disabled={!newLabel.trim()}
+          disabled={!newLabel.trim() || !newCategory.trim()}
           onClick={submitCreate}
           className='rounded-md border border-gray-200 px-2 py-1 text-xs text-gray-600 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-40'
         >
@@ -580,6 +720,36 @@ function SegmentPill({
       className={cx(
         'rounded-full px-3 py-1 text-xs font-medium transition',
         active ? cx(colorClass || 'bg-gray-800 text-white', 'ring-2 ring-gray-300 ring-offset-1') : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+      )}
+    >
+      {children}
+    </button>
+  )
+}
+
+// TagFilterPill mirrors SegmentPill but stays outline-styled even when
+// inactive (colorClass already carries a border+bg+text triplet from
+// categoryColorClass) — a solid fill on every one of a dozen+ tags would be
+// louder than the segment row above it, which only ever has six.
+function TagFilterPill({
+  active,
+  onClick,
+  colorClass,
+  children,
+}: {
+  active: boolean
+  onClick: () => void
+  colorClass?: string
+  children: React.ReactNode
+}) {
+  return (
+    <button
+      type='button'
+      onClick={onClick}
+      className={cx(
+        'rounded-full border px-2.5 py-0.5 text-[11px] font-medium transition',
+        colorClass || 'border-gray-200 bg-white text-gray-600',
+        active ? 'ring-2 ring-gray-300 ring-offset-1' : 'opacity-70 hover:opacity-100'
       )}
     >
       {children}

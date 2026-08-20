@@ -724,7 +724,7 @@ paths:
       summary: The curated manual-tag vocabulary — AddClientTag only accepts a tag already listed here
       responses:
         "200":
-          description: Every tag definition, alphabetical
+          description: Every tag definition, grouped by category then alphabetical within it
           content:
             application/json:
               schema:
@@ -757,17 +757,17 @@ paths:
         schema:
           type: string
     patch:
-      operationId: renameClientTagDef
+      operationId: updateClientTagDef
       security:
         - bearerAuth: [ ]
       tags: [ Clients ]
-      summary: Rename a tag definition — every client carrying the old label is updated to the new one in the same operation
+      summary: Rename a tag definition and/or move it to another category — omitted fields are left as-is; a rename applies to every client carrying the old label in the same operation
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/RenameTagDefRequest"
+              $ref: "#/components/schemas/UpdateTagDefRequest"
       responses:
         "204":
           description: Renamed
@@ -1801,11 +1801,15 @@ components:
 
     TagDef:
       type: object
-      required: [ label, created_at ]
+      required: [ label, category, created_at ]
       properties:
         label:
           type: string
           maxLength: 40
+        category:
+          type: string
+          maxLength: 40
+          description: Groups defs into the two-level (category → tag) structure the picker/management UI show — free text, not a fixed enum
         created_at:
           type: string
           format: date-time
@@ -1821,20 +1825,26 @@ components:
 
     CreateTagDefRequest:
       type: object
-      required: [ label ]
+      required: [ label, category ]
       properties:
         label:
+          type: string
+          maxLength: 40
+        category:
           type: string
           maxLength: 40
 
-    RenameTagDefRequest:
+    UpdateTagDefRequest:
       type: object
-      required: [ label ]
       properties:
         label:
           type: string
           maxLength: 40
-          description: The new label
+          description: The new label — omit to leave it unchanged
+        category:
+          type: string
+          maxLength: 40
+          description: The new category — omit to leave it unchanged
 
     ClientDetailInfo:
       type: object

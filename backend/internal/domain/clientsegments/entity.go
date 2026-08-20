@@ -15,25 +15,32 @@ var ErrInvalidSort = errors.New("clientsegments: invalid sort")
 // empty or over ManualTagMaxLen.
 var ErrInvalidManualTag = errors.New("clientsegments: invalid manual tag")
 
-// AddTag against a label that isn't in client_tag_defs — the vocabulary is
-// closed, so this is the "not a valid choice" error, not a typo-tolerant one.
+// AddTag when label isn't in client_tag_defs — closed vocabulary, not typo-tolerant.
 var ErrUnknownTag = errors.New("clientsegments: unknown tag")
 
-// A CreateTagDef/RenameTagDef label collision — labels are the primary key.
+// A CreateTagDef/UpdateTagDef label collision — labels are the primary key.
 var ErrTagDefExists = errors.New("clientsegments: tag definition already exists")
 
-// RenameTagDef/DeleteTagDef against a label that isn't in the vocabulary.
+// UpdateTagDef/DeleteTagDef against a label that isn't in the vocabulary.
 var ErrTagDefNotFound = errors.New("clientsegments: tag definition not found")
 
-// keeps a manual tag a label, not a note — notes have their own field (see clientdetail).
+// keeps a manual tag (or a tag def's label/category) short — notes have
+// their own field (see clientdetail) for anything longer.
 const ManualTagMaxLen = 40
 
+// DefaultTagCategory is what a tag def gets when nothing more specific
+// applies — the vocabulary's one catch-all group.
+const DefaultTagCategory = "Інше"
+
 // TagDef is one entry in the manual-tag vocabulary — see client_tag_defs.
-// AddTag only accepts a Label already defined here (enforced by a DB FK,
-// not just application code): the whole point is a curated, stable list,
-// not whatever text a staff member happens to type.
+// AddTag only accepts a Label already defined here (enforced by a DB FK):
+// the whole point is a curated, stable list, not whatever text a staff
+// member happens to type. Category groups defs into the two-level
+// (category → tag) structure the picker and management UI both show —
+// picked freely by whoever manages the vocabulary, not a fixed enum.
 type TagDef struct {
 	Label     string
+	Category  string
 	CreatedAt time.Time
 }
 

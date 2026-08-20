@@ -111,10 +111,7 @@ func (r *ClientSegmentsRepository) SetSegmentOverride(ctx context.Context, clien
 	return nil
 }
 
-// idempotent: ON CONFLICT DO NOTHING, re-adding an existing tag is a
-// no-op, not an error. The insert touches two FKs (client_id → clients,
-// tag → client_tag_defs) — ConstraintName tells them apart, since both
-// fail with the same SQLSTATE 23503.
+// ON CONFLICT DO NOTHING (re-add = no-op); ConstraintName disambiguates the two FKs sharing SQLSTATE 23503.
 func (r *ClientSegmentsRepository) AddTag(ctx context.Context, clientID, tag, createdBy string) error {
 	const q = `INSERT INTO client_tags (client_id, tag, created_by) VALUES (@id, @tag, @by)
 		ON CONFLICT (client_id, tag) DO NOTHING`
@@ -141,7 +138,7 @@ func (r *ClientSegmentsRepository) RemoveTag(ctx context.Context, clientID, tag 
 }
 
 func (r *ClientSegmentsRepository) ListTagDefs(ctx context.Context) ([]clientsegments.TagDef, error) {
-	const q = `SELECT label, created_at FROM client_tag_defs ORDER BY label`
+	const q = `SELECT label, category, created_at FROM client_tag_defs ORDER BY category, label`
 	rows, err := r.db.Query(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("list tag defs: %w", err)
@@ -151,7 +148,7 @@ func (r *ClientSegmentsRepository) ListTagDefs(ctx context.Context) ([]clientseg
 	var out []clientsegments.TagDef
 	for rows.Next() {
 		var d clientsegments.TagDef
-		if err := rows.Scan(&d.Label, &d.CreatedAt); err != nil {
+		if err := rows.Scan(&d.Label, &d.Category, &d.CreatedAt); err != nil {
 			return nil, fmt.Errorf("list tag defs: scan: %w", err)
 		}
 		out = append(out, d)
@@ -162,9 +159,9 @@ func (r *ClientSegmentsRepository) ListTagDefs(ctx context.Context) ([]clientseg
 	return out, nil
 }
 
-func (r *ClientSegmentsRepository) CreateTagDef(ctx context.Context, label, createdBy string) error {
-	const q = `INSERT INTO client_tag_defs (label, created_by) VALUES (@label, @by)`
-	_, err := r.db.Exec(ctx, q, pgx.NamedArgs{"label": label, "by": createdBy})
+func (r *ClientSegmentsRepository) CreateTagDef(ctx context.Context, label, category, createdBy string) error {
+	const q = `INSERT INTO client_tag_defs (label, category, created_by) VALUES (@label, @category, @by)`
+	_, err := r.db.Exec(ctx, q, pgx.NamedArgs{"label": label, "category": category, "by": createdBy})
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
@@ -175,26 +172,29 @@ func (r *ClientSegmentsRepository) CreateTagDef(ctx context.Context, label, crea
 	return nil
 }
 
-func (r *ClientSegmentsRepository) RenameTagDef(ctx context.Context, oldLabel, newLabel string) error {
-	const q = `UPDATE client_tag_defs SET label = @new WHERE label = @old`
-	tag, err := r.db.Exec(ctx, q, pgx.NamedArgs{"old": oldLabel, "new": newLabel})
+// UpdateTagDef always runs the same statement — coalesce(@new, current)
+// leaves a field untouched when its pointer is nil — rather than building
+// the SET clause dynamically for what's still just two possible columns.
+func (r *ClientSegmentsRepository) UpdateTagDef(ctx context.Context, label string, newLabel, newCategory *string) error {
+	const q = `UPDATE client_tag_defs SET
+			label = coalesce(@new_label, label),
+			category = coalesce(@new_category, category)
+		WHERE label = @label`
+	tag, err := r.db.Exec(ctx, q, pgx.NamedArgs{"label": label, "new_label": newLabel, "new_category": newCategory})
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-			return fmt.Errorf("rename tag def %q: %w", oldLabel, clientsegments.ErrTagDefExists)
+			return fmt.Errorf("update tag def %q: %w", label, clientsegments.ErrTagDefExists)
 		}
-		return fmt.Errorf("rename tag def %q: %w", oldLabel, err)
+		return fmt.Errorf("update tag def %q: %w", label, err)
 	}
 	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("rename tag def %q: %w", oldLabel, clientsegments.ErrTagDefNotFound)
+		return fmt.Errorf("update tag def %q: %w", label, clientsegments.ErrTagDefNotFound)
 	}
 	return nil
 }
 
-// idempotent: deleting a label that's already gone is not an error — the
-// same ON DELETE CASCADE that lets a real delete clean up client_tags also
-// means there's nothing left to distinguish "already gone" from "just
-// removed" after the fact.
+// idempotent — ON DELETE CASCADE erases the trace, so "already gone" and "just removed" look the same.
 func (r *ClientSegmentsRepository) DeleteTagDef(ctx context.Context, label string) error {
 	const q = `DELETE FROM client_tag_defs WHERE label = @label`
 	if _, err := r.db.Exec(ctx, q, pgx.NamedArgs{"label": label}); err != nil {
