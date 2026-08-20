@@ -20,7 +20,7 @@ func TestArticleRepository_CreateAndGet(t *testing.T) {
 	repo := postgres.NewArticleRepository(testsupport.NewTestDB(t, baseConnStr))
 
 	siteID := uuid.New()
-	id, err := repo.Create(ctx, articles.CreateArticle{
+	created, err := repo.Create(ctx, articles.CreateArticle{
 		Keyword: "best running shoes",
 		SiteID:  siteID,
 		Site:    "example.com",
@@ -28,6 +28,7 @@ func TestArticleRepository_CreateAndGet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
+	id := created.ID
 	if id == 0 {
 		t.Fatalf("Create returned zero id")
 	}
@@ -85,10 +86,10 @@ func TestArticleRepository_List(t *testing.T) {
 	for _, a := range list {
 		seen[a.ID] = a.Keyword
 	}
-	if seen[first] != "alpha" {
+	if seen[first.ID] != "alpha" {
 		t.Errorf("list missing first article, got %v", seen)
 	}
-	if seen[second] != "beta" {
+	if seen[second.ID] != "beta" {
 		t.Errorf("list missing second article, got %v", seen)
 	}
 }
@@ -97,10 +98,11 @@ func TestArticleRepository_UpdateDraft(t *testing.T) {
 	ctx := context.Background()
 	repo := postgres.NewArticleRepository(testsupport.NewTestDB(t, baseConnStr))
 
-	id, err := repo.Create(ctx, articles.CreateArticle{Keyword: "draft me", SiteID: uuid.New(), Site: "d.com"})
+	created, err := repo.Create(ctx, articles.CreateArticle{Keyword: "draft me", SiteID: uuid.New(), Site: "d.com"})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
+	id := created.ID
 
 	const wpPostID = int64(4242)
 	const editURL = "https://d.com/wp-admin/post.php?post=4242&action=edit"
@@ -127,10 +129,11 @@ func TestArticleRepository_MarkPublished(t *testing.T) {
 	ctx := context.Background()
 	repo := postgres.NewArticleRepository(testsupport.NewTestDB(t, baseConnStr))
 
-	id, err := repo.Create(ctx, articles.CreateArticle{Keyword: "publish me", SiteID: uuid.New(), Site: "p.com"})
+	created, err := repo.Create(ctx, articles.CreateArticle{Keyword: "publish me", SiteID: uuid.New(), Site: "p.com"})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
+	id := created.ID
 
 	const postURL = "https://p.com/publish-me"
 	if err := repo.MarkPublished(ctx, id, postURL); err != nil {
@@ -153,10 +156,11 @@ func TestArticleRepository_MarkFailed(t *testing.T) {
 	ctx := context.Background()
 	repo := postgres.NewArticleRepository(testsupport.NewTestDB(t, baseConnStr))
 
-	id, err := repo.Create(ctx, articles.CreateArticle{Keyword: "fail me", SiteID: uuid.New(), Site: "f.com"})
+	created, err := repo.Create(ctx, articles.CreateArticle{Keyword: "fail me", SiteID: uuid.New(), Site: "f.com"})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
+	id := created.ID
 
 	if err := repo.MarkFailed(ctx, id); err != nil {
 		t.Fatalf("MarkFailed: %v", err)
@@ -175,10 +179,11 @@ func TestArticleRepository_SaveCompetitorData(t *testing.T) {
 	ctx := context.Background()
 	repo := postgres.NewArticleRepository(testsupport.NewTestDB(t, baseConnStr))
 
-	id, err := repo.Create(ctx, articles.CreateArticle{Keyword: "serp", SiteID: uuid.New(), Site: "s.com"})
+	created, err := repo.Create(ctx, articles.CreateArticle{Keyword: "serp", SiteID: uuid.New(), Site: "s.com"})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
+	id := created.ID
 
 	data := articles.CompetitorData{
 		Keyword:  "serp",
@@ -210,10 +215,11 @@ func TestArticleRepository_SaveCheckResult(t *testing.T) {
 	ctx := context.Background()
 	repo := postgres.NewArticleRepository(testsupport.NewTestDB(t, baseConnStr))
 
-	id, err := repo.Create(ctx, articles.CreateArticle{Keyword: "check", SiteID: uuid.New(), Site: "c.com"})
+	created, err := repo.Create(ctx, articles.CreateArticle{Keyword: "check", SiteID: uuid.New(), Site: "c.com"})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
+	id := created.ID
 
 	result := articles.CheckResult{AIScore: 0.12, PlagiarismScore: 0.03, Original: true, Provider: "test"}
 	if err := repo.SaveCheckResult(ctx, id, result); err != nil {
@@ -241,10 +247,11 @@ func TestArticleRepository_SaveImageStats(t *testing.T) {
 	ctx := context.Background()
 	repo := postgres.NewArticleRepository(testsupport.NewTestDB(t, baseConnStr))
 
-	id, err := repo.Create(ctx, articles.CreateArticle{Keyword: "images", SiteID: uuid.New(), Site: "i.com"})
+	created, err := repo.Create(ctx, articles.CreateArticle{Keyword: "images", SiteID: uuid.New(), Site: "i.com"})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
+	id := created.ID
 
 	if err := repo.SaveImageStats(ctx, id, 5, 3, 2); err != nil {
 		t.Fatalf("SaveImageStats: %v", err)
@@ -276,11 +283,11 @@ func TestArticleRepository_GeneratedKeywords_SiteScopedAndSkipsFailed(t *testing
 	if _, err := repo.Create(ctx, articles.CreateArticle{Keyword: "gamma", SiteID: siteB, Site: "b.com"}); err != nil {
 		t.Fatalf("Create gamma: %v", err)
 	}
-	deltaID, err := repo.Create(ctx, articles.CreateArticle{Keyword: "delta", SiteID: siteA, Site: "a.com"})
+	delta, err := repo.Create(ctx, articles.CreateArticle{Keyword: "delta", SiteID: siteA, Site: "a.com"})
 	if err != nil {
 		t.Fatalf("Create delta: %v", err)
 	}
-	if err := repo.MarkFailed(ctx, deltaID); err != nil {
+	if err := repo.MarkFailed(ctx, delta.ID); err != nil {
 		t.Fatalf("MarkFailed delta: %v", err)
 	}
 
@@ -326,10 +333,11 @@ func TestArticleRepository_Get_NoWriterOutcome_NilFields(t *testing.T) {
 	ctx := context.Background()
 	repo := postgres.NewArticleRepository(testsupport.NewTestDB(t, baseConnStr))
 
-	id, err := repo.Create(ctx, articles.CreateArticle{Keyword: "join-nil", SiteID: uuid.New(), Site: "a.com"})
+	created, err := repo.Create(ctx, articles.CreateArticle{Keyword: "join-nil", SiteID: uuid.New(), Site: "a.com"})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
+	id := created.ID
 
 	got, err := repo.Get(ctx, id)
 	if err != nil {
@@ -361,10 +369,11 @@ func TestArticleRepository_Get_WriterOutcomePopulatesInfoPanelFields(t *testing.
 	repo := postgres.NewArticleRepository(pool)
 	prompts := postgres.NewPromptRepository(pool)
 
-	id, err := repo.Create(ctx, articles.CreateArticle{Keyword: "join-full", SiteID: uuid.New(), Site: "a.com"})
+	created, err := repo.Create(ctx, articles.CreateArticle{Keyword: "join-full", SiteID: uuid.New(), Site: "a.com"})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
+	id := created.ID
 
 	if err := prompts.SaveOutcome(ctx, articles.PromptOutcome{
 		ArticleID:      id,
@@ -405,10 +414,11 @@ func TestArticleRepository_Get_IgnoresNonWriterOutcome(t *testing.T) {
 	repo := postgres.NewArticleRepository(pool)
 	prompts := postgres.NewPromptRepository(pool)
 
-	id, err := repo.Create(ctx, articles.CreateArticle{Keyword: "join-editor", SiteID: uuid.New(), Site: "a.com"})
+	created, err := repo.Create(ctx, articles.CreateArticle{Keyword: "join-editor", SiteID: uuid.New(), Site: "a.com"})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
+	id := created.ID
 
 	if err := prompts.SaveOutcome(ctx, articles.PromptOutcome{
 		ArticleID:      id,
@@ -439,10 +449,11 @@ func TestArticleRepository_Get_WriterOutcomeNullScalars(t *testing.T) {
 	repo := postgres.NewArticleRepository(pool)
 	prompts := postgres.NewPromptRepository(pool)
 
-	id, err := repo.Create(ctx, articles.CreateArticle{Keyword: "join-nullable", SiteID: uuid.New(), Site: "a.com"})
+	created, err := repo.Create(ctx, articles.CreateArticle{Keyword: "join-nullable", SiteID: uuid.New(), Site: "a.com"})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
+	id := created.ID
 
 	if err := prompts.SaveOutcome(ctx, articles.PromptOutcome{
 		ArticleID:      id,

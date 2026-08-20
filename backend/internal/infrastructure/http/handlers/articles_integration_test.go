@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -28,6 +29,16 @@ import (
 
 const itArtKnownKeyword = "android game development services"
 
+// The service resolves a site's keyword source through a provider now; this
+// hands every site the same mock sheet.
+type itArtFakeTopics struct {
+	src articles.TopicSource
+}
+
+func (f itArtFakeTopics) ForSite(context.Context, uuid.UUID, string) (articles.TopicSource, error) {
+	return f.src, nil
+}
+
 type itArtFakeLLM struct{}
 
 func (itArtFakeLLM) Complete(context.Context, string, int) (string, articles.Usage, error) {
@@ -47,16 +58,17 @@ func itArtBuild(t *testing.T) http.Handler {
 	articleRepo := postgres.NewArticleRepository(pool)
 	serp := dataforseo.NewMock()
 	topics := sheets.NewMock()
-	check, err := checker.New("mock", "", "", 0.9, nil)
+	check, err := checker.New(checker.Config{Provider: "mock", AIThreshold: 0.9}, nil)
 	if err != nil {
 		t.Fatalf("checker.New: %v", err)
 	}
 	images := pexels.New("", nil)
-	publisher := wordpress.NewProvider(postgres.NewWordpressSiteRepository(pool, "k"), nil)
+	publisher := wordpress.NewProvider(postgres.NewWordpressSiteRepository(pool, "k"), nil, 10*time.Second)
+	prompts := postgres.NewPromptRepository(pool)
 	runner := jobrunner.NewSyncRunner()
 
 	svc := apparticles.NewService(
-		articleRepo, itArtFakeFactory{}, serp, topics, check, images, publisher, runner,
+		articleRepo, itArtFakeFactory{}, serp, itArtFakeTopics{src: topics}, check, images, publisher, prompts, runner,
 		apparticles.Defaults{
 			MinWords: 300, MaxWords: 600, Language: "en",
 			Provider: "groq", Model: "m", AIThreshold: 0.9, MaxCycles: 1, SERPLimit: 5,
@@ -64,7 +76,7 @@ func itArtBuild(t *testing.T) http.Handler {
 		nil,
 	)
 
-	server := handlers.NewServer(nil, nil, nil, handlers.NewArticlesHandler(svc), handlers.NewLinkbuildingHandler(nil), handlers.NewApiTokensHandler(nil), handlers.NewEmailScrapeHandler(nil), handlers.NewLeadStatsHandler(nil), handlers.NewClientSegmentsHandler(nil), handlers.NewClientDetailHandler(nil), handlers.NewVaultHandler(nil))
+	server := handlers.NewServer(nil, nil, nil, handlers.NewArticlesHandler(svc), handlers.NewLinkbuildingHandler(nil), handlers.NewApiTokensHandler(nil), handlers.NewEmailScrapeHandler(nil), handlers.NewLeadStatsHandler(nil), handlers.NewClientSegmentsHandler(nil), handlers.NewClientDetailHandler(nil), handlers.NewVaultHandler(nil), handlers.NewFinanceHandler(nil))
 	return apihttp.NewRouter(config.ServerConfig{
 		BasePath:           "/",
 		CORSAllowedOrigins: []string{"http://localhost:3000"},
@@ -124,11 +136,12 @@ func TestItArt_GenerateAndPersist(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET /articles status = %d, want 200 (body=%s)", rec.Code, rec.Body.String())
 	}
-	var list []oapigen.Article
+	// GET /articles is paginated now: {items, total}, not a bare array.
+	var list oapigen.ArticleList
 	if err := json.NewDecoder(rec.Body).Decode(&list); err != nil {
 		t.Fatalf("decode list: %v", err)
 	}
-	if !itArtListHas(list, accepted.Id) {
+	if !itArtListHas(list.Items, accepted.Id) {
 		t.Errorf("GET /articles missing generated article id=%d", accepted.Id)
 	}
 }

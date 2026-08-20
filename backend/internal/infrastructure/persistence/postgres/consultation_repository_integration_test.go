@@ -25,10 +25,14 @@ import (
 // stray local `cmd/server` was holding the bot's long-poll lock, so every
 // write was landing in the local dev database, not prod. Kept as a
 // regression test anyway: it's a real guarantee worth pinning down.
+// any non-empty key works here: the tests only round-trip through pgcrypto,
+// they never assert the ciphertext.
+const testEncryptionKey = "test-key"
+
 func TestConsultationRepository_CreateAdvocate_VisibleFromAnotherConnection(t *testing.T) {
 	ctx := context.Background()
 	pool := testsupport.NewTestDB(t, baseConnStr)
-	repo := postgres.NewConsultationRepository(pool)
+	repo := postgres.NewConsultationRepository(pool, testEncryptionKey)
 
 	saved, err := repo.CreateAdvocate(ctx, "Ярослав Борзов")
 	if err != nil {
@@ -72,7 +76,7 @@ func TestConsultationRepository_CreateAdvocate_VisibleFromAnotherConnection(t *t
 func TestConsultationRepository_CreateAdvocate_CalledTwiceMakesTwoRows(t *testing.T) {
 	ctx := context.Background()
 	pool := testsupport.NewTestDB(t, baseConnStr)
-	repo := postgres.NewConsultationRepository(pool)
+	repo := postgres.NewConsultationRepository(pool, testEncryptionKey)
 
 	first, err := repo.CreateAdvocate(ctx, "Ярослав Борзов")
 	if err != nil {
@@ -101,7 +105,7 @@ func TestConsultationRepository_CreateAdvocate_CalledTwiceMakesTwoRows(t *testin
 func TestConsultationRepository_DeactivateAdvocate(t *testing.T) {
 	ctx := context.Background()
 	pool := testsupport.NewTestDB(t, baseConnStr)
-	repo := postgres.NewConsultationRepository(pool)
+	repo := postgres.NewConsultationRepository(pool, testEncryptionKey)
 
 	a, err := repo.CreateAdvocate(ctx, "Ярослав Борзов")
 	if err != nil {
