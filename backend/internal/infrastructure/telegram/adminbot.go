@@ -106,7 +106,11 @@ var editFieldLabel = map[editableField]string{
 // phone number to actually create the row.
 type newClientDraft struct {
 	name string
-	mode clientLookupMode
+	// phone is pre-filled only by resolveClientOrCreate's looksLikePhone
+	// branch, where the search query itself was the phone number — see
+	// there for why that path skips sendNewClientContactPicker entirely.
+	phone string
+	mode  clientLookupMode
 }
 
 // payDraft holds what /pay's wizard has collected so far while it waits on
@@ -432,7 +436,7 @@ func (b *AdminBot) handle(ctx context.Context, update tgbotapi.Update) {
 			b.send(ctx, chatID, "Введіть ім'я, юзернейм або телефон клієнта:")
 			return
 		}
-		b.searchForGroup(ctx, chatID, query)
+		b.searchForGroup(ctx, chatID, userID, query)
 		return
 
 	case strings.HasPrefix(text, "/client"):
@@ -577,6 +581,10 @@ func (b *AdminBot) handle(ctx context.Context, update tgbotapi.Update) {
 	case "new_client_telegram":
 		b.finishNewClient(ctx, chatID, userID, fl, "", "", text)
 
+	case "new_client_name_known_phone":
+		fl.newClient.name = text
+		b.finishNewClient(ctx, chatID, userID, fl, fl.newClient.phone, "", "")
+
 	case "case_fee":
 		amount, err := parseAmount(text)
 		if err != nil {
@@ -598,7 +606,7 @@ func (b *AdminBot) handle(ctx context.Context, update tgbotapi.Update) {
 
 	case "creategroup_query":
 		delete(b.flows, userID)
-		b.searchForGroup(ctx, chatID, text)
+		b.searchForGroup(ctx, chatID, userID, text)
 
 	case "client_query":
 		delete(b.flows, userID)
@@ -1280,6 +1288,18 @@ func (b *AdminBot) resolveClientOrCreate(ctx context.Context, chatID, userID int
 		return
 	}
 	if len(matches) == 0 {
+		// A query that reads as a phone number is contact info, not a
+		// name — using it as the new client's name (the branch below)
+		// silently corrupted last_name/patronymic too, since CreateClient
+		// runs it through SplitName, which reads a multi-word phone like
+		// "+49 160 95803175" as three name parts. Ask for the real name
+		// instead, with the phone already on file — one less step than
+		// the generic picker, since we already know it's a phone.
+		if looksLikePhone(query) {
+			b.flows[userID] = &flow{step: "new_client_name_known_phone", newClient: newClientDraft{phone: domainleads.NormalizePhone(query), mode: mode}}
+			b.send(ctx, chatID, fmt.Sprintf(b.tr(ctx, chatID, "Клієнта не знайдено. Телефон %s. Введіть ім'я нового клієнта:"), query))
+			return
+		}
 		b.flows[userID] = &flow{step: "new_client_contact", newClient: newClientDraft{name: query, mode: mode}}
 		b.sendNewClientContactPicker(ctx, chatID, query)
 		return
@@ -1613,7 +1633,17 @@ func (b *AdminBot) handleStatusCallback(ctx context.Context, cb *tgbotapi.Callba
 // searchForGroup is /creategroup's entry point — looks a client up by
 // whatever the staff member remembers (name, @username, phone) instead of
 // making them copy a Client ID, and offers the matches as tappable buttons.
-func (b *AdminBot) searchForGroup(ctx context.Context, chatID int64, query string) {
+func (b *AdminBot) searchForGroup(ctx context.Context, chatID, userID int64, query string) {
+	// Staff often paste an exact Client ID copied off another card —
+	// SearchClients only matches name/telegram_name/phone, never id, so
+	// without this an exact id here always came back "нічого не знайдено"
+	// even though the client exists. Same fast path /book, /case, /client
+	// and /edit already have.
+	if client, err := b.store.FindClient(ctx, query); err == nil {
+		b.sendGroupAdvocatePicker(ctx, chatID, userID, client.ID)
+		return
+	}
+
 	clients, err := b.store.SearchClients(ctx, query)
 	if err != nil {
 		b.log.ErrorContext(ctx, "telegram: search clients failed", "err", err)
@@ -1642,6 +1672,36 @@ func (b *AdminBot) searchForGroup(ctx context.Context, chatID int64, query strin
 	msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(rows...)
 	if _, err := b.bot.Send(msg); err != nil {
 		b.log.ErrorContext(ctx, "telegram: send client picker failed", "err", err)
+	}
+}
+
+// sendGroupAdvocatePicker is searchForGroup's exact-Client-ID fast path —
+// same "pick an advocate" step pickAdvocateForGroup's picker tap reaches,
+// just sent as a new message instead of replacing an existing one (there's
+// no prior picker message here to edit).
+func (b *AdminBot) sendGroupAdvocatePicker(ctx context.Context, chatID, userID int64, clientID string) {
+	advocates, err := b.store.ListAdvocates(ctx, true)
+	if err != nil {
+		b.log.ErrorContext(ctx, "telegram: creategroup: list advocates failed", "err", err)
+		b.send(ctx, chatID, "Помилка отримання адвокатів, спробуйте ще раз.")
+		return
+	}
+	if len(advocates) == 0 {
+		b.send(ctx, chatID, "Немає активних адвокатів — спочатку /advocate <ПІБ>, потім заново /creategroup.")
+		return
+	}
+	b.flows[userID] = &flow{step: "creategroup_advocate", creategroup: creategroupDraft{clientID: clientID}}
+
+	rows := make([][]tgbotapi.InlineKeyboardButton, 0, len(advocates))
+	for _, a := range advocates {
+		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(a.FullName, "crgrp:adv:"+a.ID),
+		))
+	}
+	msg := b.newMsg(ctx, chatID, "Оберіть адвоката:")
+	msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(rows...)
+	if _, err := b.bot.Send(msg); err != nil {
+		b.log.ErrorContext(ctx, "telegram: send group advocate picker failed", "err", err)
 	}
 }
 
@@ -2363,28 +2423,30 @@ var ukToRu = map[string]string{
 	"Формат: /pay &lt;Case ID&gt; &lt;сума&gt;, наприклад /pay <code>3f0b8beb-23c2-4ad4-90fb-48064c9359d4</code> 5000": "Формат: /pay &lt;Case ID&gt; &lt;сумма&gt;, например /pay <code>3f0b8beb-23c2-4ad4-90fb-48064c9359d4</code> 5000",
 
 	// /advocate, /advocates.
-	"Адвоката збережено. Перешліть йому одноразове посилання:":                 "Адвокат сохранён. Перешлите ему одноразовую ссылку:",
-	"Активні адвокати (тап — деактивувати):":                                   "Активные адвокаты (тап — деактивировать):",
-	"Немає активних адвокатів — спочатку /advocate <ПІБ>, потім заново /case.": "Нет активных адвокатов — сначала /advocate <ФИО>, потом заново /case.",
-	"Не вдалося зберегти справу, спробуйте ще раз.":                            "Не удалось сохранить дело, попробуйте ещё раз.",
-	"Не вдалося зберегти адвоката, спробуйте ще раз.":                          "Не удалось сохранить адвоката, попробуйте ещё раз.",
-	"Не вдалося отримати список адвокатів.":                                    "Не удалось получить список адвокатов.",
-	"Активних адвокатів немає. Додати: /advocate <ПІБ>":                        "Активных адвокатов нет. Добавить: /advocate <ФИО>",
-	"Помилка отримання адвокатів, спробуйте ще раз.":                           "Ошибка получения адвокатов, попробуйте ещё раз.",
-	"Оберіть адвоката, який веде справу:":                                      "Выберите адвоката, который ведёт дело:",
-	"Оберіть адвоката:":                                                        "Выберите адвоката:",
-	"Адвоката не знайдено":                                                     "Адвоката не найдено",
-	"Немає активних адвокатів":                                                 "Нет активных адвокатов",
-	"У адвоката немає юзернейму":                                               "У адвоката нет юзернейма",
-	"Не можу створити групу: у адвоката немає @username.":                      "Не могу создать группу: у адвоката нет @username.",
-	"Немає жодного активного адвоката — спочатку /advocate":                    "Нет ни одного активного адвоката — сначала /advocate",
-	"Деактивовано":                               "Деактивировано",
-	"Не вдалося деактивувати":                    "Не удалось деактивировать",
-	"Деактивовано ✅ (старі справи не змінились)": "Деактивировано ✅ (старые дела не изменились)",
+	"Адвоката збережено. Перешліть йому одноразове посилання:":                        "Адвокат сохранён. Перешлите ему одноразовую ссылку:",
+	"Активні адвокати (тап — деактивувати):":                                          "Активные адвокаты (тап — деактивировать):",
+	"Немає активних адвокатів — спочатку /advocate <ПІБ>, потім заново /case.":        "Нет активных адвокатов — сначала /advocate <ФИО>, потом заново /case.",
+	"Немає активних адвокатів — спочатку /advocate <ПІБ>, потім заново /creategroup.": "Нет активных адвокатов — сначала /advocate <ФИО>, потом заново /creategroup.",
+	"Не вдалося зберегти справу, спробуйте ще раз.":                                   "Не удалось сохранить дело, попробуйте ещё раз.",
+	"Не вдалося зберегти адвоката, спробуйте ще раз.":                                 "Не удалось сохранить адвоката, попробуйте ещё раз.",
+	"Не вдалося отримати список адвокатів.":                                           "Не удалось получить список адвокатов.",
+	"Активних адвокатів немає. Додати: /advocate <ПІБ>":                               "Активных адвокатов нет. Добавить: /advocate <ФИО>",
+	"Помилка отримання адвокатів, спробуйте ще раз.":                                  "Ошибка получения адвокатов, попробуйте ещё раз.",
+	"Оберіть адвоката, який веде справу:":                                             "Выберите адвоката, который ведёт дело:",
+	"Оберіть адвоката:":                                     "Выберите адвоката:",
+	"Адвоката не знайдено":                                  "Адвоката не найдено",
+	"Немає активних адвокатів":                              "Нет активных адвокатов",
+	"У адвоката немає юзернейму":                            "У адвоката нет юзернейма",
+	"Не можу створити групу: у адвоката немає @username.":   "Не могу создать группу: у адвоката нет @username.",
+	"Немає жодного активного адвоката — спочатку /advocate": "Нет ни одного активного адвоката — сначала /advocate",
+	"Деактивовано":                                          "Деактивировано",
+	"Не вдалося деактивувати":                               "Не удалось деактивировать",
+	"Деактивовано ✅ (старі справи не змінились)":            "Деактивировано ✅ (старые дела не изменились)",
 
 	// /book, /case shared client lookup.
 	"Кілька збігів, оберіть клієнта:":                                      "Несколько совпадений, выберите клиента:",
 	"Клієнта не знайдено. Створити нового на ім'я «%s»? Що є з контактів?": "Клиента не найдено. Создать нового на имя «%s»? Что есть из контактов?",
+	"Клієнта не знайдено. Телефон %s. Введіть ім'я нового клієнта:":        "Клиента не найдено. Телефон %s. Введите имя нового клиента:",
 	"📞 Телефон":           "📞 Телефон",
 	"✉️ Email":            "✉️ Email",
 	"💬 Telegram":          "💬 Telegram",
@@ -2514,6 +2576,25 @@ func buildConsultText(name, date, timeStr string, amount float64) string {
 З повагою, ТОВ «Абаліс».`,
 		html.EscapeString(name), html.EscapeString(timeStr), html.EscapeString(date), amountInt, words, amountInt, offerLink,
 	)
+}
+
+// looksLikePhone reports whether s reads as a phone number rather than a
+// name — mostly digits, plus the punctuation phone numbers commonly carry
+// (+, spaces, dashes, parens) — used by resolveClientOrCreate so a phone
+// typed as the search query isn't mistaken for the new client's name.
+func looksLikePhone(s string) bool {
+	digits, other := 0, 0
+	for _, r := range s {
+		switch {
+		case r >= '0' && r <= '9':
+			digits++
+		case r == '+' || r == '-' || r == '(' || r == ')' || r == ' ':
+			// phone punctuation — neither counts against it
+		default:
+			other++
+		}
+	}
+	return digits >= 6 && other == 0
 }
 
 func parseAmount(s string) (float64, error) {
