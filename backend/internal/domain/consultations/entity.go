@@ -95,6 +95,29 @@ func ComposeName(lastName, firstName, patronymic string) string {
 	return strings.Join(parts, " ")
 }
 
+// SplitName is ComposeName's inverse — every place a name arrives as one
+// free-text field (client typed "ПІБ" in /request or /intake, staff typed
+// it while creating a client in /book) but needs to land in the structured
+// last_name/first_name/patronymic columns the web CRM's client card edits.
+// Without this, the whole string used to pile into one field (first_name)
+// and the card looked broken. Same Прізвище Ім'я По батькові order as
+// ComposeName: first word is the surname, second the given name, anything
+// after that the patronymic — except a single bare word, which is read as
+// a given name (most self-booking clients type just that), not a surname.
+func SplitName(raw string) (lastName, firstName, patronymic string) {
+	parts := strings.Fields(raw)
+	switch len(parts) {
+	case 0:
+		return "", "", ""
+	case 1:
+		return "", parts[0], ""
+	case 2:
+		return parts[0], parts[1], ""
+	default:
+		return parts[0], parts[1], strings.Join(parts[2:], " ")
+	}
+}
+
 type ReminderTarget struct {
 	Consultation Consultation
 	Client       Client

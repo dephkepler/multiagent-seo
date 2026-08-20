@@ -7,6 +7,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"multiagent-seo/internal/domain/consultations"
 	"multiagent-seo/internal/domain/webleads"
 )
 
@@ -23,15 +24,26 @@ func (r *LeadRepository) ResolveClient(ctx context.Context, phone, name string) 
 		return "", nil
 	}
 
-	const q = `INSERT INTO clients (phone, name)
-		VALUES (@phone, @name)
+	// last_name/first_name/patronymic are the web CRM client card's
+	// structured fields — a lead's name arrives as one free-text string,
+	// so it's split once here instead of leaving those columns blank
+	// forever (see SplitName). Only set on a fresh INSERT: the ON CONFLICT
+	// branch never touches them, so a manual correction made later on the
+	// client card is never overwritten by a repeat lead from the same phone.
+	lastName, firstName, patronymic := consultations.SplitName(name)
+
+	const q = `INSERT INTO clients (phone, name, last_name, first_name, patronymic)
+		VALUES (@phone, @name, @last_name, @first_name, @patronymic)
 		ON CONFLICT (phone) DO UPDATE SET
 			last_seen_at = now(),
 			name = CASE WHEN @name = '' THEN clients.name ELSE @name END
 		RETURNING id`
 
 	var id string
-	err := r.db.QueryRow(ctx, q, pgx.NamedArgs{"phone": phone, "name": name}).Scan(&id)
+	err := r.db.QueryRow(ctx, q, pgx.NamedArgs{
+		"phone": phone, "name": name,
+		"last_name": lastName, "first_name": firstName, "patronymic": patronymic,
+	}).Scan(&id)
 	if err != nil {
 		return "", fmt.Errorf("resolve client %q: %w", phone, err)
 	}

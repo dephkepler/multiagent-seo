@@ -159,18 +159,38 @@ interface ClientForm {
   birthdate: string
   taxId: string
 }
+// Splits a raw "Прізвище Ім'я По батькові" string (Ukrainian legal/business
+// name order) into its three parts — mirrors consultations.SplitName on
+// the backend, which now seeds last_name/first_name/patronymic this way
+// for every *new* client created through the bot. This client-side twin
+// only matters for clients created *before* that fix, whose structured
+// fields are still blank with everything sitting in the single `name`
+// field — falling back to dumping the whole string into first_name (the
+// previous behavior here) looked exactly as broken as the bug this is
+// fixing. A single bare word is read as a given name, not a surname —
+// most self-booking clients type just that.
+function splitName(raw: string): { lastName: string; firstName: string; patronymic: string } {
+  const parts = raw.trim().split(/\s+/).filter(Boolean)
+  if (parts.length === 0) return { lastName: '', firstName: '', patronymic: '' }
+  if (parts.length === 1) return { lastName: '', firstName: parts[0], patronymic: '' }
+  if (parts.length === 2) return { lastName: parts[0], firstName: parts[1], patronymic: '' }
+  return { lastName: parts[0], firstName: parts[1], patronymic: parts.slice(2).join(' ') }
+}
+
 // Clients created through the bot/lead form only ever get the single
 // combined `name` written (see webleads.ResolveClient) — the structured
 // last_name/first_name/patronymic fields the card actually edits stay
-// blank forever unless something seeds them. Falling first_name back to
-// name when it's empty means the name is at least visible instead of a
-// blank field next to a client the CRM clearly already knows the name
-// of — and saving the card (even for an unrelated field) now writes it
-// into first_name for real, fixing the record going forward.
+// blank forever unless something seeds them. Falling back to name (split,
+// same as the backend now does for new clients) means the name is at
+// least visible instead of a blank field next to a client the CRM clearly
+// already knows the name of — and saving the card (even for an unrelated
+// field) now writes it into first_name/last_name for real, fixing the
+// record going forward.
 function toForm(c: ClientDetailInfo): ClientForm {
+  const fallback = c.first_name || c.last_name ? null : splitName(c.name)
   return {
-    lastName: c.last_name,
-    firstName: c.first_name || c.name,
+    lastName: c.last_name || fallback?.lastName || '',
+    firstName: c.first_name || fallback?.firstName || '',
     patronymic: c.patronymic,
     phone: c.phone,
     gender: c.gender,

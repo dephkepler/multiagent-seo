@@ -70,28 +70,40 @@ func (r *ConsultationRepository) SearchClients(ctx context.Context, query string
 // index on phone (see migration 000040) only applies to non-empty phones,
 // so any number of "no phone" clients can coexist without colliding.
 func (r *ConsultationRepository) CreateClient(ctx context.Context, name, phone, email, telegramName string) (consultations.Client, error) {
+	// last_name/first_name/patronymic are the client card's structured
+	// fields — name arrives as one free-text string here, so it's split
+	// once at creation instead of leaving those columns blank forever (see
+	// SplitName). Only set on a fresh INSERT: the ON CONFLICT branch below
+	// never touches them, so a manual correction made later on the client
+	// card is never overwritten by a repeat /book with the same phone.
+	lastName, firstName, patronymic := consultations.SplitName(name)
+
 	if phone != "" {
-		const q = `INSERT INTO clients (phone, name)
-			VALUES (@phone, @name)
+		const q = `INSERT INTO clients (phone, name, last_name, first_name, patronymic)
+			VALUES (@phone, @name, @last_name, @first_name, @patronymic)
 			ON CONFLICT (phone) DO UPDATE SET
 				last_seen_at = now(),
 				name = CASE WHEN @name = '' THEN clients.name ELSE @name END
 			RETURNING id, name, coalesce(phone, ''), coalesce(telegram_name, '')`
 		var c consultations.Client
-		err := r.db.QueryRow(ctx, q, pgx.NamedArgs{"phone": phone, "name": name}).
-			Scan(&c.ID, &c.Name, &c.Phone, &c.TelegramName)
+		err := r.db.QueryRow(ctx, q, pgx.NamedArgs{
+			"phone": phone, "name": name,
+			"last_name": lastName, "first_name": firstName, "patronymic": patronymic,
+		}).Scan(&c.ID, &c.Name, &c.Phone, &c.TelegramName)
 		if err != nil {
 			return consultations.Client{}, fmt.Errorf("create client %q: %w", name, err)
 		}
 		return c, nil
 	}
 
-	const q = `INSERT INTO clients (name, email, telegram_name)
-		VALUES (@name, @email, @telegram_name)
+	const q = `INSERT INTO clients (name, email, telegram_name, last_name, first_name, patronymic)
+		VALUES (@name, @email, @telegram_name, @last_name, @first_name, @patronymic)
 		RETURNING id, name, coalesce(phone, ''), coalesce(telegram_name, '')`
 	var c consultations.Client
-	err := r.db.QueryRow(ctx, q, pgx.NamedArgs{"name": name, "email": email, "telegram_name": telegramName}).
-		Scan(&c.ID, &c.Name, &c.Phone, &c.TelegramName)
+	err := r.db.QueryRow(ctx, q, pgx.NamedArgs{
+		"name": name, "email": email, "telegram_name": telegramName,
+		"last_name": lastName, "first_name": firstName, "patronymic": patronymic,
+	}).Scan(&c.ID, &c.Name, &c.Phone, &c.TelegramName)
 	if err != nil {
 		return consultations.Client{}, fmt.Errorf("create client %q: %w", name, err)
 	}
