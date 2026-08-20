@@ -12,11 +12,30 @@ var ErrInvalidSegment = errors.New("clientsegments: invalid segment")
 var ErrNotFound = errors.New("clientsegments: client not found")
 var ErrInvalidSort = errors.New("clientsegments: invalid sort")
 
-// empty or over ManualTagMaxLen — free text, so no fixed-value set to validate against.
+// empty or over ManualTagMaxLen.
 var ErrInvalidManualTag = errors.New("clientsegments: invalid manual tag")
+
+// AddTag against a label that isn't in client_tag_defs — the vocabulary is
+// closed, so this is the "not a valid choice" error, not a typo-tolerant one.
+var ErrUnknownTag = errors.New("clientsegments: unknown tag")
+
+// A CreateTagDef/RenameTagDef label collision — labels are the primary key.
+var ErrTagDefExists = errors.New("clientsegments: tag definition already exists")
+
+// RenameTagDef/DeleteTagDef against a label that isn't in the vocabulary.
+var ErrTagDefNotFound = errors.New("clientsegments: tag definition not found")
 
 // keeps a manual tag a label, not a note — notes have their own field (see clientdetail).
 const ManualTagMaxLen = 40
+
+// TagDef is one entry in the manual-tag vocabulary — see client_tag_defs.
+// AddTag only accepts a Label already defined here (enforced by a DB FK,
+// not just application code): the whole point is a curated, stable list,
+// not whatever text a staff member happens to type.
+type TagDef struct {
+	Label     string
+	CreatedAt time.Time
+}
 
 const (
 	SegmentLead      = "lead"

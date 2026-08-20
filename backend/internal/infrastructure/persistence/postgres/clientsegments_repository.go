@@ -111,7 +111,10 @@ func (r *ClientSegmentsRepository) SetSegmentOverride(ctx context.Context, clien
 	return nil
 }
 
-// idempotent: ON CONFLICT DO NOTHING, re-adding an existing tag is a no-op, not an error
+// idempotent: ON CONFLICT DO NOTHING, re-adding an existing tag is a
+// no-op, not an error. The insert touches two FKs (client_id → clients,
+// tag → client_tag_defs) — ConstraintName tells them apart, since both
+// fail with the same SQLSTATE 23503.
 func (r *ClientSegmentsRepository) AddTag(ctx context.Context, clientID, tag, createdBy string) error {
 	const q = `INSERT INTO client_tags (client_id, tag, created_by) VALUES (@id, @tag, @by)
 		ON CONFLICT (client_id, tag) DO NOTHING`
@@ -119,6 +122,9 @@ func (r *ClientSegmentsRepository) AddTag(ctx context.Context, clientID, tag, cr
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23503" {
+			if pgErr.ConstraintName == "client_tags_tag_fkey" {
+				return fmt.Errorf("add tag %q for %q: %w", tag, clientID, clientsegments.ErrUnknownTag)
+			}
 			return fmt.Errorf("add tag %q for %q: %w", tag, clientID, clientsegments.ErrNotFound)
 		}
 		return fmt.Errorf("add tag %q for %q: %w", tag, clientID, err)
@@ -130,6 +136,69 @@ func (r *ClientSegmentsRepository) RemoveTag(ctx context.Context, clientID, tag 
 	const q = `DELETE FROM client_tags WHERE client_id = @id AND tag = @tag`
 	if _, err := r.db.Exec(ctx, q, pgx.NamedArgs{"id": clientID, "tag": tag}); err != nil {
 		return fmt.Errorf("remove tag %q for %q: %w", tag, clientID, err)
+	}
+	return nil
+}
+
+func (r *ClientSegmentsRepository) ListTagDefs(ctx context.Context) ([]clientsegments.TagDef, error) {
+	const q = `SELECT label, created_at FROM client_tag_defs ORDER BY label`
+	rows, err := r.db.Query(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("list tag defs: %w", err)
+	}
+	defer rows.Close()
+
+	var out []clientsegments.TagDef
+	for rows.Next() {
+		var d clientsegments.TagDef
+		if err := rows.Scan(&d.Label, &d.CreatedAt); err != nil {
+			return nil, fmt.Errorf("list tag defs: scan: %w", err)
+		}
+		out = append(out, d)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list tag defs: %w", err)
+	}
+	return out, nil
+}
+
+func (r *ClientSegmentsRepository) CreateTagDef(ctx context.Context, label, createdBy string) error {
+	const q = `INSERT INTO client_tag_defs (label, created_by) VALUES (@label, @by)`
+	_, err := r.db.Exec(ctx, q, pgx.NamedArgs{"label": label, "by": createdBy})
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return fmt.Errorf("create tag def %q: %w", label, clientsegments.ErrTagDefExists)
+		}
+		return fmt.Errorf("create tag def %q: %w", label, err)
+	}
+	return nil
+}
+
+func (r *ClientSegmentsRepository) RenameTagDef(ctx context.Context, oldLabel, newLabel string) error {
+	const q = `UPDATE client_tag_defs SET label = @new WHERE label = @old`
+	tag, err := r.db.Exec(ctx, q, pgx.NamedArgs{"old": oldLabel, "new": newLabel})
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return fmt.Errorf("rename tag def %q: %w", oldLabel, clientsegments.ErrTagDefExists)
+		}
+		return fmt.Errorf("rename tag def %q: %w", oldLabel, err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("rename tag def %q: %w", oldLabel, clientsegments.ErrTagDefNotFound)
+	}
+	return nil
+}
+
+// idempotent: deleting a label that's already gone is not an error — the
+// same ON DELETE CASCADE that lets a real delete clean up client_tags also
+// means there's nothing left to distinguish "already gone" from "just
+// removed" after the fact.
+func (r *ClientSegmentsRepository) DeleteTagDef(ctx context.Context, label string) error {
+	const q = `DELETE FROM client_tag_defs WHERE label = @label`
+	if _, err := r.db.Exec(ctx, q, pgx.NamedArgs{"label": label}); err != nil {
+		return fmt.Errorf("delete tag def %q: %w", label, err)
 	}
 	return nil
 }

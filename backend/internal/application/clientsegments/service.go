@@ -28,7 +28,8 @@ func (s *Service) List(ctx context.Context, filter domain.ListFilter) (domain.Cl
 	if filter.Segment != "" && !domain.IsSegment(filter.Segment) {
 		return domain.ClientList{}, fmt.Errorf("clientsegments: list: %w: %q", domain.ErrInvalidSegment, filter.Segment)
 	}
-	// Tag isn't validated — manual tags are free text; unknown values just match nothing.
+	// Tag isn't validated against client_tag_defs — a filter for a tag
+	// that's since been renamed/deleted should just match nothing, not error.
 	if filter.Sort != "" && filter.Sort != domain.SortActivity && filter.Sort != domain.SortLTV {
 		return domain.ClientList{}, fmt.Errorf("clientsegments: list: %w: %q", domain.ErrInvalidSort, filter.Sort)
 	}
@@ -99,9 +100,13 @@ func (s *Service) SetOverride(ctx context.Context, clientID string, segment *str
 	return nil
 }
 
+// AddTag no longer accepts arbitrary text — tag must already be in
+// client_tag_defs (enforced by the DB FK; ErrUnknownTag surfaces a
+// violation there). The trim/empty check here is just defense in depth for
+// a client that skips the picker and posts raw text.
 func (s *Service) AddTag(ctx context.Context, clientID, tag, createdBy string) error {
 	tag = strings.TrimSpace(tag)
-	if tag == "" || utf8.RuneCountInString(tag) > domain.ManualTagMaxLen {
+	if tag == "" {
 		return fmt.Errorf("clientsegments: add tag: %w: %q", domain.ErrInvalidManualTag, tag)
 	}
 	if err := s.repo.AddTag(ctx, clientID, tag, createdBy); err != nil {
@@ -126,4 +131,41 @@ func (s *Service) Tags(ctx context.Context, clientID string) ([]string, error) {
 		return nil, fmt.Errorf("clientsegments: tags: %w", domain.ErrNotFound)
 	}
 	return list.Items[0].ManualTags, nil
+}
+
+func (s *Service) ListTagDefs(ctx context.Context) ([]domain.TagDef, error) {
+	defs, err := s.repo.ListTagDefs(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("clientsegments: list tag defs: %w", err)
+	}
+	return defs, nil
+}
+
+func (s *Service) CreateTagDef(ctx context.Context, label, createdBy string) error {
+	label = strings.TrimSpace(label)
+	if label == "" || utf8.RuneCountInString(label) > domain.ManualTagMaxLen {
+		return fmt.Errorf("clientsegments: create tag def: %w: %q", domain.ErrInvalidManualTag, label)
+	}
+	if err := s.repo.CreateTagDef(ctx, label, createdBy); err != nil {
+		return fmt.Errorf("clientsegments: create tag def: %w", err)
+	}
+	return nil
+}
+
+func (s *Service) RenameTagDef(ctx context.Context, oldLabel, newLabel string) error {
+	newLabel = strings.TrimSpace(newLabel)
+	if newLabel == "" || utf8.RuneCountInString(newLabel) > domain.ManualTagMaxLen {
+		return fmt.Errorf("clientsegments: rename tag def: %w: %q", domain.ErrInvalidManualTag, newLabel)
+	}
+	if err := s.repo.RenameTagDef(ctx, oldLabel, newLabel); err != nil {
+		return fmt.Errorf("clientsegments: rename tag def: %w", err)
+	}
+	return nil
+}
+
+func (s *Service) DeleteTagDef(ctx context.Context, label string) error {
+	if err := s.repo.DeleteTagDef(ctx, label); err != nil {
+		return fmt.Errorf("clientsegments: delete tag def: %w", err)
+	}
+	return nil
 }

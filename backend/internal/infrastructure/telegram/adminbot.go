@@ -7,6 +7,7 @@ import (
 	"html"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -14,6 +15,7 @@ import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 
 	"multiagent-seo/internal/domain/cases"
+	"multiagent-seo/internal/domain/clientsegments"
 	"multiagent-seo/internal/domain/consultations"
 	domainleads "multiagent-seo/internal/domain/webleads"
 )
@@ -31,6 +33,9 @@ type ClientTagger interface {
 	AddTag(ctx context.Context, clientID, tag, createdBy string) error
 	RemoveTag(ctx context.Context, clientID, tag string) error
 	Tags(ctx context.Context, clientID string) ([]string, error)
+	// ListTagDefs returns the curated tag vocabulary — /tags' "add" picker
+	// only ever offers these, never a free-text prompt (see sendAddTagPicker).
+	ListTagDefs(ctx context.Context) ([]clientsegments.TagDef, error)
 }
 
 type AdminBot struct {
@@ -72,7 +77,8 @@ type editClientDraft struct {
 
 // clientID lives here, not callback_data — a tag's own text can contain ':' and exceed the 64-byte limit
 type tagsDraft struct {
-	clientID string
+	clientID   string
+	clientName string
 }
 
 type editableField string
@@ -594,11 +600,6 @@ func (b *AdminBot) handle(ctx context.Context, update tgbotapi.Update) {
 	case "tags_client_query":
 		delete(b.flows, userID)
 		b.searchClientForTags(ctx, chatID, userID, text)
-
-	case "tags_new_value":
-		clientID := fl.tags.clientID
-		delete(b.flows, userID)
-		b.applyAddTag(ctx, chatID, userID, clientID, text)
 	}
 }
 
@@ -716,7 +717,7 @@ const helpText = `📖 <b>Довідка по командах бота</b>
 <b>👤 Клієнти</b>
 /client &lt;ім'я/телефон/ID&gt; — знайти клієнта: картка з усіма ID (клієнт/консультація/справи), історія оплат, посилання на CRM.
 /edit — виправити ім'я/телефон/email клієнта покроково, кнопками.
-/tags — мітки клієнта вручну: додати свою або прибрати (окремо від автоматичних — боржник/ризик неявки тощо).
+/tags — мітки клієнта вручну: додати з готового списку або прибрати (окремо від автоматичних — боржник/ризик неявки тощо).
 /book &lt;ім'я/телефон/ID&gt; — записати на консультацію. Клієнта нема в базі — бот сам запропонує завести нового.
 
 <b>📁 Справи</b>
@@ -1469,7 +1470,11 @@ func (b *AdminBot) handleCallback(ctx context.Context, cb *tgbotapi.CallbackQuer
 	case "tagdel":
 		b.pickRemoveTag(ctx, cb, rest)
 	case "tagadd":
-		b.pickAddTagPrompt(ctx, cb)
+		b.pickShowAddTagPicker(ctx, cb)
+	case "tagset":
+		b.pickSetTag(ctx, cb, rest)
+	case "tagback":
+		b.pickTagsBack(ctx, cb)
 	default:
 		b.answerCallback(ctx, cb, "")
 	}
@@ -1808,20 +1813,15 @@ func (b *AdminBot) pickClientForTags(ctx context.Context, cb *tgbotapi.CallbackQ
 	b.sendTagsMenu(ctx, cb.Message.Chat.ID, cb.From.ID, client.ID, client.Name)
 }
 
-func (b *AdminBot) sendTagsMenu(ctx context.Context, chatID, userID int64, clientID, clientName string) {
-	if b.tags == nil {
-		b.send(ctx, chatID, "Мітки клієнта недоступні.")
-		return
-	}
+// renderTagsMenu builds /tags' main screen (current tags as "❌ <tag>"
+// removal buttons, plus "➕ Додати тег") — shared by sendTagsMenu (first
+// send) and refreshTagsMenu (edit-in-place after remove/add/back), so the
+// two can't drift apart.
+func (b *AdminBot) renderTagsMenu(ctx context.Context, chatID int64, clientID, clientName string) (string, tgbotapi.InlineKeyboardMarkup, error) {
 	tags, err := b.tags.Tags(ctx, clientID)
 	if err != nil {
-		b.log.ErrorContext(ctx, "telegram: tags: list failed", "client_id", clientID, "err", err)
-		b.send(ctx, chatID, "Помилка отримання міток, спробуйте ще раз.")
-		return
+		return "", tgbotapi.InlineKeyboardMarkup{}, err
 	}
-
-	b.flows[userID] = &flow{step: "tags_menu", tags: tagsDraft{clientID: clientID}}
-
 	rows := make([][]tgbotapi.InlineKeyboardButton, 0, len(tags)+1)
 	for _, t := range tags {
 		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
@@ -1831,15 +1831,48 @@ func (b *AdminBot) sendTagsMenu(ctx context.Context, chatID, userID int64, clien
 	rows = append(rows, tgbotapi.NewInlineKeyboardRow(
 		tgbotapi.NewInlineKeyboardButtonData(b.tr(ctx, chatID, "➕ Додати тег"), "tagadd"),
 	))
-
 	text := fmt.Sprintf(b.tr(ctx, chatID, "🏷 Мітки клієнта: %s"), clientName)
 	if len(tags) == 0 {
 		text += "\n" + b.tr(ctx, chatID, "Міток ще немає.")
 	}
+	return text, tgbotapi.NewInlineKeyboardMarkup(rows...), nil
+}
+
+func (b *AdminBot) sendTagsMenu(ctx context.Context, chatID, userID int64, clientID, clientName string) {
+	if b.tags == nil {
+		b.send(ctx, chatID, "Мітки клієнта недоступні.")
+		return
+	}
+	text, markup, err := b.renderTagsMenu(ctx, chatID, clientID, clientName)
+	if err != nil {
+		b.log.ErrorContext(ctx, "telegram: tags: list failed", "client_id", clientID, "err", err)
+		b.send(ctx, chatID, "Помилка отримання міток, спробуйте ще раз.")
+		return
+	}
+
+	b.flows[userID] = &flow{step: "tags_menu", tags: tagsDraft{clientID: clientID, clientName: clientName}}
+
 	msg := tgbotapi.NewMessage(chatID, text)
-	msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(rows...)
+	msg.ReplyMarkup = markup
 	if _, err := b.bot.Send(msg); err != nil {
 		b.log.ErrorContext(ctx, "telegram: send tags menu failed", "err", err)
+	}
+}
+
+// refreshTagsMenu redraws sendTagsMenu's message in place — used after
+// remove, after add, and after "‹ Назад" — clientID/clientName come from
+// the flow, not re-fetched, since /tags never leaves "tags_menu" for this
+// client once started (see pickShowAddTagPicker/pickSetTag).
+func (b *AdminBot) refreshTagsMenu(ctx context.Context, cb *tgbotapi.CallbackQuery, clientID, clientName string) {
+	chatID := cb.Message.Chat.ID
+	text, markup, err := b.renderTagsMenu(ctx, chatID, clientID, clientName)
+	if err != nil {
+		b.log.ErrorContext(ctx, "telegram: tags: refresh list failed", "client_id", clientID, "err", err)
+		return
+	}
+	edited := tgbotapi.NewEditMessageTextAndMarkup(chatID, cb.Message.MessageID, text, markup)
+	if _, err := b.bot.Send(edited); err != nil {
+		b.log.WarnContext(ctx, "telegram: edit tags menu failed", "err", err)
 	}
 }
 
@@ -1858,69 +1891,92 @@ func (b *AdminBot) pickRemoveTag(ctx context.Context, cb *tgbotapi.CallbackQuery
 	if cb.Message == nil {
 		return
 	}
-	b.refreshTagsMenu(ctx, cb, fl.tags.clientID)
+	b.refreshTagsMenu(ctx, cb, fl.tags.clientID, fl.tags.clientName)
 }
 
-func (b *AdminBot) pickAddTagPrompt(ctx context.Context, cb *tgbotapi.CallbackQuery) {
+// pickShowAddTagPicker handles "➕ Додати тег" — offers every tag from the
+// curated vocabulary (client_tag_defs) the client doesn't already have, as
+// buttons. No text prompt: the whole point of a closed vocabulary is that
+// staff picks, never types, a tag.
+func (b *AdminBot) pickShowAddTagPicker(ctx context.Context, cb *tgbotapi.CallbackQuery) {
+	fl := b.flows[cb.From.ID]
+	if fl == nil || fl.step != "tags_menu" || b.tags == nil {
+		b.answerCallback(ctx, cb, "Сесія застаріла, почніть з /tags")
+		return
+	}
+	defs, err := b.tags.ListTagDefs(ctx)
+	if err != nil {
+		b.log.ErrorContext(ctx, "telegram: list tag defs failed", "err", err)
+		b.answerCallback(ctx, cb, "Помилка отримання списку міток")
+		return
+	}
+	current, err := b.tags.Tags(ctx, fl.tags.clientID)
+	if err != nil {
+		b.log.ErrorContext(ctx, "telegram: tags: list failed", "client_id", fl.tags.clientID, "err", err)
+		b.answerCallback(ctx, cb, "Помилка отримання міток")
+		return
+	}
+	b.answerCallback(ctx, cb, "")
+	if cb.Message == nil {
+		return
+	}
+	chatID := cb.Message.Chat.ID
+
+	rows := make([][]tgbotapi.InlineKeyboardButton, 0, len(defs)+1)
+	for _, d := range defs {
+		if slices.Contains(current, d.Label) {
+			continue
+		}
+		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(d.Label, "tagset:"+d.Label),
+		))
+	}
+	rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+		tgbotapi.NewInlineKeyboardButtonData(b.tr(ctx, chatID, "‹ Назад"), "tagback"),
+	))
+
+	text := b.tr(ctx, chatID, "Оберіть мітку:")
+	if len(rows) == 1 {
+		text = b.tr(ctx, chatID, "Усі мітки вже додані клієнту.")
+	}
+	edited := tgbotapi.NewEditMessageTextAndMarkup(chatID, cb.Message.MessageID, text, tgbotapi.NewInlineKeyboardMarkup(rows...))
+	if _, err := b.bot.Send(edited); err != nil {
+		b.log.WarnContext(ctx, "telegram: edit add-tag picker failed", "err", err)
+	}
+}
+
+// pickSetTag handles a tap on one vocabulary entry from
+// pickShowAddTagPicker — applies it and returns to the main tags menu.
+func (b *AdminBot) pickSetTag(ctx context.Context, cb *tgbotapi.CallbackQuery, label string) {
+	fl := b.flows[cb.From.ID]
+	if fl == nil || fl.step != "tags_menu" || b.tags == nil {
+		b.answerCallback(ctx, cb, "Сесія застаріла, почніть з /tags")
+		return
+	}
+	if err := b.tags.AddTag(ctx, fl.tags.clientID, label, strconv.FormatInt(cb.From.ID, 10)); err != nil {
+		b.log.ErrorContext(ctx, "telegram: add tag failed", "client_id", fl.tags.clientID, "tag", label, "err", err)
+		b.answerCallback(ctx, cb, "Не вдалося додати мітку")
+		return
+	}
+	b.answerCallback(ctx, cb, "Додано")
+	if cb.Message == nil {
+		return
+	}
+	b.refreshTagsMenu(ctx, cb, fl.tags.clientID, fl.tags.clientName)
+}
+
+// pickTagsBack handles "‹ Назад" out of the add-tag picker.
+func (b *AdminBot) pickTagsBack(ctx context.Context, cb *tgbotapi.CallbackQuery) {
 	fl := b.flows[cb.From.ID]
 	if fl == nil || fl.step != "tags_menu" {
 		b.answerCallback(ctx, cb, "Сесія застаріла, почніть з /tags")
 		return
 	}
-	fl.step = "tags_new_value"
 	b.answerCallback(ctx, cb, "")
-	b.editCallbackMessage(ctx, cb, "Введіть нову мітку:")
-}
-
-func (b *AdminBot) applyAddTag(ctx context.Context, chatID, userID int64, clientID, tag string) {
-	if b.tags == nil {
-		b.send(ctx, chatID, "Мітки клієнта недоступні.")
+	if cb.Message == nil {
 		return
 	}
-	if err := b.tags.AddTag(ctx, clientID, tag, strconv.FormatInt(userID, 10)); err != nil {
-		b.send(ctx, chatID, "Не вдалося додати мітку — можливо, вона порожня або задовга.")
-		b.log.ErrorContext(ctx, "telegram: add tag failed", "client_id", clientID, "err", err)
-		return
-	}
-	client, err := b.store.FindClient(ctx, clientID)
-	name := ""
-	if err == nil {
-		name = client.Name
-	}
-	b.sendTagsMenu(ctx, chatID, userID, clientID, name)
-}
-
-func (b *AdminBot) refreshTagsMenu(ctx context.Context, cb *tgbotapi.CallbackQuery, clientID string) {
-	chatID := cb.Message.Chat.ID
-	tags, err := b.tags.Tags(ctx, clientID)
-	if err != nil {
-		b.log.ErrorContext(ctx, "telegram: tags: refresh list failed", "client_id", clientID, "err", err)
-		return
-	}
-	client, err := b.store.FindClient(ctx, clientID)
-	name := ""
-	if err == nil {
-		name = client.Name
-	}
-
-	rows := make([][]tgbotapi.InlineKeyboardButton, 0, len(tags)+1)
-	for _, t := range tags {
-		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("❌ "+t, "tagdel:"+t),
-		))
-	}
-	rows = append(rows, tgbotapi.NewInlineKeyboardRow(
-		tgbotapi.NewInlineKeyboardButtonData(b.tr(ctx, chatID, "➕ Додати тег"), "tagadd"),
-	))
-
-	text := fmt.Sprintf(b.tr(ctx, chatID, "🏷 Мітки клієнта: %s"), name)
-	if len(tags) == 0 {
-		text += "\n" + b.tr(ctx, chatID, "Міток ще немає.")
-	}
-	edited := tgbotapi.NewEditMessageTextAndMarkup(chatID, cb.Message.MessageID, text, tgbotapi.NewInlineKeyboardMarkup(rows...))
-	if _, err := b.bot.Send(edited); err != nil {
-		b.log.WarnContext(ctx, "telegram: edit tags menu failed", "err", err)
-	}
+	b.refreshTagsMenu(ctx, cb, fl.tags.clientID, fl.tags.clientName)
 }
 
 func (b *AdminBot) handleCreateGroupCallback(ctx context.Context, cb *tgbotapi.CallbackQuery, action, arg string) {
@@ -2332,7 +2388,7 @@ var ukToRu = map[string]string{
 <b>👤 Клиенты</b>
 /client &lt;имя/телефон/ID&gt; — найти клиента: карточка со всеми ID (клиент/консультация/дела), история оплат, ссылка на CRM.
 /edit — исправить имя/телефон/email клиента пошагово, кнопками.
-/tags — метки клиента вручную: добавить свою или убрать (отдельно от автоматических — должник/риск неявки и т.п.).
+/tags — метки клиента вручную: добавить из готового списка или убрать (отдельно от автоматических — должник/риск неявки и т.п.).
 /book &lt;имя/телефон/ID&gt; — записать на консультацию. Клиента нет в базе — бот сам предложит завести нового.
 
 <b>📁 Дела</b>
@@ -2485,8 +2541,13 @@ var ukToRu = map[string]string{
 	"Сесія застаріла, почніть з /tags": "Сессия устарела, начните с /tags",
 	"Не вдалося прибрати мітку":        "Не удалось убрать метку",
 	"Прибрано":                         "Убрано",
-	"Введіть нову мітку:":              "Введите новую метку:",
-	"Не вдалося додати мітку — можливо, вона порожня або задовга.": "Не удалось добавить метку — возможно, она пустая или слишком длинная.",
+	"Додано":                           "Добавлено",
+	"‹ Назад":                          "‹ Назад",
+	"Оберіть мітку:":                   "Выберите метку:",
+	"Усі мітки вже додані клієнту.":    "Все метки уже добавлены клиенту.",
+	"Помилка отримання списку міток":   "Ошибка получения списка меток",
+	"Помилка отримання міток":          "Ошибка получения меток",
+	"Не вдалося додати мітку":          "Не удалось добавить метку",
 }
 
 // inverse of ukToRu — lets handle() match a Russian-rendered button back to its Ukrainian source

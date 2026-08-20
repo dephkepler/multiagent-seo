@@ -677,7 +677,7 @@ paths:
       security:
         - bearerAuth: [ ]
       tags: [ Clients ]
-      summary: Attach a staff-added tag to a client — idempotent, adding a tag already present is not an error
+      summary: Attach a tag to a client — tag must be one of GET /clients/tag-defs' labels; idempotent, adding a tag already present is not an error
       requestBody:
         required: true
         content:
@@ -714,6 +714,78 @@ paths:
       responses:
         "204":
           description: Tag removed (or wasn't present)
+
+  /clients/tag-defs:
+    get:
+      operationId: listClientTagDefs
+      security:
+        - bearerAuth: [ ]
+      tags: [ Clients ]
+      summary: The curated manual-tag vocabulary — AddClientTag only accepts a tag already listed here
+      responses:
+        "200":
+          description: Every tag definition, alphabetical
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TagDefList"
+    post:
+      operationId: createClientTagDef
+      security:
+        - bearerAuth: [ ]
+      tags: [ Clients ]
+      summary: Add a new entry to the tag vocabulary
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateTagDefRequest"
+      responses:
+        "204":
+          description: Tag definition created
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          description: A tag definition with this label already exists
+
+  /clients/tag-defs/{label}:
+    parameters:
+      - name: label
+        in: path
+        required: true
+        schema:
+          type: string
+    patch:
+      operationId: renameClientTagDef
+      security:
+        - bearerAuth: [ ]
+      tags: [ Clients ]
+      summary: Rename a tag definition — every client carrying the old label is updated to the new one in the same operation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RenameTagDefRequest"
+      responses:
+        "204":
+          description: Renamed
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: A tag definition with the new label already exists
+    delete:
+      operationId: deleteClientTagDef
+      security:
+        - bearerAuth: [ ]
+      tags: [ Clients ]
+      summary: Remove a tag definition — every client carrying it loses the tag too (idempotent, removing an already-gone label is not an error)
+      responses:
+        "204":
+          description: Deleted (or already gone)
 
   /clients/{id}:
     parameters:
@@ -1667,7 +1739,7 @@ components:
           type: array
           items:
             type: string
-          description: Staff-added via POST/DELETE /clients/{id}/tags — free text, never recomputed
+          description: Staff-added via POST/DELETE /clients/{id}/tags, picked from GET /clients/tag-defs — never recomputed
         last_activity:
           type: string
           format: date-time
@@ -1725,7 +1797,44 @@ components:
         tag:
           type: string
           maxLength: 40
-          description: Free text — no fixed vocabulary, unlike the four auto-computed tags
+          description: Must be one of GET /clients/tag-defs' labels — rejected (400) otherwise
+
+    TagDef:
+      type: object
+      required: [ label, created_at ]
+      properties:
+        label:
+          type: string
+          maxLength: 40
+        created_at:
+          type: string
+          format: date-time
+
+    TagDefList:
+      type: object
+      required: [ items ]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/TagDef"
+
+    CreateTagDefRequest:
+      type: object
+      required: [ label ]
+      properties:
+        label:
+          type: string
+          maxLength: 40
+
+    RenameTagDefRequest:
+      type: object
+      required: [ label ]
+      properties:
+        label:
+          type: string
+          maxLength: 40
+          description: The new label
 
     ClientDetailInfo:
       type: object

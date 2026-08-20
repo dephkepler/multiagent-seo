@@ -256,6 +256,14 @@ export default function ClientDetailPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['client-segments'] }),
     onError: (e: Error) => toast.error(e.message),
   })
+  // The manual-tag vocabulary — same source /clients uses for its "+ тег"
+  // dropdown; managing the list itself (add/rename/delete) lives there, not
+  // on this page.
+  const tagDefs = useQuery({
+    queryKey: ['client-tag-defs'],
+    queryFn: () => api<{ items: { label: string }[] }>('/clients/tag-defs'),
+  })
+  const tagDefLabels = (tagDefs.data?.items ?? []).map((d) => d.label)
 
   // Editable draft, seeded from the loaded client — re-seeded whenever a
   // fresh fetch lands (loadedFor tracks which one we've already synced
@@ -386,6 +394,7 @@ export default function ClientDetailPage() {
             <TagsEditor
               tags={segment?.tags ?? []}
               manualTags={segment?.manual_tags ?? []}
+              availableTags={tagDefLabels}
               pending={addTag.isPending || removeTag.isPending}
               onAdd={(tag) => addTag.mutate(tag)}
               onRemove={(tag) => removeTag.mutate(tag)}
@@ -624,36 +633,32 @@ export default function ClientDetailPage() {
   )
 }
 
-// TagsEditor renders the four auto-computed tags read-only, plus every
-// manual tag as a removable chip and a "+ тег" affordance to add one — auto
-// tags never get an × since they're recomputed on every load (see backend
-// clientsegments.Derive), manual ones are the one thing staff owns here.
+// TagsEditor renders the four auto-computed tags read-only, every manual
+// tag as a removable chip, and a dropdown to add one more — same curated
+// vocabulary as the /clients list page (see there for the "Управление
+// тегами" panel that actually manages the list).
 function TagsEditor({
   tags,
   manualTags,
+  availableTags,
   onAdd,
   onRemove,
   pending,
 }: {
   tags: string[]
   manualTags: string[]
+  availableTags: string[]
   onAdd: (tag: string) => void
   onRemove: (tag: string) => void
   pending: boolean
 }) {
-  const [adding, setAdding] = useState(false)
-  const [value, setValue] = useState('')
-
-  function submit() {
-    const tag = value.trim()
-    setValue('')
-    setAdding(false)
-    if (tag) onAdd(tag)
-  }
+  const remaining = availableTags.filter((t) => !manualTags.includes(t))
 
   return (
     <div className='flex flex-wrap items-center gap-1'>
-      {tags.length === 0 && manualTags.length === 0 && !adding && <span className='text-sm text-gray-400'>—</span>}
+      {tags.length === 0 && manualTags.length === 0 && remaining.length === 0 && (
+        <span className='text-sm text-gray-400'>—</span>
+      )}
       {tags.map((t) => (
         <span key={t} className={cx('rounded px-1.5 py-0.5 text-[11px] font-medium', TAG_COLOR[t] || 'bg-gray-100 text-gray-600')}>
           {TAG_LABEL[t] || t}
@@ -676,37 +681,22 @@ function TagsEditor({
           </button>
         </span>
       ))}
-      {adding ? (
-        <input
-          autoFocus
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              e.preventDefault()
-              submit()
-            }
-            if (e.key === 'Escape') {
-              setValue('')
-              setAdding(false)
-            }
+      {remaining.length > 0 && (
+        <select
+          value=''
+          disabled={pending}
+          onChange={(e) => {
+            if (e.target.value) onAdd(e.target.value)
           }}
-          onBlur={() => {
-            setValue('')
-            setAdding(false)
-          }}
-          maxLength={40}
-          placeholder='тег…'
-          className='w-24 rounded border border-gray-200 px-1 py-0.5 text-[11px] outline-none focus:border-emerald-400'
-        />
-      ) : (
-        <button
-          type='button'
-          onClick={() => setAdding(true)}
-          className='rounded border border-dashed border-gray-300 px-1.5 py-0.5 text-[11px] text-gray-400 hover:border-gray-400 hover:text-gray-600'
+          className='rounded border border-dashed border-gray-300 bg-white px-1 py-0.5 text-[11px] text-gray-400 outline-none disabled:cursor-wait'
         >
-          + тег
-        </button>
+          <option value=''>+ тег</option>
+          {remaining.map((t) => (
+            <option key={t} value={t}>
+              {t}
+            </option>
+          ))}
+        </select>
       )}
     </div>
   )
