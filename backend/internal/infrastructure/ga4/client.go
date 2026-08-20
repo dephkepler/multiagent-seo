@@ -8,12 +8,15 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sort"
+	"strconv"
 	"time"
 
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/analyticsdata/v1beta"
 	"google.golang.org/api/option"
 
+	"multiagent-seo/internal/domain/finance"
 	"multiagent-seo/internal/domain/leadstats"
 )
 
@@ -91,8 +94,12 @@ func (c *Client) SessionsByPeriod(ctx context.Context, from, to time.Time, group
 		}
 		rawDate := row.DimensionValues[0].Value // "20240814" or "202408"
 		channel := row.DimensionValues[1].Value
-		var sessions int64
-		fmt.Sscanf(row.MetricValues[0].Value, "%d", &sessions)
+		// A metric that doesn't parse must not silently read as zero traffic —
+		// that understates the dashboard's sessions with no signal at all.
+		sessions, err := strconv.ParseInt(row.MetricValues[0].Value, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("ga4: parse sessions %q for %q: %w", row.MetricValues[0].Value, rawDate, err)
+		}
 
 		key, err := formatBucketKey(rawDate, groupBy)
 		if err != nil {
@@ -134,4 +141,76 @@ func formatBucketKey(raw, groupBy string) (string, error) {
 		return "", err
 	}
 	return t.Format("2006-01-02"), nil
+}
+
+// AdSpend reports what GA4 calls Google Ads cost per month, read on the same
+// service account that reads sessions — no Ads API credentials involved.
+//
+// DIAGNOSTIC ONLY. On this property the figure is NOT a usable money value: it
+// is non-additive across query windows (December alone reads 323 626, December
+// inside a two-month range reads 796 004), and no single scale factor maps it
+// onto payments the company actually made (ratios of 12.5 / 19.2 / 23.5 for
+// December / January / February 2025). GA4 also refuses advertiserAdCost
+// without an ads-scoped dimension, which is what drives the re-attribution.
+// Real ad-spend automation needs the Google Ads API (developer token + OAuth +
+// customer ID), which nobody has set up yet — see cmd/adspend.
+func (c *Client) AdSpend(ctx context.Context, from, to time.Time) ([]finance.AdSpend, error) {
+	resp, err := c.svc.Properties.RunReport("properties/"+c.propertyID, &analyticsdata.RunReportRequest{
+		DateRanges: []*analyticsdata.DateRange{{
+			StartDate: from.Format("2006-01-02"),
+			EndDate:   to.Format("2006-01-02"),
+		}},
+		Dimensions: []*analyticsdata.Dimension{{Name: "yearMonth"}, {Name: "sessionCampaignName"}},
+		Metrics: []*analyticsdata.Metric{
+			{Name: "advertiserAdCost"},
+			{Name: "advertiserAdClicks"},
+		},
+	}).Context(ctx).Do()
+	if err != nil {
+		return nil, fmt.Errorf("ga4: ad spend report: %w", err)
+	}
+
+	byMonth := map[string]*finance.AdSpend{}
+	var order []string
+	for _, row := range resp.Rows {
+		if len(row.DimensionValues) < 1 || len(row.MetricValues) < 2 {
+			continue
+		}
+		// Cost GA4 could not attribute to a session month comes back with an
+		// empty yearMonth. It is real money, so it is reported under an empty
+		// Month rather than dropped — a caller that needs monthly buckets can
+		// see how much never made it into one.
+		raw := row.DimensionValues[0].Value // "202412", or "" when unattributed
+		month := ""
+		if len(raw) == 6 {
+			month = raw[:4] + "-" + raw[4:]
+		} else if raw != "" {
+			return nil, fmt.Errorf("ga4: unexpected yearMonth %q", raw)
+		}
+
+		cost, err := strconv.ParseFloat(row.MetricValues[0].Value, 64)
+		if err != nil {
+			return nil, fmt.Errorf("ga4: parse ad cost %q for %s: %w", row.MetricValues[0].Value, month, err)
+		}
+		clicks, err := strconv.ParseInt(row.MetricValues[1].Value, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("ga4: parse ad clicks %q for %s: %w", row.MetricValues[1].Value, month, err)
+		}
+
+		m, ok := byMonth[month]
+		if !ok {
+			m = &finance.AdSpend{Month: month}
+			byMonth[month] = m
+			order = append(order, month)
+		}
+		m.Cost += cost
+		m.Clicks += clicks
+	}
+
+	sort.Strings(order)
+	out := make([]finance.AdSpend, 0, len(order))
+	for _, month := range order {
+		out = append(out, *byMonth[month])
+	}
+	return out, nil
 }
