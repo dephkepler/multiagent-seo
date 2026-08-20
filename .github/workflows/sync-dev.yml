@@ -1,0 +1,23 @@
+# Keeps `dev` fast-forwarded to `main` on every push, so dev never drifts
+# again the way it did before 2026-08 (was 30 commits behind, unnoticed for
+# weeks). dev must never receive its own commits — this only ever moves it
+# forward to match main; if dev ever diverges, this push fails loudly
+# instead of force-overwriting anything.
+name: sync-dev-to-main
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Fast-forward dev to main
+        run: git push origin HEAD:refs/heads/dev
