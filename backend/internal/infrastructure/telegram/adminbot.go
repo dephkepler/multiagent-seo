@@ -201,13 +201,14 @@ func NewAdminBot(
 		tgbotapi.BotCommand{Command: "request", Description: "Забронювати консультацію"},
 	))
 	staffCommands := []tgbotapi.BotCommand{
+		{Command: "help", Description: "Довідка — що робить кожна команда"},
 		{Command: "menu", Description: "Показати кнопки замість команд"},
 		{Command: "invoice", Description: "Згенерувати рахунок на оплату"},
 		{Command: "consult", Description: "Згенерувати підтвердження запису на консультацію"},
-		{Command: "book", Description: "Забронювати консультацію за Client ID"},
+		{Command: "book", Description: "Записати на консультацію (ім'я/телефон/Client ID)"},
 		{Command: "advocate", Description: "Додати адвоката"},
 		{Command: "advocates", Description: "Список активних адвокатів (і деактивація)"},
-		{Command: "case", Description: "Завести справу (клопотання/позов/супровід) за Client ID"},
+		{Command: "case", Description: "Завести справу (ім'я/телефон/Client ID)"},
 		{Command: "pay", Description: "Додати оплату по справі: /pay <Case ID> <сума>"},
 		{Command: "caseclose", Description: "Позначити справу виконаною: /caseclose <Case ID>"},
 		{Command: "creategroup", Description: "Створити групу з клієнтом і адвокатом"},
@@ -329,6 +330,10 @@ func (b *AdminBot) handle(ctx context.Context, update tgbotapi.Update) {
 	switch {
 	case text == "/menu":
 		b.sendStaffMenu(ctx, chatID)
+		return
+
+	case text == "/help":
+		b.sendHTML(ctx, chatID, helpText)
 		return
 
 	case strings.HasPrefix(text, "/invoice"):
@@ -668,6 +673,7 @@ const (
 	btnClientInfo  = "🔎 Картка клієнта"
 	btnEditClient  = "✏️ Редагувати клієнта"
 	btnIntakeLink  = "📋 Анкета для клієнта"
+	btnHelp        = "❓ Довідка"
 )
 
 // staffMenuCommands maps a tapped button's label to the equivalent bare
@@ -686,6 +692,7 @@ var staffMenuCommands = map[string]string{
 	btnClientInfo:  "/client",
 	btnEditClient:  "/edit",
 	btnIntakeLink:  "/intakelink",
+	btnHelp:        "/help",
 }
 
 // Two buttons per row — three squeezed Ukrainian labels onto one row on a
@@ -693,16 +700,53 @@ var staffMenuCommands = map[string]string{
 // longer ones.
 func staffMenuKeyboard() tgbotapi.ReplyKeyboardMarkup {
 	kb := tgbotapi.NewReplyKeyboard(
-		tgbotapi.NewKeyboardButtonRow(tgbotapi.NewKeyboardButton(btnClientInfo), tgbotapi.NewKeyboardButton(btnEditClient)),
-		tgbotapi.NewKeyboardButtonRow(tgbotapi.NewKeyboardButton(btnInvoice), tgbotapi.NewKeyboardButton(btnConsult)),
-		tgbotapi.NewKeyboardButtonRow(tgbotapi.NewKeyboardButton(btnBook), tgbotapi.NewKeyboardButton(btnCreateGroup)),
-		tgbotapi.NewKeyboardButtonRow(tgbotapi.NewKeyboardButton(btnIntakeLink), tgbotapi.NewKeyboardButton(btnCase)),
-		tgbotapi.NewKeyboardButtonRow(tgbotapi.NewKeyboardButton(btnPay), tgbotapi.NewKeyboardButton(btnCaseClose)),
-		tgbotapi.NewKeyboardButtonRow(tgbotapi.NewKeyboardButton(btnAdvocateAdd), tgbotapi.NewKeyboardButton(btnAdvocates)),
+		tgbotapi.NewKeyboardButtonRow(tgbotapi.NewKeyboardButton(btnHelp), tgbotapi.NewKeyboardButton(btnClientInfo)),
+		tgbotapi.NewKeyboardButtonRow(tgbotapi.NewKeyboardButton(btnEditClient), tgbotapi.NewKeyboardButton(btnInvoice)),
+		tgbotapi.NewKeyboardButtonRow(tgbotapi.NewKeyboardButton(btnConsult), tgbotapi.NewKeyboardButton(btnBook)),
+		tgbotapi.NewKeyboardButtonRow(tgbotapi.NewKeyboardButton(btnCreateGroup), tgbotapi.NewKeyboardButton(btnIntakeLink)),
+		tgbotapi.NewKeyboardButtonRow(tgbotapi.NewKeyboardButton(btnCase), tgbotapi.NewKeyboardButton(btnPay)),
+		tgbotapi.NewKeyboardButtonRow(tgbotapi.NewKeyboardButton(btnCaseClose), tgbotapi.NewKeyboardButton(btnAdvocateAdd)),
+		tgbotapi.NewKeyboardButtonRow(tgbotapi.NewKeyboardButton(btnAdvocates)),
 	)
 	kb.ResizeKeyboard = true
 	return kb
 }
+
+// helpText is /help's static reference — organized by workflow stage
+// (find/create a client → book a consultation or open a case → record
+// payments → close), not alphabetically, so a new hire can read it once
+// top-to-bottom and then skim back to whichever section they actually
+// need. Doesn't spell out every prompt a command asks — every command
+// already does that itself when typed bare, this is just "what it's for
+// and when to reach for it".
+const helpText = `📖 <b>Довідка по командах бота</b>
+
+Типовий сценарій: клієнт звернувся → знайти/завести його → записати на консультацію або одразу завести справу → фіксувати оплати → закрити справу.
+
+<b>👤 Клієнти</b>
+/client &lt;ім'я/телефон/ID&gt; — знайти клієнта: картка з усіма ID (клієнт/консультація/справи), історія оплат, посилання на CRM.
+/edit — виправити ім'я/телефон/email клієнта покроково, кнопками.
+/book &lt;ім'я/телефон/ID&gt; — записати на консультацію. Клієнта нема в базі — бот сам запропонує завести нового.
+
+<b>📁 Справи</b>
+/case &lt;ім'я/телефон/ID&gt; — завести справу (клопотання/позов/супровід). Так само заводить нового клієнта, якщо треба.
+/pay — записати оплату по справі: Case ID → сума → дата (сьогодні або вручну). Або одним рядком: /pay &lt;Case ID&gt; &lt;сума&gt; — тоді дата = сьогодні.
+/caseclose &lt;Case ID&gt; — позначити справу виконаною.
+
+<b>👨‍⚖️ Адвокати</b>
+/advocate &lt;ПІБ&gt; — додати в ростер, дає одноразове посилання для адвоката (перешліть йому).
+/advocates — список активних, можна деактивувати (старі справи не зникнуть).
+
+<b>💳 Інше</b>
+/invoice &lt;сума&gt; — рахунок на оплату з номером картки, для клієнта.
+/consult — текст-підтвердження запису на консультацію (з умовами оферти), для клієнта.
+/creategroup — Telegram-група клієнт+адвокат (потрібен зв'язаний особистий акаунт).
+/intakelink — універсальне посилання на анкету для нового клієнта (без бронювання конкретної дати) — скиньте у смс/месенджер.
+
+Команда без аргументів сама запитає, що потрібно, крок за кроком — не обов'язково пам'ятати точний синтаксис.
+
+/menu — кнопки замість команд.
+/help — ця довідка.`
 
 func (b *AdminBot) sendStaffMenu(ctx context.Context, chatID int64) {
 	msg := tgbotapi.NewMessage(chatID, "Меню:")
