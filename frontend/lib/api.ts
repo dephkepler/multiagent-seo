@@ -23,7 +23,7 @@ export async function api<T = unknown>(path: string, init: RequestInit = {}): Pr
     throw new ApiError(401, 'unauthorized')
   }
   if (!res.ok) {
-    const msg = body?.title || body?.detail || (typeof body === 'string' ? body : res.statusText)
+    const msg = body?.detail || body?.title || (typeof body === 'string' ? body : res.statusText)
     throw new ApiError(res.status, msg)
   }
   return body as T
