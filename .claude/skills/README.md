@@ -6,8 +6,11 @@ skill подписан кодовым именем первой строкой �
 
 | Кодовое имя       | Skill                                       | Вызов                   | Что делает |
 |--------------------|----------------------------------------------|--------------------------|------------|
-| Захар Палыч        | [`deploy`](deploy/SKILL.md)                   | `/deploy`                | Прод-раскатка (SSH, docker compose) |
+| Захар Палыч        | [`deploy`](deploy/SKILL.md)                   | `/deploy`                | Прод-раскатка multiagent-seo (SSH, docker compose) |
 | Нина Аркадьевна     | [`code-standards-review`](code-standards-review/SKILL.md) | `/code-standards-review` | Систематический проход по `doc/audit/*.md` до прод-состояния |
-| Виктор Степаныч     | [`review-agent-work`](review-agent-work/SKILL.md) | `/review-agent-work`     | Проверка дифа сабагента на соответствие `.claude/rules/*.md` |
 
-Новый skill — добавляй строкой сюда же.
+Общие/личные скилы (`comments-cleanup`, `review-agent-work`, `commit`, `push`, `deploy-vps`, `en`,
+`obs`) переехали в `~/pet-projects/claude-toolkit` — симлинкнуты в `~/.claude/skills/`, доступны
+во всех проектах на этой машине, здесь больше не лежат.
+
+Новый **project-local** skill — добавляй строкой сюда же.

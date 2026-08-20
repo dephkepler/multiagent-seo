@@ -20,8 +20,9 @@ disable-model-invocation: true
 
 Этот же VPS держит ещё два проекта (`tracker-bot`, `job-applier`) в полностью отдельных
 docker-compose стеках — не трогай их контейнеры/файлы. Общий список всех трёх проектов и как их
-деплоить — глобальная команда `/deploy` (`~/.claude/commands/deploy.md`); этот файл — только про
-multiagent-seo, специфичные правила проекта ниже дополняют общую команду, а не дублируют.
+деплоить — личный skill `/deploy-vps` (`~/pet-projects/claude-toolkit/skills/deploy-vps/SKILL.md`);
+этот файл — только про multiagent-seo, специфичные правила проекта ниже дополняют общий обзор,
+а не дублируют.
 
 ## Перед стартом
 1. `git status --short` и `git rev-parse --abbrev-ref HEAD` локально — если есть незакоммиченные
