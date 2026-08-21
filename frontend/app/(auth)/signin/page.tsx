@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
-import { setRole, setToken } from '@/lib/auth'
+import { setSession } from '@/lib/auth'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input, Label } from '@/components/ui/input'
@@ -13,6 +13,7 @@ export default function SignInPage() {
   const router = useRouter()
   const [email, setEmail] = useState('verify@local.test')
   const [password, setPassword] = useState('')
+  const [tabOnly, setTabOnly] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -25,8 +26,7 @@ export default function SignInPage() {
         method: 'POST',
         body: JSON.stringify({ email, password }),
       })
-      setToken(res.token)
-      setRole(res.role)
+      setSession(res.token, res.role, tabOnly)
       // An advocate has no business on /generate — that page, and most of the
       // menu, is not theirs.
       router.push(res.role === 'advocate' ? '/my' : '/generate')
@@ -71,6 +71,18 @@ export default function SignInPage() {
               required
             />
           </div>
+          <label className='flex items-start gap-2 text-xs text-gray-600'>
+            <input
+              type='checkbox'
+              checked={tabOnly}
+              onChange={(e) => setTabOnly(e.target.checked)}
+              className='mt-0.5 size-4 rounded border-gray-300 accent-emerald-500'
+            />
+            <span>
+              Только в этой вкладке — другие вкладки останутся под своим аккаунтом. Так можно держать админа и адвоката
+              открытыми одновременно; закроешь вкладку — вход придётся повторить.
+            </span>
+          </label>
           <Button type='submit' disabled={busy} className='h-11 w-full text-base'>
             {busy ? 'Signing in…' : 'Sign in'}
           </Button>
