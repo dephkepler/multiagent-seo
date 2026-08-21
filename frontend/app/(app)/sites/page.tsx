@@ -84,12 +84,18 @@ export default function SitesPage() {
         <AddForm onSubmit={(body) => create.mutate(body)} busy={create.isPending} />
       </Card>
 
+      {sites.isError && (
+        <Card className='border-red-200 bg-red-50 text-sm text-red-700'>
+          Failed to load sites{sites.error instanceof Error ? `: ${sites.error.message}` : ''}.
+        </Card>
+      )}
+
       <Card>
         <SectionHeader
           title='Sites'
           action={
-            <Button variant='secondary' size='sm' onClick={() => sites.refetch()}>
-              Refresh
+            <Button variant='secondary' size='sm' onClick={() => sites.refetch()} disabled={sites.isFetching}>
+              {sites.isFetching ? 'Refreshing…' : 'Refresh'}
             </Button>
           }
         />
@@ -107,7 +113,7 @@ export default function SitesPage() {
               </tr>
             </thead>
             <tbody>
-              {(sites.data || []).length === 0 && (
+              {!sites.isError && (sites.data || []).length === 0 && (
                 <tr>
                   <td colSpan={7} className='py-6 text-center text-gray-400'>
                     {sites.isLoading ? 'Loading…' : 'No sites yet — add one above'}
@@ -171,7 +177,7 @@ export default function SitesPage() {
                         variant='ghost'
                         size='sm'
                         onClick={() => {
-                          if (confirm(`Remove site "${s.alias}"?`)) del.mutate(s.id)
+                          if (confirm(`Remove site "${s.alias}"? This can't be undone.`)) del.mutate(s.id)
                         }}
                         className='text-rose-600 hover:bg-rose-50'
                       >

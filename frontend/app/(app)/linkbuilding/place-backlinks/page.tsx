@@ -130,7 +130,7 @@ export default function PlaceBacklinksPage() {
   return (
     <div className='max-w-2xl space-y-6'>
       <Card>
-        <h1 className='mb-1 text-lg font-semibold'>Place backlinks on donor sites</h1>
+        <SectionHeader title='Place backlinks on donor sites' as='h1' />
         <p className='mb-6 text-sm text-gray-500'>
           For each donor (url + login + password in columns E–G) it logs into WordPress, picks the latest post via WP REST, asks the LLM to weave in a contextual{' '}
           <code className='rounded bg-gray-100 px-1'>{'<a>'}</code> linking to your site, updates the post, and records the result in columns H–I. Already-placed and
@@ -150,13 +150,18 @@ export default function PlaceBacklinksPage() {
           <div>
             <Label>Target site (your site, the backlink destination)</Label>
             <Select value={targetSiteUrl} onChange={(e) => setTargetSiteUrl(e.target.value)} required disabled={sites.isLoading}>
-              {siteOptions.length === 0 && <option value=''>{sites.isLoading ? 'Loading…' : 'No sites configured'}</option>}
+              {siteOptions.length === 0 && (
+                <option value=''>{sites.isLoading ? 'Loading…' : sites.isError ? 'Failed to load sites' : 'No sites configured'}</option>
+              )}
               {siteOptions.map((s) => (
                 <option key={s.id} value={s.url}>
                   {s.alias} — {s.url}
                 </option>
               ))}
             </Select>
+            {sites.isError && (
+              <p className='mt-1.5 text-xs text-rose-600'>Failed to load sites{sites.error instanceof Error ? `: ${sites.error.message}` : ''}.</p>
+            )}
           </div>
           <div>
             <Label>How many to place today (stops after this many successful)</Label>
@@ -179,7 +184,7 @@ export default function PlaceBacklinksPage() {
       {runId && (
         <Card>
           <SectionHeader
-            title={canceled ? 'Canceled' : done ? 'Done' : 'Placing…'}
+            title={canceled ? 'Canceled' : done ? (succeeded < target ? 'Done — ran out of donors' : 'Done') : 'Placing…'}
             action={
               <div className='flex items-center gap-3'>
                 <span className='text-sm text-gray-500'>
@@ -196,8 +201,14 @@ export default function PlaceBacklinksPage() {
           <div className='mb-4 h-2 w-full overflow-hidden rounded bg-gray-100'>
             <div className='h-2 rounded bg-emerald-500 transition-all' style={{ width: `${Math.min(100, (succeeded / Math.max(1, target)) * 100)}%` }} />
           </div>
+          {placements.isError && (
+            <p className='mb-2 text-xs text-rose-600'>
+              Live updates failed to load{placements.error instanceof Error ? `: ${placements.error.message}` : ''} — results below may be stale.
+            </p>
+          )}
           <ul className='space-y-1 text-sm'>
-            {results.length === 0 && <li className='text-gray-400'>Waiting for the first result…</li>}
+            {results.length === 0 && !placements.isError && <li className='text-gray-400'>Waiting for the first result…</li>}
+            {results.length === 0 && placements.isError && <li className='text-rose-600'>Couldn&apos;t load results yet — still retrying…</li>}
             {results.map((p) => {
               const pending = p.outcome === 'pending'
               return (
@@ -232,7 +243,12 @@ export default function PlaceBacklinksPage() {
         <SectionHeader title='Placed before' action={<span className='text-sm text-gray-500'>{total} total</span>} />
         <ul className='space-y-1 text-sm'>
           {history.isLoading && <li className='text-gray-400'>Loading…</li>}
-          {!history.isLoading && (history.data?.items.length || 0) === 0 && <li className='text-gray-400'>No successful placements yet.</li>}
+          {history.isError && (
+            <li className='text-rose-600'>Failed to load history{history.error instanceof Error ? `: ${history.error.message}` : ''}.</li>
+          )}
+          {!history.isLoading && !history.isError && (history.data?.items.length || 0) === 0 && (
+            <li className='text-gray-400'>No successful placements yet.</li>
+          )}
           {(history.data?.items || []).map((p) => {
             const link = p.post_url || p.edit_url
             return (

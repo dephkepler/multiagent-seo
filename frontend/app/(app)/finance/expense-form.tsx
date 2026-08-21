@@ -1,8 +1,8 @@
 'use client'
 
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+import { Input, Label } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
 import { PAYMENT_LABEL, type Category, type Expense, type PaymentMethod } from './types'
 import { todayISO } from './format'
@@ -26,6 +26,7 @@ interface Props {
 }
 
 export function ExpenseForm({ categories, initial, submitLabel, pending, onSubmit, onCancel }: Props) {
+  const id = useId()
   const [spentAt, setSpentAt] = useState(initial?.spent_at ?? todayISO())
   const [amount, setAmount] = useState(initial ? String(initial.amount) : '')
   const [category, setCategory] = useState(initial?.category_code ?? '')
@@ -63,16 +64,22 @@ export function ExpenseForm({ categories, initial, submitLabel, pending, onSubmi
   return (
     <form onSubmit={submit} className='grid gap-2 sm:grid-cols-2 lg:grid-cols-12'>
       <div className='lg:col-span-2'>
-        <Label>Дата</Label>
-        <Input type='date' value={spentAt} onChange={(e) => setSpentAt(e.target.value)} />
+        <Label htmlFor={`${id}-spent-at`}>Дата</Label>
+        <Input id={`${id}-spent-at`} type='date' value={spentAt} onChange={(e) => setSpentAt(e.target.value)} />
       </div>
       <div className='lg:col-span-2'>
-        <Label>Сумма, ₴</Label>
-        <Input inputMode='decimal' value={amount} onChange={(e) => setAmount(e.target.value)} placeholder='9140' />
+        <Label htmlFor={`${id}-amount`}>Сумма, ₴</Label>
+        <Input
+          id={`${id}-amount`}
+          inputMode='decimal'
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
+          placeholder='9140'
+        />
       </div>
       <div className='lg:col-span-3'>
-        <Label>Категория</Label>
-        <Select value={selectedCategory} onChange={(e) => setCategory(e.target.value)}>
+        <Label htmlFor={`${id}-category`}>Категория</Label>
+        <Select id={`${id}-category`} value={selectedCategory} onChange={(e) => setCategory(e.target.value)}>
           {categories.map((c) => (
             <option key={c.code} value={c.code}>
               {c.label}
@@ -81,8 +88,8 @@ export function ExpenseForm({ categories, initial, submitLabel, pending, onSubmi
         </Select>
       </div>
       <div className='lg:col-span-2'>
-        <Label>Оплата</Label>
-        <Select value={method} onChange={(e) => setMethod(e.target.value as PaymentMethod)}>
+        <Label htmlFor={`${id}-method`}>Оплата</Label>
+        <Select id={`${id}-method`} value={method} onChange={(e) => setMethod(e.target.value as PaymentMethod)}>
           {(Object.keys(PAYMENT_LABEL) as PaymentMethod[]).map((m) => (
             <option key={m} value={m}>
               {PAYMENT_LABEL[m]}
@@ -91,12 +98,17 @@ export function ExpenseForm({ categories, initial, submitLabel, pending, onSubmi
         </Select>
       </div>
       <div className='lg:col-span-3'>
-        <Label>Контрагент</Label>
-        <Input value={vendor} onChange={(e) => setVendor(e.target.value)} placeholder='Алсана' />
+        <Label htmlFor={`${id}-vendor`}>Контрагент</Label>
+        <Input id={`${id}-vendor`} value={vendor} onChange={(e) => setVendor(e.target.value)} placeholder='Алсана' />
       </div>
       <div className='sm:col-span-2 lg:col-span-9'>
-        <Label>Описание</Label>
-        <Input value={description} onChange={(e) => setDescription(e.target.value)} placeholder='Контекст, зарплата за месяц' />
+        <Label htmlFor={`${id}-description`}>Описание</Label>
+        <Input
+          id={`${id}-description`}
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          placeholder='Контекст, зарплата за месяц'
+        />
       </div>
       <div className='flex items-end gap-2 sm:col-span-2 lg:col-span-3'>
         <Button type='submit' disabled={pending} className='w-full'>
@@ -108,11 +120,11 @@ export function ExpenseForm({ categories, initial, submitLabel, pending, onSubmi
           </Button>
         )}
       </div>
-      {error && <div className='text-sm text-rose-600 sm:col-span-2 lg:col-span-12'>{error}</div>}
+      {error && (
+        <div className='text-sm text-rose-600 sm:col-span-2 lg:col-span-12' role='alert'>
+          {error}
+        </div>
+      )}
     </form>
   )
-}
-
-function Label({ children }: { children: React.ReactNode }) {
-  return <div className='mb-1 text-xs text-gray-500'>{children}</div>
 }

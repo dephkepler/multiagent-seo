@@ -106,13 +106,19 @@ export default function VaultPage() {
         <SectionHeader
           title='Saved passwords'
           action={
-            <Button variant='secondary' size='sm' onClick={() => entries.refetch()}>
-              Refresh
+            <Button variant='secondary' size='sm' onClick={() => entries.refetch()} disabled={entries.isFetching}>
+              {entries.isFetching ? 'Refreshing…' : 'Refresh'}
             </Button>
           }
         />
 
-        {(entries.data || []).length === 0 && (
+        {entries.isError && (
+          <Card className='border-red-200 bg-red-50 text-sm text-red-700'>
+            Failed to load passwords{entries.error instanceof Error ? `: ${entries.error.message}` : ''}.
+          </Card>
+        )}
+
+        {!entries.isError && (entries.data || []).length === 0 && (
           <Card className='text-center text-sm text-gray-400'>
             {entries.isLoading ? 'Loading…' : 'No passwords saved yet — add one above'}
           </Card>
@@ -176,7 +182,7 @@ export default function VaultPage() {
                     size='sm'
                     className='text-rose-600 hover:bg-rose-50'
                     onClick={() => {
-                      if (confirm(`Delete "${entry.title}"?`)) del.mutate(entry.id)
+                      if (confirm(`Delete "${entry.title}"? This can't be undone.`)) del.mutate(entry.id)
                     }}
                   >
                     Delete
@@ -210,14 +216,22 @@ function Field({
         <div className='text-[10px] uppercase tracking-wide text-gray-400'>{label}</div>
         <div className='truncate font-mono text-sm text-gray-800'>{value}</div>
       </div>
-      <div className='flex shrink-0 gap-3'>
+      <div className='flex shrink-0 gap-1'>
         {onToggle && (
-          <button type='button' onClick={onToggle} className='-my-1 py-1 text-xs text-gray-500 hover:text-gray-800'>
+          <button
+            type='button'
+            onClick={onToggle}
+            className='-my-1.5 rounded px-2 py-1.5 text-xs text-gray-500 hover:bg-gray-100 hover:text-gray-800'
+          >
             {revealed ? 'Hide' : 'Show'}
           </button>
         )}
         {onCopy && (
-          <button type='button' onClick={onCopy} className='-my-1 py-1 text-xs text-gray-500 hover:text-gray-800'>
+          <button
+            type='button'
+            onClick={onCopy}
+            className='-my-1.5 rounded px-2 py-1.5 text-xs text-gray-500 hover:bg-gray-100 hover:text-gray-800'
+          >
             Copy
           </button>
         )}

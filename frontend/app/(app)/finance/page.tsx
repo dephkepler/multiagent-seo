@@ -6,11 +6,12 @@ import { toast } from 'sonner'
 import { api } from '@/lib/api'
 import { Section } from './section'
 import { SettlementPanel, type SettlementData } from './settlement-panel'
+import { SectionHeader } from '@/components/ui/section-header'
 import { Select } from '@/components/ui/select'
 import { Drafts } from './drafts'
 import { ExpenseForm, type ExpenseValues } from './expense-form'
 import { Ledger, LEDGER_PAGE_SIZE, emptyFilters, type LedgerFilters } from './ledger'
-import { MetricTile } from './metric-tile'
+import { StatTile } from '@/components/ui/stat-tile'
 import { OtherIncomePanel, type OtherIncomeValues } from './other-income-panel'
 import { PLTable } from './pl-table'
 import { RatesPanel } from './rates-panel'
@@ -278,87 +279,106 @@ export default function FinancePage() {
 
   return (
     <div className='space-y-4'>
-      <div className='flex flex-wrap items-center justify-between gap-2'>
-        <h1 className='text-xl font-semibold'>Финансы</h1>
-        <div className='flex flex-wrap items-center gap-2'>
-          <Select
-            value={period.kind}
-            onChange={(e) => {
-              const kind = e.target.value as PeriodKind
-              // Jump to the newest option of the new kind, which for this data is
-              // the most recent month/quarter/year that actually has rows.
-              const first = optionsFor(kind, available)[0]?.value ?? ''
-              setPeriod({ kind, value: first })
-              setDrillMonth(null)
-            }}
-            className='w-[130px]'
-          >
-            {(Object.keys(KIND_LABEL) as PeriodKind[]).map((k) => (
-              <option key={k} value={k}>
-                {KIND_LABEL[k]}
-              </option>
-            ))}
-          </Select>
-          {period.kind !== 'all' && (
+      <SectionHeader
+        title='Финансы'
+        as='h1'
+        action={
+          <div className='flex flex-wrap items-center gap-2'>
             <Select
-              value={period.value}
+              value={period.kind}
+              disabled={dataRange.isLoading || dataRange.isError}
               onChange={(e) => {
-                setPeriod({ kind: period.kind, value: e.target.value })
+                const kind = e.target.value as PeriodKind
+                // Jump to the newest option of the new kind, which for this data is
+                // the most recent month/quarter/year that actually has rows.
+                const first = optionsFor(kind, available)[0]?.value ?? ''
+                setPeriod({ kind, value: first })
                 setDrillMonth(null)
               }}
-              className='w-[170px]'
+              className='w-[130px]'
             >
-              {optionsFor(period.kind, available).map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
+              {(Object.keys(KIND_LABEL) as PeriodKind[]).map((k) => (
+                <option key={k} value={k}>
+                  {KIND_LABEL[k]}
                 </option>
               ))}
             </Select>
-          )}
-          <span className='text-sm text-gray-500'>{periodLabel(period, available)}</span>
-        </div>
-      </div>
+            {period.kind !== 'all' && (
+              <Select
+                value={period.value}
+                disabled={dataRange.isLoading || dataRange.isError}
+                onChange={(e) => {
+                  setPeriod({ kind: period.kind, value: e.target.value })
+                  setDrillMonth(null)
+                }}
+                className='w-[170px]'
+              >
+                {optionsFor(period.kind, available).map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </Select>
+            )}
+            <span className='text-sm text-gray-500'>{periodLabel(period, available)}</span>
+          </div>
+        }
+      />
 
-      <div className='grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5'>
-        <MetricTile label='Доход' value={money(current.income_total)} accent='good' hint={monthLabel(shownMonth)} />
-        <MetricTile label='Расход' value={money(current.expense_total)} />
-        <MetricTile label='Баланс' value={money(current.balance)} accent={current.balance < 0 ? 'bad' : 'good'} />
-        <MetricTile
-          label='Нар. итог'
-          value={money(current.cumulative)}
-          accent={current.cumulative < 0 ? 'bad' : 'good'}
-          hint='на конец месяца, за всё время'
-        />
-        <MetricTile
-          label='CAC'
-          value={current.cac ? money(current.cac) : '—'}
-          hint={`${current.cohort_payers} из ${current.new_clients} заплатили`}
-        />
-        <MetricTile label='ROMI' value={times(current.romi, current.marketing_spend === 0)} hint='на 1 ₴ рекламы' />
-        <MetricTile
-          label='Маржа'
-          value={percent(current.margin_percent, current.income_total === 0)}
-          accent={current.margin_percent < 0 ? 'bad' : 'good'}
-          hint='баланс / доход'
-        />
-        <MetricTile
-          label='Средний чек'
-          value={current.avg_consult_ticket ? money(current.avg_consult_ticket) : '—'}
-          hint={`${current.consult_count} консультаций`}
-        />
-        <MetricTile
-          label='LTV / CAC'
-          value={times(current.ltv_to_cac, current.cac === 0)}
-          accent={current.ltv_to_cac > 0 && current.ltv_to_cac < 1 ? 'bad' : undefined}
-          hint={current.ltv ? `LTV ${money(current.ltv)}` : '<1 — клиент не окупается'}
-        />
-        <MetricTile
-          label='Дебиторка'
-          value={report.data?.receivable ? money(report.data.receivable) : '—'}
-          accent={report.data?.receivable ? 'bad' : undefined}
-          hint='долг по делам, за всё время'
-        />
-      </div>
+      {dataRange.isLoading && <div className='text-sm text-gray-500'>Загрузка периода…</div>}
+      {dataRange.isError && (
+        <div className='text-sm text-rose-600'>Не удалось загрузить доступный период — выбор периода может быть неполным.</div>
+      )}
+
+      {report.isLoading ? (
+        <div className='text-sm text-gray-500'>Загрузка…</div>
+      ) : (
+        <div className='grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5'>
+          <StatTile
+            label='Доход'
+            value={money(current.income_total)}
+            accent='good'
+            hint={drillMonth ? monthLabel(shownMonth) : periodLabel(period, available)}
+          />
+          <StatTile label='Расход' value={money(current.expense_total)} />
+          <StatTile label='Баланс' value={money(current.balance)} accent={current.balance < 0 ? 'bad' : 'good'} />
+          <StatTile
+            label='Нар. итог'
+            value={money(current.cumulative)}
+            accent={current.cumulative < 0 ? 'bad' : 'good'}
+            hint='на конец месяца, за всё время'
+          />
+          <StatTile
+            label='CAC'
+            value={current.cac ? money(current.cac) : '—'}
+            hint={`${current.cohort_payers} из ${current.new_clients} заплатили`}
+          />
+          <StatTile label='ROMI' value={times(current.romi, current.marketing_spend === 0)} hint='на 1 ₴ рекламы' />
+          <StatTile
+            label='Маржа'
+            value={percent(current.margin_percent, current.income_total === 0)}
+            accent={current.margin_percent < 0 ? 'bad' : 'good'}
+            hint='баланс / доход'
+          />
+          <StatTile
+            label='Средний чек'
+            value={current.avg_consult_ticket ? money(current.avg_consult_ticket) : '—'}
+            hint={`${current.consult_count} консультаций`}
+          />
+          <StatTile
+            label='LTV / CAC'
+            value={times(current.ltv_to_cac, current.cac === 0)}
+            accent={current.ltv_to_cac > 0 && current.ltv_to_cac < 1 ? 'bad' : undefined}
+            hint={current.ltv ? `LTV ${money(current.ltv)}` : '<1 — клиент не окупается'}
+          />
+          <StatTile
+            label='Дебиторка'
+            value={report.data?.receivable ? money(report.data.receivable) : '—'}
+            accent={report.data?.receivable ? 'bad' : undefined}
+            hint='долг по делам, за всё время'
+          />
+        </div>
+      )}
 
       <Drafts
         drafts={draftItems}
@@ -496,6 +516,7 @@ export default function FinancePage() {
         {
           <RulesPanel
             rules={rules.data?.items ?? []}
+            loading={rules.isLoading}
             categories={activeCategories}
             pending={createRule.isPending || updateRule.isPending}
             onCreate={(values) => createRule.mutateAsync(values).catch(() => undefined)}
@@ -522,6 +543,7 @@ export default function FinancePage() {
         {
           <RatesPanel
             rates={rates.data?.items ?? []}
+            loading={rates.isLoading}
             pendingId={saveRate.isPending ? (saveRate.variables?.id ?? null) : null}
             onSave={(id, percent) => saveRate.mutate({ id, percent })}
           />
@@ -541,6 +563,7 @@ export default function FinancePage() {
         {
           <OtherIncomePanel
             items={otherIncome.data?.items ?? []}
+            loading={otherIncome.isLoading}
             pending={createIncome.isPending}
             onCreate={(values) => createIncome.mutateAsync(values).catch(() => undefined)}
             onDelete={(income) => {

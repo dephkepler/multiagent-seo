@@ -8,11 +8,14 @@ import type { AdvocateRate } from './types'
 
 interface Props {
   rates: AdvocateRate[]
+  // optional and defaulted to false: finance/page.tsx does not pass the query's
+  // isLoading yet, so until it does this stays a no-op and the panel behaves as before
+  loading?: boolean
   pendingId: string | null
   onSave: (advocateID: string, percent: number) => void
 }
 
-export function RatesPanel({ rates, pendingId, onSave }: Props) {
+export function RatesPanel({ rates, loading = false, pendingId, onSave }: Props) {
   return (
     <div>
       <div className='text-sm text-gray-500'>
@@ -20,17 +23,14 @@ export function RatesPanel({ rates, pendingId, onSave }: Props) {
         черновики: это платёж человеку, его подтверждают руками.
       </div>
 
-      {rates.length === 0 ? (
+      {loading ? (
+        <div className='mt-3 text-sm text-gray-500'>Загрузка…</div>
+      ) : rates.length === 0 ? (
         <div className='mt-3 text-sm text-gray-500'>Адвокатов нет — добавьте через бота командой /advocate.</div>
       ) : (
         <ul className='mt-3 grid gap-2 lg:grid-cols-2'>
           {rates.map((rate) => (
-            <RateRow
-              key={`${rate.advocate_id}:${rate.commission_percent}`}
-              rate={rate}
-              pending={pendingId === rate.advocate_id}
-              onSave={onSave}
-            />
+            <RateRow key={rate.advocate_id} rate={rate} pending={pendingId === rate.advocate_id} onSave={onSave} />
           ))}
         </ul>
       )}
@@ -66,10 +66,20 @@ function RateRow({
       <div className='min-w-0 flex-1'>
         <div className='truncate font-medium'>{rate.full_name}</div>
         {!rate.is_active && <Badge variant='neutral'>Неактивен</Badge>}
-        {error && <div className='text-xs text-rose-600'>{error}</div>}
+        {error && (
+          <div className='text-xs text-rose-600' role='alert'>
+            {error}
+          </div>
+        )}
       </div>
       <div className='flex items-center gap-1'>
-        <Input inputMode='decimal' value={value} onChange={(e) => setValue(e.target.value)} className='w-20' />
+        <Input
+          inputMode='decimal'
+          aria-label={`Ставка для ${rate.full_name}, %`}
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          className='w-20'
+        />
         <span className='text-sm text-gray-500'>%</span>
       </div>
       <Button size='sm' variant='secondary' disabled={!dirty || pending} onClick={save}>

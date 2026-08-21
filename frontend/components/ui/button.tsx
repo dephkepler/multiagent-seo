@@ -22,7 +22,7 @@ export function Button({ variant = 'primary', size = 'md', className, ...rest }:
   return (
     <button
       className={cx(
-        'inline-flex items-center justify-center rounded-md font-medium transition disabled:cursor-not-allowed disabled:opacity-50',
+        'inline-flex items-center justify-center rounded-md font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50',
         variants[variant],
         sizes[size],
         className

@@ -1,9 +1,9 @@
 'use client'
 
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+import { Input, Label } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
 import { money, todayISO } from './format'
 import { PAYMENT_LABEL, type Category, type PaymentMethod, type Rule } from './types'
@@ -23,6 +23,9 @@ export interface RuleValues {
 
 interface Props {
   rules: Rule[]
+  // optional and defaulted to false: finance/page.tsx does not pass the query's
+  // isLoading yet, so until it does this stays a no-op and the panel behaves as before
+  loading?: boolean
   categories: Category[]
   pending: boolean
   onCreate: (values: RuleValues) => Promise<unknown>
@@ -30,7 +33,7 @@ interface Props {
   onDelete: (rule: Rule) => void
 }
 
-export function RulesPanel({ rules, categories, pending, onCreate, onUpdate, onDelete }: Props) {
+export function RulesPanel({ rules, loading = false, categories, pending, onCreate, onUpdate, onDelete }: Props) {
   const [editing, setEditing] = useState<Rule | null>(null)
   const [adding, setAdding] = useState(false)
 
@@ -69,7 +72,9 @@ export function RulesPanel({ rules, categories, pending, onCreate, onUpdate, onD
         </div>
       )}
 
-      {rules.length === 0 ? (
+      {loading ? (
+        <div className='mt-3 text-sm text-gray-500'>Загрузка…</div>
+      ) : rules.length === 0 ? (
         <div className='mt-3 text-sm text-gray-500'>Шаблонов нет.</div>
       ) : (
         <ul className='mt-3 grid gap-2 lg:grid-cols-2'>
@@ -115,6 +120,7 @@ interface FormProps {
 }
 
 function RuleForm({ categories, initial, submitLabel, pending, onSubmit, onCancel }: FormProps) {
+  const id = useId()
   const [name, setName] = useState(initial?.name ?? '')
   const [category, setCategory] = useState(initial?.category_code ?? '')
   const [vendor, setVendor] = useState(initial?.vendor ?? '')
@@ -157,42 +163,50 @@ function RuleForm({ categories, initial, submitLabel, pending, onSubmit, onCance
 
   return (
     <form onSubmit={submit} className='grid gap-2 sm:grid-cols-2 lg:grid-cols-4'>
-      <Field label='Название'>
-        <Input value={name} onChange={(e) => setName(e.target.value)} placeholder='Хостинг' />
-      </Field>
-      <Field label='Категория'>
-        <Select value={selectedCategory} onChange={(e) => setCategory(e.target.value)}>
+      <div>
+        <Label htmlFor={`${id}-name`}>Название</Label>
+        <Input id={`${id}-name`} value={name} onChange={(e) => setName(e.target.value)} placeholder='Хостинг' />
+      </div>
+      <div>
+        <Label htmlFor={`${id}-category`}>Категория</Label>
+        <Select id={`${id}-category`} value={selectedCategory} onChange={(e) => setCategory(e.target.value)}>
           {categories.map((c) => (
             <option key={c.code} value={c.code}>
               {c.label}
             </option>
           ))}
         </Select>
-      </Field>
-      <Field label='Сумма, ₴'>
-        <Input inputMode='decimal' value={amount} onChange={(e) => setAmount(e.target.value)} placeholder='642' />
-      </Field>
-      <Field label='День месяца'>
-        <Input inputMode='numeric' value={day} onChange={(e) => setDay(e.target.value)} placeholder='14' />
-      </Field>
-      <Field label='Контрагент'>
-        <Input value={vendor} onChange={(e) => setVendor(e.target.value)} placeholder='Бинотель' />
-      </Field>
-      <Field label='Оплата'>
-        <Select value={method} onChange={(e) => setMethod(e.target.value as PaymentMethod)}>
+      </div>
+      <div>
+        <Label htmlFor={`${id}-amount`}>Сумма, ₴</Label>
+        <Input id={`${id}-amount`} inputMode='decimal' value={amount} onChange={(e) => setAmount(e.target.value)} placeholder='642' />
+      </div>
+      <div>
+        <Label htmlFor={`${id}-day`}>День месяца</Label>
+        <Input id={`${id}-day`} inputMode='numeric' value={day} onChange={(e) => setDay(e.target.value)} placeholder='14' />
+      </div>
+      <div>
+        <Label htmlFor={`${id}-vendor`}>Контрагент</Label>
+        <Input id={`${id}-vendor`} value={vendor} onChange={(e) => setVendor(e.target.value)} placeholder='Бинотель' />
+      </div>
+      <div>
+        <Label htmlFor={`${id}-method`}>Оплата</Label>
+        <Select id={`${id}-method`} value={method} onChange={(e) => setMethod(e.target.value as PaymentMethod)}>
           {(Object.keys(PAYMENT_LABEL) as PaymentMethod[]).map((m) => (
             <option key={m} value={m}>
               {PAYMENT_LABEL[m]}
             </option>
           ))}
         </Select>
-      </Field>
-      <Field label='Действует с'>
-        <Input type='date' value={activeFrom} onChange={(e) => setActiveFrom(e.target.value)} />
-      </Field>
-      <Field label='Действует до'>
-        <Input type='date' value={activeTo} onChange={(e) => setActiveTo(e.target.value)} />
-      </Field>
+      </div>
+      <div>
+        <Label htmlFor={`${id}-active-from`}>Действует с</Label>
+        <Input id={`${id}-active-from`} type='date' value={activeFrom} onChange={(e) => setActiveFrom(e.target.value)} />
+      </div>
+      <div>
+        <Label htmlFor={`${id}-active-to`}>Действует до</Label>
+        <Input id={`${id}-active-to`} type='date' value={activeTo} onChange={(e) => setActiveTo(e.target.value)} />
+      </div>
 
       <label className='flex items-center gap-2 text-sm sm:col-span-2'>
         <input type='checkbox' checked={autoPost} onChange={(e) => setAutoPost(e.target.checked)} />
@@ -211,16 +225,11 @@ function RuleForm({ categories, initial, submitLabel, pending, onSubmit, onCance
           Отмена
         </Button>
       </div>
-      {error && <div className='text-sm text-rose-600 sm:col-span-2 lg:col-span-4'>{error}</div>}
+      {error && (
+        <div className='text-sm text-rose-600 sm:col-span-2 lg:col-span-4' role='alert'>
+          {error}
+        </div>
+      )}
     </form>
-  )
-}
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <div className='mb-1 text-xs text-gray-500'>{label}</div>
-      {children}
-    </div>
   )
 }

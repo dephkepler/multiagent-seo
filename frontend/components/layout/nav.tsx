@@ -3,7 +3,7 @@
 import Image from 'next/image'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { clearToken, getToken } from '@/lib/auth'
 import { Button } from '@/components/ui/button'
 import { cx } from '@/lib/cx'
@@ -44,6 +44,9 @@ export function Nav() {
   const router = useRouter()
   const [open, setOpen] = useState(false)
   const hasToken = typeof window !== 'undefined' && !!getToken()
+  const toggleRef = useRef<HTMLButtonElement>(null)
+  const firstLinkRef = useRef<HTMLAnchorElement>(null)
+  const mountedRef = useRef(false)
 
   useEffect(() => {
     if (!open) return
@@ -52,10 +55,26 @@ export function Nav() {
     return () => window.removeEventListener('keydown', onKey)
   }, [open])
 
+  // move focus into the drawer when it opens, and back to the toggle when it closes —
+  // otherwise keyboard/screen-reader focus is left stranded on a hidden trigger or nothing at all.
+  // Skip the first run so mounting on a fresh page load doesn't steal focus onto the toggle.
+  useEffect(() => {
+    if (!mountedRef.current) {
+      mountedRef.current = true
+      return
+    }
+    if (open) {
+      firstLinkRef.current?.focus()
+    } else {
+      toggleRef.current?.focus()
+    }
+  }, [open])
+
   return (
     <>
       <nav className='relative z-[60] flex h-14 items-center gap-2 border-b border-gray-200 bg-white px-4'>
         <button
+          ref={toggleRef}
           type='button'
           aria-label={open ? 'Закрыть меню' : 'Открыть меню'}
           aria-expanded={open}
@@ -102,9 +121,11 @@ export function Nav() {
               <div className='flex flex-col gap-0.5'>
                 {group.links.map((l) => {
                   const active = pathname === l.href || pathname.startsWith(l.href + '/')
+                  const isFirstLink = group.label === groups[0].label && l.href === groups[0].links[0].href
                   return (
                     <Link
                       key={l.href}
+                      ref={isFirstLink ? firstLinkRef : undefined}
                       href={l.href}
                       onClick={() => setOpen(false)}
                       className={cx(

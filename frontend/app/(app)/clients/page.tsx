@@ -225,7 +225,7 @@ export default function ClientsPage() {
                 ))}
               </div>
               <p className='mt-1.5 text-[11px] text-gray-400'>
-                Считается сам — выберите вручную в таблице, чтобы закрепить свой (например клиент ушёл к другому
+                Считается сам — выберите вручную в списке, чтобы закрепить свой (например клиент ушёл к другому
                 адвокату)
               </p>
             </div>
@@ -278,52 +278,35 @@ export default function ClientsPage() {
           </div>
         )}
 
-        <div className='overflow-x-auto'>
-          <table className='w-full text-sm'>
-            <thead className='text-left text-xs uppercase text-gray-500'>
-              <tr>
-                <th className='py-2 pr-4'>Имя</th>
-                <th className='py-2 pr-4'>Телефон</th>
-                <th className='py-2 pr-4'>Сегмент</th>
-                <th className='py-2 pr-4'>Теги</th>
-                <th className='py-2 pr-4'>Дел</th>
-                <th className='py-2 pr-4'>Долг</th>
-                <SortableHeader label='LTV' active={sortKey === 'ltv'} onClick={() => onSortKeyChange('ltv')} />
-                <SortableHeader
-                  label='Последняя активность'
-                  active={sortKey === 'activity'}
-                  onClick={() => onSortKeyChange('activity')}
-                  last
-                />
-              </tr>
-            </thead>
-            <tbody>
-              {items.length === 0 && (
-                <tr>
-                  <td colSpan={8} className='py-6 text-center text-gray-400'>
-                    {clients.isLoading ? 'Загрузка…' : clients.isError ? 'Не удалось загрузить' : 'Никого не найдено'}
-                  </td>
-                </tr>
-              )}
+        {clients.isLoading && <div className='py-6 text-center text-sm text-gray-400'>Загрузка…</div>}
+        {clients.isError && !clients.isLoading && (
+          <div className='py-6 text-center text-sm text-rose-600'>Не удалось загрузить</div>
+        )}
+        {!clients.isLoading && !clients.isError && items.length === 0 && (
+          <div className='py-6 text-center text-sm text-gray-400'>Никого не найдено</div>
+        )}
+
+        {items.length > 0 && (
+          <div className={clients.isFetching ? 'opacity-50 transition-opacity' : undefined}>
+            {/* mobile: cards — an 8-column table is unreadable on a phone even with horizontal scroll */}
+            <ul className='grid gap-2 md:hidden'>
               {items.map((c) => {
                 const debt = c.case_fee - c.case_paid
+                const segmentPending = setOverride.isPending && setOverride.variables?.id === c.client_id
                 return (
-                  <tr key={c.client_id} className='border-t border-gray-100'>
-                    <td className='max-w-[180px] py-2 pr-4 font-medium'>
+                  <li key={c.client_id} className='rounded-md border border-gray-200 bg-white p-3'>
+                    <div className='flex items-start justify-between gap-2'>
                       <Link
                         href={`/clients/${c.client_id}`}
-                        className='block truncate text-emerald-700 hover:underline'
+                        className='min-w-0 truncate font-medium text-emerald-700 hover:underline'
                         title={c.name || undefined}
                       >
                         {c.name || '—'}
                       </Link>
-                    </td>
-                    <td className='max-w-[140px] py-2 pr-4 text-gray-500'>
-                      <span className='block truncate' title={c.phone || undefined}>
-                        {c.phone || '—'}
-                      </span>
-                    </td>
-                    <td className='py-2 pr-4'>
+                      <span className='shrink-0 text-xs text-gray-500'>{c.phone || '—'}</span>
+                    </div>
+
+                    <div className='mt-2 flex items-center gap-1.5'>
                       <select
                         value={c.segment}
                         disabled={setOverride.isPending}
@@ -339,8 +322,10 @@ export default function ClientsPage() {
                           </option>
                         ))}
                       </select>
-                    </td>
-                    <td className='py-2 pr-4'>
+                      {segmentPending && <span className='text-xs text-gray-400'>…</span>}
+                    </div>
+
+                    <div className='mt-2'>
                       <TagsCell
                         tags={c.tags}
                         manualTags={c.manual_tags}
@@ -350,21 +335,121 @@ export default function ClientsPage() {
                         onAdd={(tag) => addTag.mutate({ id: c.client_id, tag })}
                         onRemove={(tag) => removeTag.mutate({ id: c.client_id, tag })}
                       />
-                    </td>
-                    <td className='py-2 pr-4 text-gray-500'>{c.case_count || '—'}</td>
-                    <td className={cx('py-2 pr-4', debt > 0 ? 'font-medium text-rose-600' : 'text-gray-400')}>
-                      {debt > 0 ? fmtMoney(debt) : '—'}
-                    </td>
-                    <td className={cx('py-2 pr-4 tabular-nums', c.ltv > 0 ? 'font-medium text-emerald-700' : 'text-gray-400')}>
-                      {c.ltv > 0 ? fmtMoney(c.ltv) : '—'}
-                    </td>
-                    <td className='py-2 text-gray-500'>{fmtDate(c.last_activity)}</td>
-                  </tr>
+                    </div>
+
+                    <dl className='mt-2.5 grid grid-cols-2 gap-y-1 border-t border-gray-100 pt-2 text-xs'>
+                      <div className='flex items-center justify-between pr-2'>
+                        <dt className='text-gray-400'>Дел</dt>
+                        <dd className='text-gray-600'>{c.case_count || '—'}</dd>
+                      </div>
+                      <div className='flex items-center justify-between'>
+                        <dt className='text-gray-400'>Долг</dt>
+                        <dd className={debt > 0 ? 'font-medium text-rose-600' : 'text-gray-400'}>
+                          {debt > 0 ? fmtMoney(debt) : '—'}
+                        </dd>
+                      </div>
+                      <div className='flex items-center justify-between pr-2'>
+                        <dt className='text-gray-400'>LTV</dt>
+                        <dd className={cx('tabular-nums', c.ltv > 0 ? 'font-medium text-emerald-700' : 'text-gray-400')}>
+                          {c.ltv > 0 ? fmtMoney(c.ltv) : '—'}
+                        </dd>
+                      </div>
+                      <div className='flex items-center justify-between'>
+                        <dt className='text-gray-400'>Активность</dt>
+                        <dd className='text-gray-600'>{fmtDate(c.last_activity)}</dd>
+                      </div>
+                    </dl>
+                  </li>
                 )
               })}
-            </tbody>
-          </table>
-        </div>
+            </ul>
+
+            <div className='hidden overflow-x-auto md:block'>
+              <table className='w-full text-sm'>
+                <thead className='text-left text-xs uppercase text-gray-500'>
+                  <tr>
+                    <th className='py-2 pr-4'>Имя</th>
+                    <th className='py-2 pr-4'>Телефон</th>
+                    <th className='py-2 pr-4'>Сегмент</th>
+                    <th className='py-2 pr-4'>Теги</th>
+                    <th className='py-2 pr-4'>Дел</th>
+                    <th className='py-2 pr-4'>Долг</th>
+                    <SortableHeader label='LTV' active={sortKey === 'ltv'} onClick={() => onSortKeyChange('ltv')} />
+                    <SortableHeader
+                      label='Последняя активность'
+                      active={sortKey === 'activity'}
+                      onClick={() => onSortKeyChange('activity')}
+                      last
+                    />
+                  </tr>
+                </thead>
+                <tbody>
+                  {items.map((c) => {
+                    const debt = c.case_fee - c.case_paid
+                    const segmentPending = setOverride.isPending && setOverride.variables?.id === c.client_id
+                    return (
+                      <tr key={c.client_id} className='border-t border-gray-100'>
+                        <td className='max-w-[180px] py-2 pr-4 font-medium'>
+                          <Link
+                            href={`/clients/${c.client_id}`}
+                            className='block truncate text-emerald-700 hover:underline'
+                            title={c.name || undefined}
+                          >
+                            {c.name || '—'}
+                          </Link>
+                        </td>
+                        <td className='max-w-[140px] py-2 pr-4 text-gray-500'>
+                          <span className='block truncate' title={c.phone || undefined}>
+                            {c.phone || '—'}
+                          </span>
+                        </td>
+                        <td className='py-2 pr-4'>
+                          <div className='flex items-center gap-1.5'>
+                            <select
+                              value={c.segment}
+                              disabled={setOverride.isPending}
+                              onChange={(e) => setOverride.mutate({ id: c.client_id, segment: e.target.value as Segment })}
+                              className={cx(
+                                'cursor-pointer rounded px-2 py-1 text-xs font-medium outline-none disabled:cursor-wait',
+                                SEGMENT_COLOR[c.segment]
+                              )}
+                            >
+                              {SEGMENT_ORDER.map((s) => (
+                                <option key={s} value={s}>
+                                  {SEGMENT_LABEL[s]}
+                                </option>
+                              ))}
+                            </select>
+                            {segmentPending && <span className='text-xs text-gray-400'>…</span>}
+                          </div>
+                        </td>
+                        <td className='py-2 pr-4'>
+                          <TagsCell
+                            tags={c.tags}
+                            manualTags={c.manual_tags}
+                            categories={categories}
+                            defsByCategory={defsByCategory}
+                            pending={addTag.isPending || removeTag.isPending}
+                            onAdd={(tag) => addTag.mutate({ id: c.client_id, tag })}
+                            onRemove={(tag) => removeTag.mutate({ id: c.client_id, tag })}
+                          />
+                        </td>
+                        <td className='py-2 pr-4 text-gray-500'>{c.case_count || '—'}</td>
+                        <td className={cx('py-2 pr-4', debt > 0 ? 'font-medium text-rose-600' : 'text-gray-400')}>
+                          {debt > 0 ? fmtMoney(debt) : '—'}
+                        </td>
+                        <td className={cx('py-2 pr-4 tabular-nums', c.ltv > 0 ? 'font-medium text-emerald-700' : 'text-gray-400')}>
+                          {c.ltv > 0 ? fmtMoney(c.ltv) : '—'}
+                        </td>
+                        <td className='py-2 text-gray-500'>{fmtDate(c.last_activity)}</td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
 
         {total > 0 && (
           <div className='mt-4 flex flex-wrap items-center justify-between gap-2 text-xs text-gray-500'>

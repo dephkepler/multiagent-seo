@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
+import { cx } from '@/lib/cx'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -29,6 +30,13 @@ const jobStateBadge: Record<string, 'success' | 'danger' | 'neutral' | 'info'> =
   done: 'success',
   canceled: 'neutral',
   failed: 'danger',
+}
+
+const jobStateCaption: Record<string, string> = {
+  running: 'Working through the sheet…',
+  done: 'Finished — check the sheet for results.',
+  canceled: 'Stopped before finishing — already-processed rows were kept.',
+  failed: 'Stopped due to a server error, not just slow — partial results may be in the sheet. Try starting a new scrape.',
 }
 
 export default function EmailScrapePage() {
@@ -90,6 +98,12 @@ export default function EmailScrapePage() {
         </form>
       </Card>
 
+      {jobId && job.isError && !j && (
+        <Card className='border-red-200 bg-red-50 text-sm text-red-700'>
+          Failed to load job status{job.error instanceof Error ? `: ${job.error.message}` : ''}.
+        </Card>
+      )}
+
       {j && (
         <Card>
           <SectionHeader
@@ -102,6 +116,7 @@ export default function EmailScrapePage() {
               )
             }
           />
+          {job.isError && <p className='mb-2 text-xs text-rose-600'>Couldn&apos;t refresh status just now — showing the last known state.</p>}
           <div className='mb-2 flex flex-wrap items-center gap-2 text-sm font-medium'>
             <span>
               {j.processed} / {j.total} sites
@@ -111,6 +126,9 @@ export default function EmailScrapePage() {
           <div className='h-2 w-full overflow-hidden rounded bg-gray-100'>
             <div className='h-full bg-emerald-500 transition-all' style={{ width: `${pct}%` }} />
           </div>
+          <p className={cx('mt-2 text-xs', j.state === 'failed' ? 'text-rose-600' : 'text-gray-500')}>
+            {jobStateCaption[j.state] ?? null}
+          </p>
         </Card>
       )}
     </div>

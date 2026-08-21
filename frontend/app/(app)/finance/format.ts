@@ -37,11 +37,6 @@ export function dateLabel(iso: string): string {
   return month && day ? `${day}.${month}` : '—'
 }
 
-export function currentMonthKey(): string {
-  const now = new Date()
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
-}
-
 export function monthBounds(monthKey: string): { from: string; to: string } {
   const [year, month] = monthKey.split('-').map(Number)
   const last = new Date(Date.UTC(year, month, 0)).getUTCDate()
@@ -51,23 +46,11 @@ export function monthBounds(monthKey: string): { from: string; to: string } {
   }
 }
 
-// Report range: `count` months back from (and including) the current month.
-export function rangeBack(count: number): { from: string; to: string } {
-  const now = new Date()
-  const start = new Date(Date.UTC(now.getFullYear(), now.getMonth() - (count - 1), 1))
-  const end = new Date(Date.UTC(now.getFullYear(), now.getMonth() + 1, 0))
-  return { from: iso(start), to: iso(end) }
-}
-
 // Local, not toISOString(): before 03:00 Kyiv the UTC date is still yesterday,
 // and a new expense would be filed into the previous day — or previous month.
 export function todayISO(): string {
   const now = new Date()
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
-}
-
-function iso(d: Date): string {
-  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`
 }
 
 function pad(n: number): string {

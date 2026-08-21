@@ -1,12 +1,13 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { LineChart } from '@/components/charts/line-chart'
 import { Badge, type Variant as BadgeVariant } from '@/components/ui/badge'
 import { Card } from '@/components/ui/card'
 import { SectionHeader } from '@/components/ui/section-header'
+import { StatTile } from '@/components/ui/stat-tile'
 import { CHART_PRIMARY, CHART_SECONDARY, STATUS_CRITICAL, STATUS_GOOD, STATUS_SERIOUS } from '@/lib/chart-colors'
 import { cx } from '@/lib/cx'
 
@@ -99,6 +100,15 @@ export default function LeadsPage() {
   const [activePreset, setActivePreset] = useState('90 дней')
   const [pickerOpen, setPickerOpen] = useState(false)
   const pickerRef = useRef<HTMLDivElement>(null)
+  const pickerTriggerRef = useRef<HTMLButtonElement>(null)
+
+  // Keyboard users opened the picker from the trigger button — closing it
+  // (via Escape, a preset, or "Готово") without sending focus back there
+  // would drop focus to <body>, silently resetting their place on the page.
+  const closePicker = useCallback(() => {
+    setPickerOpen(false)
+    pickerTriggerRef.current?.focus()
+  }, [])
 
   const spanDays = useMemo(() => {
     const a = new Date(from).getTime()
@@ -116,7 +126,7 @@ export default function LeadsPage() {
     setFrom(toISODate(p.from()))
     setTo(toISODate(new Date()))
     setActivePreset(p.label)
-    setPickerOpen(false)
+    closePicker()
   }
 
   // Click outside the picker (button + panel) closes it — the panel itself
@@ -128,7 +138,7 @@ export default function LeadsPage() {
       if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) setPickerOpen(false)
     }
     function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') setPickerOpen(false)
+      if (e.key === 'Escape') closePicker()
     }
     document.addEventListener('mousedown', onClick)
     document.addEventListener('keydown', onKey)
@@ -136,21 +146,24 @@ export default function LeadsPage() {
       document.removeEventListener('mousedown', onClick)
       document.removeEventListener('keydown', onKey)
     }
-  }, [pickerOpen])
+  }, [pickerOpen, closePicker])
 
   return (
     <div className='max-w-6xl space-y-6'>
       <div>
-        <h1 className='text-lg font-semibold'>Заявки и консультации</h1>
-        <p className='mt-1 text-sm text-gray-500'>
+        <SectionHeader title='Заявки и консультации' as='h1' />
+        <p className='-mt-3 text-sm text-gray-500'>
           Считается напрямую из данных бота — включает историю до его запуска и растёт с каждой новой заявкой.
         </p>
       </div>
 
       <div ref={pickerRef} className='relative flex flex-wrap items-center gap-3'>
         <button
+          ref={pickerTriggerRef}
           type='button'
           onClick={() => setPickerOpen((v) => !v)}
+          aria-haspopup='dialog'
+          aria-expanded={pickerOpen}
           className={cx(
             'flex items-center gap-2 rounded-lg border bg-white px-3 py-2 text-sm shadow-sm',
             pickerOpen ? 'border-emerald-400 ring-2 ring-emerald-100' : 'border-gray-200 hover:border-gray-300'
@@ -169,6 +182,7 @@ export default function LeadsPage() {
               {PRESETS.map((p) => (
                 <button
                   key={p.label}
+                  type='button'
                   onClick={() => applyPreset(p)}
                   className={cx(
                     'rounded-md px-2 py-1.5 text-left text-sm',
@@ -207,7 +221,8 @@ export default function LeadsPage() {
                 />
               </label>
               <button
-                onClick={() => setPickerOpen(false)}
+                type='button'
+                onClick={closePicker}
                 className='mt-auto self-end rounded-md bg-emerald-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-600'
               >
                 Готово
@@ -218,12 +233,18 @@ export default function LeadsPage() {
       </div>
 
       {isError && (
-        <Card className='border-red-200 bg-red-50 text-sm text-red-700'>
-          Не удалось загрузить статистику{error instanceof Error ? `: ${error.message}` : ''}.
-        </Card>
+        <div role='alert'>
+          <Card className='border-red-200 bg-red-50 text-sm text-red-700'>
+            Не удалось загрузить статистику{error instanceof Error ? `: ${error.message}` : ''}.
+          </Card>
+        </div>
       )}
 
-      {isLoading && <Card className='text-sm text-gray-500'>Загрузка…</Card>}
+      {isLoading && (
+        <div role='status' aria-live='polite'>
+          <Card className='text-sm text-gray-500'>Загрузка…</Card>
+        </div>
+      )}
 
       {data && (
         <>
@@ -232,8 +253,8 @@ export default function LeadsPage() {
             subtitle='Сырые числа — включая повторные обращения уже существующих клиентов, не только новых (воронка ниже — только новые)'
           />
           <div className='grid grid-cols-2 gap-4 sm:w-1/2'>
-            <KpiTile label='Всего заявок' value={data.totals.leads.toLocaleString('ru-RU')} />
-            <KpiTile label='Уникальных обратившихся' value={data.totals.clients.toLocaleString('ru-RU')} />
+            <StatTile label='Всего заявок' value={data.totals.leads.toLocaleString('ru-RU')} />
+            <StatTile label='Уникальных обратившихся' value={data.totals.clients.toLocaleString('ru-RU')} />
           </div>
 
           <GroupHeading
@@ -255,18 +276,18 @@ export default function LeadsPage() {
                 Консультации — сумма самих консультаций (обычно 500–800 ₴ за штуку), отдельно от денег по делам
               </div>
               <div className='grid grid-cols-1 gap-4 sm:grid-cols-3'>
-                <KpiTile label='Забронировано (весь потенциал)' value={fmtMoney(data.totals.revenue_booked)} />
-                <KpiTile
+                <StatTile label='Забронировано (весь потенциал)' value={fmtMoney(data.totals.revenue_booked)} />
+                <StatTile
                   label='Заработано (провёл)'
                   value={fmtMoney(data.totals.revenue_earned)}
-                  sub={
+                  hint={
                     data.totals.avg_ticket > 0
                       ? `средний чек ${fmtMoney(data.totals.avg_ticket)} — цена состоявшейся консультации, не дела`
                       : undefined
                   }
                   accent='good'
                 />
-                <KpiTile label='Потеряно (отмены и неявки)' value={fmtMoney(data.totals.revenue_lost)} accent='bad' />
+                <StatTile label='Потеряно (отмены и неявки)' value={fmtMoney(data.totals.revenue_lost)} accent='bad' />
               </div>
             </div>
 
@@ -276,20 +297,20 @@ export default function LeadsPage() {
                 открыто/законтрактовано/оплачено.
               </div>
               <div className='grid grid-cols-1 gap-4 sm:grid-cols-3'>
-                <KpiTile label='Завершено дел' value={data.totals.cases_completed.toLocaleString('ru-RU')} />
-                <KpiTile label='Законтрактовано' value={fmtMoney(data.totals.case_fee_contracted)} />
-                <KpiTile
+                <StatTile label='Завершено дел' value={data.totals.cases_completed.toLocaleString('ru-RU')} />
+                <StatTile label='Законтрактовано' value={fmtMoney(data.totals.case_fee_contracted)} />
+                <StatTile
                   label='Получено оплат'
                   value={fmtMoney(data.totals.case_paid)}
-                  sub='Растёт по мере частичной оплаты — это уже поступившие деньги, не сумма договора'
+                  hint='Растёт по мере частичной оплаты — это уже поступившие деньги, не сумма договора'
                   accent='good'
                 />
               </div>
 
               <div className='mt-4 mb-2 text-xs text-gray-400'>Сейчас, по всем делам — не зависит от периода выше</div>
               <div className='grid grid-cols-2 gap-4'>
-                <KpiTile label='В работе' value={data.totals.cases_in_progress.toLocaleString('ru-RU')} />
-                <KpiTile label='Долг клиентов' value={fmtMoney(data.totals.case_owed)} accent={data.totals.case_owed > 0 ? 'bad' : undefined} />
+                <StatTile label='В работе' value={data.totals.cases_in_progress.toLocaleString('ru-RU')} />
+                <StatTile label='Долг клиентов' value={fmtMoney(data.totals.case_owed)} accent={data.totals.case_owed > 0 ? 'bad' : undefined} />
               </div>
             </div>
           </div>
@@ -303,11 +324,13 @@ export default function LeadsPage() {
                 const lost = cancelled + noShow
                 const pct = (lost / data.totals.consultations) * 100
                 return (
-                  <Card className={cx('p-4', pct >= 30 && 'border-red-200 bg-red-50')}>
-                    <div className='text-xs text-gray-500'>Отмены и неявки — доля от всех забронированных консультаций</div>
-                    <div className={cx('mt-1 text-2xl font-semibold tabular-nums', pct >= 30 && 'text-red-700')}>{pct.toFixed(0)}%</div>
-                    <div className='mt-1 text-xs text-gray-400'>{lost} из {data.totals.consultations} ({cancelled} отмен, {noShow} неявок)</div>
-                  </Card>
+                  <StatTile
+                    label='Отмены и неявки — доля от всех забронированных консультаций'
+                    value={`${pct.toFixed(0)}%`}
+                    hint={`${lost} из ${data.totals.consultations} (${cancelled} отмен, ${noShow} неявок)`}
+                    accent={pct >= 30 ? 'bad' : undefined}
+                    emphasize
+                  />
                 )
               })()}
             <div className='grid grid-cols-1 gap-4 md:grid-cols-2'>
@@ -334,16 +357,16 @@ export default function LeadsPage() {
             <>
               <GroupHeading title='Привлечение' subtitle='Сайт, не заявки — воронка выше начинается уже после этого шага' />
               <div className='grid grid-cols-1 gap-4 sm:grid-cols-3'>
-                <KpiTile label='Визитов на сайт' value={data.totals.site_sessions.toLocaleString('ru-RU')} />
-                <KpiTile
+                <StatTile label='Визитов на сайт' value={data.totals.site_sessions.toLocaleString('ru-RU')} />
+                <StatTile
                   label='Из поиска (Сео)'
                   value={data.totals.organic_sessions.toLocaleString('ru-RU')}
-                  sub={`${Math.round((data.totals.organic_sessions / data.totals.site_sessions) * 100)}% от всего трафика`}
+                  hint={`${Math.round((data.totals.organic_sessions / data.totals.site_sessions) * 100)}% от всего трафика`}
                 />
-                <KpiTile
+                <StatTile
                   label='Заявка на визит'
                   value={`${((data.totals.leads / data.totals.site_sessions) * 100).toFixed(1)}%`}
-                  sub={`${fmtLeads(data.totals.leads)} из ${data.totals.site_sessions} визитов`}
+                  hint={`${fmtLeads(data.totals.leads)} из ${data.totals.site_sessions} визитов`}
                 />
               </div>
             </>
@@ -417,34 +440,6 @@ export default function LeadsPage() {
         </>
       )}
     </div>
-  )
-}
-
-function KpiTile({
-  label,
-  value,
-  sub,
-  accent,
-}: {
-  label: string
-  value: string
-  sub?: string
-  accent?: 'good' | 'bad'
-}) {
-  return (
-    <Card className='p-4'>
-      <div className='text-xs text-gray-500'>{label}</div>
-      <div
-        className={cx(
-          'mt-1 text-2xl font-semibold tabular-nums',
-          accent === 'good' && 'text-emerald-700',
-          accent === 'bad' && 'text-red-700'
-        )}
-      >
-        {value}
-      </div>
-      {sub && <div className='mt-1 text-xs text-gray-400'>{sub}</div>}
-    </Card>
   )
 }
 
@@ -616,6 +611,17 @@ function CollapsibleChart({
   )
 }
 
+// Every bar-list on this page caps itself at the top 8 rows for readability
+// (a 30-source list would be unreadable). Silently dropping the rest reads as
+// a bug the moment there are actually 9+ rows, so every list that slices to 8
+// says so.
+const LIST_ROW_LIMIT = 8
+
+function TruncationNote({ shown, total }: { shown: number; total: number }) {
+  if (total <= shown) return null
+  return <div className='pt-1 text-xs text-gray-400'>Показаны топ-{shown} из {total}</div>
+}
+
 function HBarList({
   rows,
   emptyLabel,
@@ -628,7 +634,7 @@ function HBarList({
   const max = Math.max(...rows.map((r) => r.count))
   return (
     <div className='space-y-2'>
-      {rows.slice(0, 8).map((r) => {
+      {rows.slice(0, LIST_ROW_LIMIT).map((r) => {
         const label = r.key === '' ? emptyLabel : r.key
         const pct = total ? ((r.count / total) * 100).toFixed(1) : '0.0'
         return (
@@ -654,6 +660,7 @@ function HBarList({
           </div>
         )
       })}
+      <TruncationNote shown={LIST_ROW_LIMIT} total={rows.length} />
     </div>
   )
 }
@@ -689,6 +696,10 @@ const WEEKDAY_ORDER = ['1', '2', '3', '4', '5', '6', '7']
 // touch has no hover state at all — nothing ever showed on a phone. `open`/
 // `onToggle` are owned by the chart above so tapping one bar closes
 // whichever other one was open, instead of every tapped tooltip stacking up.
+// A real <button> (not a div+onClick) so the tooltip is reachable and
+// triggerable by keyboard too — Tab lands on it, Enter/Space fires onToggle
+// for free, and group-focus/tip below reveals the tooltip on focus the same
+// way group-hover/tip does on mouse hover.
 function ChartTooltip({
   content,
   className,
@@ -703,17 +714,25 @@ function ChartTooltip({
   children: React.ReactNode
 }) {
   return (
-    <div className={cx('group/tip relative', className)} onClick={onToggle}>
+    <button
+      type='button'
+      className={cx(
+        'group/tip relative rounded border-0 bg-transparent p-0 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300',
+        className
+      )}
+      onClick={onToggle}
+      aria-pressed={open}
+    >
       {children}
       <div
         className={cx(
-          'pointer-events-none absolute bottom-full left-1/2 z-10 mb-1.5 -translate-x-1/2 rounded-md bg-gray-900 px-2 py-1 text-xs whitespace-nowrap text-white opacity-0 shadow-lg transition-opacity group-hover/tip:opacity-100',
+          'pointer-events-none absolute bottom-full left-1/2 z-10 mb-1.5 -translate-x-1/2 rounded-md bg-gray-900 px-2 py-1 text-xs whitespace-nowrap text-white opacity-0 shadow-lg transition-opacity group-hover/tip:opacity-100 group-focus/tip:opacity-100',
           open && 'opacity-100'
         )}
       >
         {content}
       </div>
-    </div>
+    </button>
   )
 }
 
@@ -826,7 +845,7 @@ function SourceList({
   const max = Math.max(1, ...rows.map(valueOf))
   return (
     <div className='space-y-2'>
-      {rows.slice(0, 8).map((r) => {
+      {rows.slice(0, LIST_ROW_LIMIT).map((r) => {
         const label = r.key === '' ? '(без источника)' : r.key
         const value = valueOf(r)
         return (
@@ -846,6 +865,7 @@ function SourceList({
           </div>
         )
       })}
+      <TruncationNote shown={LIST_ROW_LIMIT} total={rows.length} />
     </div>
   )
 }
@@ -861,7 +881,7 @@ function CategoryList({
   const max = Math.max(1, ...rows.map((r) => r.contracted))
   return (
     <div className='space-y-2'>
-      {rows.slice(0, 8).map((r) => {
+      {rows.slice(0, LIST_ROW_LIMIT).map((r) => {
         const label = r.key === '' ? emptyLabel : r.key
         const paidPct = r.contracted ? Math.round((r.paid / r.contracted) * 100) : 0
         return (
@@ -882,6 +902,7 @@ function CategoryList({
           </div>
         )
       })}
+      <TruncationNote shown={LIST_ROW_LIMIT} total={rows.length} />
     </div>
   )
 }
@@ -891,7 +912,7 @@ function CreatorList({ rows }: { rows: { key: string; bookings: number; revenue_
   const max = Math.max(1, ...rows.map((r) => r.revenue_earned))
   return (
     <div className='space-y-2'>
-      {rows.slice(0, 8).map((r) => {
+      {rows.slice(0, LIST_ROW_LIMIT).map((r) => {
         const label = r.key === '' ? '(не указано)' : r.key
         return (
           <div key={label} className='flex flex-col gap-1 text-sm sm:flex-row sm:items-center sm:gap-3'>
@@ -910,6 +931,7 @@ function CreatorList({ rows }: { rows: { key: string; bookings: number; revenue_
           </div>
         )
       })}
+      <TruncationNote shown={LIST_ROW_LIMIT} total={rows.length} />
     </div>
   )
 }

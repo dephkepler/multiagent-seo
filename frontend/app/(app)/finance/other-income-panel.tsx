@@ -1,8 +1,8 @@
 'use client'
 
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+import { Input, Label } from '@/components/ui/input'
 import { dateLabel, money, todayISO } from './format'
 import type { OtherIncome } from './types'
 
@@ -15,12 +15,16 @@ export interface OtherIncomeValues {
 
 interface Props {
   items: OtherIncome[]
+  // optional and defaulted to false: finance/page.tsx does not pass the query's
+  // isLoading yet, so until it does this stays a no-op and the panel behaves as before
+  loading?: boolean
   pending: boolean
   onCreate: (values: OtherIncomeValues) => Promise<unknown>
   onDelete: (income: OtherIncome) => void
 }
 
-export function OtherIncomePanel({ items, pending, onCreate, onDelete }: Props) {
+export function OtherIncomePanel({ items, loading = false, pending, onCreate, onDelete }: Props) {
+  const id = useId()
   const [receivedAt, setReceivedAt] = useState(todayISO())
   const [amount, setAmount] = useState('')
   const [source, setSource] = useState('')
@@ -57,30 +61,44 @@ export function OtherIncomePanel({ items, pending, onCreate, onDelete }: Props) 
 
       <form onSubmit={submit} className='mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-5'>
         <div>
-          <div className='mb-1 text-xs text-gray-500'>Дата</div>
-          <Input type='date' value={receivedAt} onChange={(e) => setReceivedAt(e.target.value)} />
+          <Label htmlFor={`${id}-received-at`}>Дата</Label>
+          <Input id={`${id}-received-at`} type='date' value={receivedAt} onChange={(e) => setReceivedAt(e.target.value)} />
         </div>
         <div>
-          <div className='mb-1 text-xs text-gray-500'>Сумма, ₴</div>
-          <Input inputMode='decimal' value={amount} onChange={(e) => setAmount(e.target.value)} placeholder='15000' />
+          <Label htmlFor={`${id}-amount`}>Сумма, ₴</Label>
+          <Input
+            id={`${id}-amount`}
+            inputMode='decimal'
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            placeholder='15000'
+          />
         </div>
         <div>
-          <div className='mb-1 text-xs text-gray-500'>Источник</div>
-          <Input value={source} onChange={(e) => setSource(e.target.value)} placeholder='от компании' />
+          <Label htmlFor={`${id}-source`}>Источник</Label>
+          <Input id={`${id}-source`} value={source} onChange={(e) => setSource(e.target.value)} placeholder='от компании' />
         </div>
         <div>
-          <div className='mb-1 text-xs text-gray-500'>Описание</div>
-          <Input value={description} onChange={(e) => setDescription(e.target.value)} />
+          <Label htmlFor={`${id}-description`}>Описание</Label>
+          <Input id={`${id}-description`} value={description} onChange={(e) => setDescription(e.target.value)} />
         </div>
         <div className='flex items-end'>
           <Button type='submit' disabled={pending} className='w-full'>
             {pending ? 'Сохранение…' : 'Добавить'}
           </Button>
         </div>
-        {error && <div className='text-sm text-rose-600 sm:col-span-2 lg:col-span-5'>{error}</div>}
+        {error && (
+          <div className='text-sm text-rose-600 sm:col-span-2 lg:col-span-5' role='alert'>
+            {error}
+          </div>
+        )}
       </form>
 
-      {items.length > 0 && (
+      {loading ? (
+        <div className='mt-3 text-sm text-gray-500'>Загрузка…</div>
+      ) : items.length === 0 ? (
+        <div className='mt-3 text-sm text-gray-500'>Доходов за месяц нет.</div>
+      ) : (
         <ul className='mt-3 grid gap-2 lg:grid-cols-2'>
           {items.map((i) => (
             <li key={i.id} className='flex items-center justify-between gap-2 rounded-md border border-gray-200 bg-white p-3'>

@@ -39,6 +39,18 @@ export function PLTable({ report, categories, activeMonth, onPickMonth }: Props)
   const noSpend = months.map((m) => m.marketing_spend === 0)
   const colSpan = months.length + 2
 
+  // A freshly-picked period can resolve to a window with no months in it yet
+  // (e.g. a brand-new account with no data at all) — without this, the table
+  // still renders with a "Статья | Итого" header and nothing underneath, which
+  // reads as broken rather than as "nothing here yet".
+  if (months.length === 0) {
+    return (
+      <div className='rounded-md border border-dashed border-gray-200 px-4 py-8 text-center text-sm text-gray-500'>
+        В этом периоде пока нет ни одного месяца с данными.
+      </div>
+    )
+  }
+
   return (
     <div className='-mx-6 overflow-x-auto sm:mx-0'>
       <table className='w-full min-w-max border-separate border-spacing-0 text-sm'>
@@ -51,7 +63,9 @@ export function PLTable({ report, categories, activeMonth, onPickMonth }: Props)
                   type='button'
                   onClick={() => onPickMonth(m.month)}
                   className={cx(
-                    'min-h-[40px] rounded px-2.5 py-2 whitespace-nowrap',
+                    // 44px min — the iOS/Android comfortable-tap-target floor; this is the
+                    // only clickable thing on the page dense enough for 40px to bite on a phone.
+                    'min-h-[44px] rounded px-2.5 py-2 whitespace-nowrap',
                     m.month === activeMonth ? 'bg-emerald-100 font-semibold text-emerald-800' : 'hover:bg-gray-100'
                   )}
                 >

@@ -12,6 +12,7 @@ import { Select } from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { SectionHeader } from '@/components/ui/section-header'
+import { StatTile } from '@/components/ui/stat-tile'
 import { cx } from '@/lib/cx'
 import {
   categoryColorClass,
@@ -201,17 +202,6 @@ function formsEqual(a: ClientForm, b: ClientForm): boolean {
   return (Object.keys(a) as (keyof ClientForm)[]).every((k) => a[k] === b[k])
 }
 
-function MetricTile({ label, value, accent }: { label: string; value: string; accent?: 'bad' | 'good' }) {
-  return (
-    <div className='rounded-md border border-gray-100 bg-gray-50/60 p-3'>
-      <div className='text-xs text-gray-500'>{label}</div>
-      <div className={cx('mt-0.5 text-lg font-semibold', accent === 'bad' ? 'text-rose-600' : accent === 'good' ? 'text-emerald-700' : 'text-gray-800')}>
-        {value}
-      </div>
-    </div>
-  )
-}
-
 export default function ClientDetailPage() {
   const params = useParams<{ id: string }>()
   const id = params.id
@@ -357,7 +347,7 @@ export default function ClientDetailPage() {
             onClick={() => {
               if (window.confirm(`Удалить клиента «${d.client.name || d.client.id}»? Это необратимо.`)) deleteClient.mutate()
             }}
-            className='text-xs text-rose-400 hover:text-rose-600 disabled:cursor-wait disabled:text-gray-300'
+            className='rounded px-1.5 py-1 text-xs text-rose-400 hover:bg-rose-50 hover:text-rose-600 disabled:cursor-wait disabled:text-gray-300'
           >
             {deleteClient.isPending ? 'Удаление…' : 'Удалить клиента'}
           </button>
@@ -367,29 +357,38 @@ export default function ClientDetailPage() {
       <Card>
         <SectionHeader title='Обзор' />
         <div className='grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6'>
-          <div className='col-span-2 rounded-md border border-gray-100 bg-gray-50/60 p-3 sm:col-span-1'>
+          <Card className='col-span-2 p-3 sm:col-span-1 sm:p-4'>
             <div className='text-xs text-gray-500'>Сегмент</div>
             <div className='mt-1 flex items-center gap-1.5'>
               {segment ? (
-                <select
-                  value={segment.segment}
-                  disabled={setOverride.isPending}
-                  onChange={(e) => setOverride.mutate(e.target.value as Segment)}
-                  className={cx('cursor-pointer rounded px-1.5 py-0.5 text-xs font-medium outline-none disabled:cursor-wait', SEGMENT_COLOR[segment.segment])}
-                >
-                  {SEGMENT_ORDER.map((s) => (
-                    <option key={s} value={s}>
-                      {SEGMENT_LABEL[s]}
-                    </option>
-                  ))}
-                </select>
+                <>
+                  <select
+                    value={segment.segment}
+                    disabled={setOverride.isPending}
+                    onChange={(e) => setOverride.mutate(e.target.value as Segment)}
+                    className={cx(
+                      'cursor-pointer rounded px-1.5 py-0.5 text-xs font-medium outline-none disabled:cursor-wait disabled:opacity-60',
+                      SEGMENT_COLOR[segment.segment]
+                    )}
+                  >
+                    {SEGMENT_ORDER.map((s) => (
+                      <option key={s} value={s}>
+                        {SEGMENT_LABEL[s]}
+                      </option>
+                    ))}
+                  </select>
+                  {setOverride.isPending && <span className='text-[10px] text-gray-400'>сохранение…</span>}
+                </>
               ) : (
                 <span className='text-sm text-gray-400'>—</span>
               )}
             </div>
-          </div>
-          <div className='col-span-2 rounded-md border border-gray-100 bg-gray-50/60 p-3 sm:col-span-1'>
-            <div className='mb-1 text-xs text-gray-500'>Теги</div>
+          </Card>
+          <Card className='col-span-2 p-3 sm:col-span-1 sm:p-4'>
+            <div className='mb-1 flex items-center gap-1.5 text-xs text-gray-500'>
+              Теги
+              {(addTag.isPending || removeTag.isPending) && <span className='text-[10px] text-gray-400'>сохранение…</span>}
+            </div>
             <TagsEditor
               tags={segment?.tags ?? []}
               manualTags={segment?.manual_tags ?? []}
@@ -399,11 +398,11 @@ export default function ClientDetailPage() {
               onAdd={(tag) => addTag.mutate(tag)}
               onRemove={(tag) => removeTag.mutate(tag)}
             />
-          </div>
-          <MetricTile label='Принесено денег' value={fmtMoney(d.revenue_total)} accent='good' />
-          <MetricTile label='Долг' value={debtTotal > 0 ? fmtMoney(debtTotal) : '—'} accent={debtTotal > 0 ? 'bad' : undefined} />
-          <MetricTile label='Дел' value={`${d.cases.length}${casesActive ? ` (${casesActive} в работе)` : ''}`} />
-          <MetricTile label='Консультаций' value={`${d.consultations.length}${consultsDone ? ` (${consultsDone} провёл)` : ''}`} />
+          </Card>
+          <StatTile label='Принесено денег' value={fmtMoney(d.revenue_total)} accent='good' />
+          <StatTile label='Долг' value={debtTotal > 0 ? fmtMoney(debtTotal) : '—'} accent={debtTotal > 0 ? 'bad' : undefined} />
+          <StatTile label='Дел' value={`${d.cases.length}${casesActive ? ` (${casesActive} в работе)` : ''}`} />
+          <StatTile label='Консультаций' value={`${d.consultations.length}${consultsDone ? ` (${consultsDone} провёл)` : ''}`} />
         </div>
         <p className='mt-4 text-xs text-gray-400'>
           Первое обращение: {fmtDate(d.client.first_seen_at)} · Последняя активность: {fmtDate(d.client.last_seen_at)}

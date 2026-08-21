@@ -131,7 +131,17 @@ export function Ledger({
       </div>
 
       {loading && <div className='mt-4 text-sm text-gray-500'>Загрузка…</div>}
-      {!loading && items.length === 0 && <div className='mt-4 text-sm text-gray-500'>За этот месяц расходов нет.</div>}
+      {!loading && items.length === 0 && (
+        <div className='mt-4 text-sm text-gray-500'>
+          {/* "за этот месяц" was hardcoded regardless of scope/filters — false claim when
+              viewing the whole period, or when filters (not the month) are why the list is empty. */}
+          {active > 0
+            ? 'По выбранным фильтрам ничего не найдено.'
+            : filters.scope === 'period'
+              ? 'За этот период расходов нет.'
+              : 'За этот месяц расходов нет.'}
+        </div>
+      )}
 
       {items.length > 0 && (
         <div className={fetching ? 'opacity-50 transition-opacity' : undefined}>

@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
@@ -166,6 +166,11 @@ export default function GeneratePage() {
     return () => window.removeEventListener('keydown', onKey)
   }, [infoId])
 
+  const closeButtonRef = useRef<HTMLButtonElement>(null)
+  useEffect(() => {
+    if (infoId != null) closeButtonRef.current?.focus()
+  }, [infoId])
+
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
     if (!busy) return
@@ -222,7 +227,9 @@ export default function GeneratePage() {
           )}
           <Field label='Site' className='md:col-span-2'>
             <Select value={form.site_id} onChange={(e) => on('site_id', e.target.value)} required disabled={sites.isLoading}>
-              {siteOptions.length === 0 && <option value=''>{sites.isLoading ? 'Loading…' : 'No sites configured'}</option>}
+              {siteOptions.length === 0 && (
+                <option value=''>{sites.isError ? 'Failed to load sites' : sites.isLoading ? 'Loading…' : 'No sites configured'}</option>
+              )}
               {siteOptions.map((s) => (
                 <option key={s.id} value={s.id}>
                   {s.alias}
@@ -318,8 +325,8 @@ export default function GeneratePage() {
             <tbody>
               {items.length === 0 && (
                 <tr>
-                  <td colSpan={8} className='py-6 text-center text-gray-400'>
-                    {articles.isLoading ? 'Loading…' : 'No articles yet'}
+                  <td colSpan={8} className={`py-6 text-center ${articles.isError ? 'text-rose-600' : 'text-gray-400'}`}>
+                    {articles.isError ? 'Failed to load articles' : articles.isLoading ? 'Loading…' : 'No articles yet'}
                   </td>
                 </tr>
               )}
@@ -362,23 +369,15 @@ export default function GeneratePage() {
         <div className='mt-4 flex flex-wrap items-center justify-between gap-2 text-sm text-gray-500'>
           <span>{total} total</span>
           <div className='flex items-center gap-1'>
-            <button
-              onClick={() => setPage((p) => Math.max(0, p - 1))}
-              disabled={page === 0}
-              className='rounded px-3 py-2 hover:bg-gray-100 disabled:opacity-40'
-            >
+            <Button variant='ghost' size='sm' onClick={() => setPage((p) => Math.max(0, p - 1))} disabled={page === 0}>
               ← Prev
-            </button>
+            </Button>
             <span>
               Page {page + 1} / {totalPages}
             </span>
-            <button
-              onClick={() => setPage((p) => p + 1)}
-              disabled={page + 1 >= totalPages}
-              className='rounded px-3 py-2 hover:bg-gray-100 disabled:opacity-40'
-            >
+            <Button variant='ghost' size='sm' onClick={() => setPage((p) => p + 1)} disabled={page + 1 >= totalPages}>
               Next →
-            </button>
+            </Button>
           </div>
         </div>
       </Card>
@@ -386,6 +385,8 @@ export default function GeneratePage() {
       {infoId != null && (
         <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4' onClick={() => setInfoId(null)}>
           <div
+            role='dialog'
+            aria-modal='true'
             className='max-h-[85vh] w-full max-w-2xl overflow-auto rounded-lg bg-white p-6 shadow-xl'
             onClick={(e) => e.stopPropagation()}
           >
@@ -393,7 +394,9 @@ export default function GeneratePage() {
               title={`Article #${infoId}`}
               action={
                 <button
+                  ref={closeButtonRef}
                   onClick={() => setInfoId(null)}
+                  aria-label='Close'
                   className='rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700'
                 >
                   ✕

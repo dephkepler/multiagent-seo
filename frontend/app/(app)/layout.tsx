@@ -17,7 +17,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     setReady(true)
   }, [router])
 
-  if (!ready) return null
+  if (!ready) return <div className='min-h-screen' aria-busy='true' />
 
   return (
     <div className='min-h-screen'>
