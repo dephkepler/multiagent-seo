@@ -488,12 +488,18 @@ func (r *FinanceRepository) MonthlyFacts(ctx context.Context, from, to time.Time
 			SELECT generate_series(b.lo::timestamp, (b.hi - interval '1 month')::timestamp, interval '1 month')::date AS month
 			FROM bounds b
 		),
+		-- Revenue is bucketed by the day the money arrived where that is known
+		-- (paid_at), and by the consultation's own day where it is not — every
+		-- imported row. A NULL paid means nobody was ever asked, and those keep
+		-- counting, because that is what the company's own monthly totals did and
+		-- they reconcile. A false paid is an answer, and does not count.
 		consult AS (
-			SELECT date_trunc('month', c.scheduled_at AT TIME ZONE '` + businessTZ + `')::date AS month,
-				coalesce(sum(c.price) FILTER (WHERE c.price > 0 AND c.status = 'completed'), 0) AS revenue,
-				count(*) FILTER (WHERE c.price > 0 AND c.status = 'completed') AS held
+			SELECT date_trunc('month', coalesce(c.paid_at, (c.scheduled_at AT TIME ZONE '` + businessTZ + `')::date))::date AS month,
+				coalesce(sum(c.price) FILTER (WHERE c.price > 0 AND c.status = 'completed' AND c.paid IS NOT FALSE), 0) AS revenue,
+				count(*) FILTER (WHERE c.price > 0 AND c.status = 'completed' AND c.paid IS NOT FALSE) AS held
 			FROM consultations c, bounds b
-			WHERE c.scheduled_at >= b.lo AND c.scheduled_at < b.hi
+			WHERE coalesce(c.paid_at, (c.scheduled_at AT TIME ZONE '` + businessTZ + `')::date) >= b.lo
+				AND coalesce(c.paid_at, (c.scheduled_at AT TIME ZONE '` + businessTZ + `')::date) < b.hi
 			GROUP BY 1
 		),
 		case_paid AS (
@@ -655,8 +661,8 @@ func (r *FinanceRepository) BalanceBefore(ctx context.Context, from time.Time) (
 	const q = `
 		SELECT
 			coalesce((SELECT sum(price) FROM consultations
-				WHERE price > 0 AND status = 'completed'
-					AND (scheduled_at AT TIME ZONE '` + businessTZ + `') < @from::date), 0)
+				WHERE price > 0 AND status = 'completed' AND paid IS NOT FALSE
+					AND coalesce(paid_at, (scheduled_at AT TIME ZONE '` + businessTZ + `')::date) < @from::date), 0)
 			+ coalesce((SELECT sum(amount) FROM case_payments WHERE paid_at < @from::date), 0)
 			+ coalesce((SELECT sum(amount) FROM other_income WHERE received_at < @from::date), 0)
 			- coalesce((SELECT sum(amount) FROM expenses
@@ -731,6 +737,15 @@ func (r *FinanceRepository) DataGaps(ctx context.Context, from, to time.Time) ([
 			args: pgx.NamedArgs{"from": from, "to": to},
 		},
 		{
+			// Money a client owes for a consultation that did happen. Impossible to
+			// see before consultations carried a payment answer at all.
+			kind: finance.GapUnpaidCompleted,
+			query: `SELECT count(*), coalesce(sum(price), 0) FROM consultations
+				WHERE status = 'completed' AND price > 0 AND paid = false
+					AND (scheduled_at AT TIME ZONE '` + businessTZ + `')::date BETWEEN @from::date AND @to::date`,
+			args: pgx.NamedArgs{"from": from, "to": to},
+		},
+		{
 			kind:  finance.GapFutureConsultations,
 			query: `SELECT count(*), coalesce(sum(price), 0) FROM consultations WHERE scheduled_at > now()`,
 			args:  pgx.NamedArgs{},
@@ -776,13 +791,13 @@ func (r *FinanceRepository) DataRange(ctx context.Context) (time.Time, time.Time
 		SELECT
 			least(
 				(SELECT min(spent_at) FROM expenses WHERE status = 'posted'),
-				(SELECT min((scheduled_at AT TIME ZONE '` + businessTZ + `')::date) FROM consultations WHERE price > 0 AND status = 'completed'),
+				(SELECT min(coalesce(paid_at, (scheduled_at AT TIME ZONE '` + businessTZ + `')::date)) FROM consultations WHERE price > 0 AND status = 'completed' AND paid IS NOT FALSE),
 				(SELECT min(paid_at) FROM case_payments),
 				(SELECT min(received_at) FROM other_income)
 			),
 			greatest(
 				(SELECT max(spent_at) FROM expenses WHERE status = 'posted'),
-				(SELECT max((scheduled_at AT TIME ZONE '` + businessTZ + `')::date) FROM consultations WHERE price > 0 AND status = 'completed'),
+				(SELECT max(coalesce(paid_at, (scheduled_at AT TIME ZONE '` + businessTZ + `')::date)) FROM consultations WHERE price > 0 AND status = 'completed' AND paid IS NOT FALSE),
 				(SELECT max(paid_at) FROM case_payments),
 				(SELECT max(received_at) FROM other_income)
 			),

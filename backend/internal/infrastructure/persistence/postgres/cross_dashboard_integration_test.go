@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"multiagent-seo/internal/domain/finance"
 	"multiagent-seo/internal/infrastructure/persistence/postgres"
 	"multiagent-seo/internal/testsupport"
 )
@@ -130,4 +131,71 @@ func seedCaseWithMoney(t *testing.T, pool *pgxpool.Pool, clientID, advocateName 
 		t.Fatalf("seed case: %v", err)
 	}
 	return id
+}
+
+// A consultation that happened but was not paid must vanish from BOTH pages'
+// revenue at once. Before consultations carried a payment answer, "провів" alone
+// booked the money and there was no way to say it never arrived.
+func TestUnpaidConsultationCountsOnNeitherPage(t *testing.T) {
+	ctx := context.Background()
+	pool := testsupport.NewTestDB(t, baseConnStr)
+
+	from := financeDate(2026, time.March, 1)
+	to := financeDate(2026, time.March, 31)
+	inMarch := time.Date(2026, time.March, 10, 12, 0, 0, 0, time.UTC)
+
+	clientID := seedClient(t, pool, "+380990000200", "Не заплатил")
+	seedConsultationDated(t, pool, clientID, inMarch, inMarch, 800, "completed")
+	seedConsultationDated(t, pool, clientID, inMarch.AddDate(0, 0, 1), inMarch.AddDate(0, 0, 1), 2000, "completed")
+
+	financeRepo := postgres.NewFinanceRepository(pool)
+	leadStatsRepo := postgres.NewLeadStatsRepository(pool)
+
+	revenue := func() (float64, float64) {
+		t.Helper()
+		facts, err := financeRepo.MonthlyFacts(ctx, from, to)
+		if err != nil {
+			t.Fatalf("MonthlyFacts: %v", err)
+		}
+		totals, err := leadStatsRepo.Totals(ctx, from, to)
+		if err != nil {
+			t.Fatalf("Totals: %v", err)
+		}
+		return facts[0].ConsultRevenue, totals.RevenueEarned
+	}
+
+	// Nobody has been asked yet: both pages count both consultations, exactly as
+	// they did before the column existed.
+	if fin, leads := revenue(); fin != 2800 || leads != 2800 {
+		t.Fatalf("unanswered: finance %v, leads %v, want 2800 each", fin, leads)
+	}
+
+	if _, err := pool.Exec(ctx, `UPDATE consultations SET paid = false WHERE price = 800`); err != nil {
+		t.Fatalf("mark unpaid: %v", err)
+	}
+
+	fin, leads := revenue()
+	if fin != 2000 {
+		t.Errorf("finance revenue = %v, want 2000 — the unpaid 800 is a debt, not income", fin)
+	}
+	if leads != 2000 {
+		t.Errorf("leads revenue = %v, want 2000 — the same money must not read differently on two pages", leads)
+	}
+
+	gaps, err := financeRepo.DataGaps(ctx, from, to)
+	if err != nil {
+		t.Fatalf("DataGaps: %v", err)
+	}
+	var found bool
+	for _, g := range gaps {
+		if g.Kind == finance.GapUnpaidCompleted {
+			found = true
+			if g.Count != 1 || g.Amount != 800 {
+				t.Errorf("unpaid gap = %+v, want 1 row of 800", g)
+			}
+		}
+	}
+	if !found {
+		t.Error("the unpaid consultation must surface as a gap, or the money simply disappears")
+	}
 }

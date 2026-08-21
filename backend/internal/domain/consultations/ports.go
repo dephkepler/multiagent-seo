@@ -43,6 +43,10 @@ type Store interface {
 	Save(ctx context.Context, c Consultation) (Consultation, error)
 	LatestConsultation(ctx context.Context, clientID string) (Consultation, error)
 	UpdateStatus(ctx context.Context, consultationID, status string) error
+	// MarkCompleted records that the consultation happened AND whether it was
+	// paid — one action, because the bot asks it in one tap. paidAt is only
+	// stored when paid is true.
+	MarkCompleted(ctx context.Context, consultationID string, paid bool, paidAt time.Time) error
 	// CreateAdvocate always adds a new advocate — advocates are a roster,
 	// not a single slot (see ABL 017's original one-advocate note, since
 	// superseded).

@@ -4,11 +4,13 @@ package postgres_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"multiagent-seo/internal/domain/consultations"
 	"multiagent-seo/internal/infrastructure/persistence/postgres"
 	"multiagent-seo/internal/testsupport"
 )
@@ -130,5 +132,34 @@ func TestConsultationRepository_DeactivateAdvocate(t *testing.T) {
 	}
 	if len(all) != 1 {
 		t.Errorf("ListAdvocates(false) after deactivate = %d advocates, want 1 (row should still exist)", len(all))
+	}
+}
+
+// The web CRM's client card lets staff hand-edit a client's phone; editing
+// it to a number another client already has must fail with a clear
+// consultations.ErrPhoneInUse, not a raw unique-violation from
+// uq_clients_phone (see clientdetail handler's error map, which turns this
+// into a 409 instead of a bare 500).
+func TestConsultationRepository_UpdateClient_DuplicatePhoneFails(t *testing.T) {
+	ctx := context.Background()
+	pool := testsupport.NewTestDB(t, baseConnStr)
+	repo := postgres.NewConsultationRepository(pool, testEncryptionKey)
+
+	existing, err := repo.CreateClient(ctx, "Ганна Коваль", "+380501112222", "", "")
+	if err != nil {
+		t.Fatalf("CreateClient(existing): %v", err)
+	}
+	other, err := repo.CreateClient(ctx, "Ярослав Борзов", "+380503334444", "", "")
+	if err != nil {
+		t.Fatalf("CreateClient(other): %v", err)
+	}
+
+	err = repo.UpdateClient(ctx, other.ID, consultations.ClientEdit{
+		FirstName:  "Ярослав",
+		Phone:      existing.Phone,
+		ClientType: consultations.ClientTypeIndividual,
+	})
+	if !errors.Is(err, consultations.ErrPhoneInUse) {
+		t.Fatalf("UpdateClient with a phone already in use: err = %v, want errors.Is(err, consultations.ErrPhoneInUse)", err)
 	}
 }

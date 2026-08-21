@@ -1,9 +1,16 @@
 package consultations
 
 import (
+	"errors"
 	"strings"
 	"time"
 )
+
+// ErrPhoneInUse is returned by UpdateClient when the new phone number
+// already belongs to a different client — see the partial unique index
+// uq_clients_phone (clients without a phone can coexist freely, but two
+// clients can't share one).
+var ErrPhoneInUse = errors.New("consultations: phone already in use by another client")
 
 // Status values a consultation can hold. Every consultation starts
 // Scheduled (the DB column defaults to it) — staff move it to one of the
@@ -23,6 +30,11 @@ type Consultation struct {
 	CaseNote    string
 	CreatedBy   string
 	Status      string
+	// nil means nobody was asked — true of every row imported from the
+	// spreadsheet, and those still count as revenue. false is an answer: the
+	// consultation happened and the client owes for it.
+	Paid   *bool
+	PaidAt *time.Time
 }
 
 type Client struct {

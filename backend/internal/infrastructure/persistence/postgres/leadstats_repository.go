@@ -19,6 +19,10 @@ func NewLeadStatsRepository(db *pgxpool.Pool) *LeadStatsRepository {
 	return &LeadStatsRepository{db: db}
 }
 
+// A consultation marked held-but-unpaid is not earned revenue here either:
+// consultations gained a payment answer (migration 000053) and the finance P&L
+// stopped counting those, so this page has to as well or the same money reads
+// differently on two screens. A NULL paid — every imported row — still counts.
 // Totals counts leads by received_at and consultations by created_at —
 // deliberately not the same column, since a consultation's created_at is
 // "when it was booked" (what happened this period) while its scheduled_at
@@ -44,7 +48,7 @@ func (r *LeadStatsRepository) Totals(ctx context.Context, from, to time.Time) (l
 		SELECT
 			count(*),
 			coalesce(sum(price) FILTER (WHERE price > 0), 0),
-			coalesce(sum(price) FILTER (WHERE price > 0 AND status = 'completed'), 0),
+			coalesce(sum(price) FILTER (WHERE price > 0 AND status = 'completed' AND paid IS NOT FALSE), 0),
 			coalesce(sum(price) FILTER (WHERE price > 0 AND status IN ('cancelled', 'no_show')), 0),
 			count(*) FILTER (WHERE price > 0 AND status = 'completed')
 		FROM consultations WHERE created_at BETWEEN @from AND @to`
@@ -108,7 +112,7 @@ func (r *LeadStatsRepository) Trend(ctx context.Context, from, to time.Time, gro
 		), c AS (
 			SELECT date_trunc('%s', created_at) AS bucket,
 				count(*) AS consultations,
-				coalesce(sum(price) FILTER (WHERE price > 0 AND status = 'completed'), 0) AS revenue_earned
+				coalesce(sum(price) FILTER (WHERE price > 0 AND status = 'completed' AND paid IS NOT FALSE), 0) AS revenue_earned
 			FROM consultations WHERE created_at BETWEEN @from AND @to
 			GROUP BY 1
 		)
@@ -162,7 +166,7 @@ func (r *LeadStatsRepository) BySource(ctx context.Context, from, to time.Time) 
 		),
 		consult_agg AS (
 			SELECT client_id,
-				coalesce(sum(price) FILTER (WHERE price > 0 AND status = 'completed'), 0) AS revenue
+				coalesce(sum(price) FILTER (WHERE price > 0 AND status = 'completed' AND paid IS NOT FALSE), 0) AS revenue
 			FROM consultations GROUP BY client_id
 		),
 		case_agg AS (
@@ -207,7 +211,7 @@ func (r *LeadStatsRepository) BySource(ctx context.Context, from, to time.Time) 
 // bookings actually happened.
 func (r *LeadStatsRepository) ByCreator(ctx context.Context, from, to time.Time) ([]leadstats.CreatorRevenue, error) {
 	const q = `
-		SELECT created_by, count(*), coalesce(sum(price) FILTER (WHERE price > 0 AND status = 'completed'), 0)
+		SELECT created_by, count(*), coalesce(sum(price) FILTER (WHERE price > 0 AND status = 'completed' AND paid IS NOT FALSE), 0)
 		FROM consultations
 		WHERE created_at BETWEEN @from AND @to
 		GROUP BY created_by ORDER BY 3 DESC, count(*) DESC`

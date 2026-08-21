@@ -1379,9 +1379,16 @@ func (b *AdminBot) finishBooking(ctx context.Context, chatID, userID int64, draf
 }
 
 func (b *AdminBot) statusKeyboard(ctx context.Context, chatID int64, consultationID string) tgbotapi.InlineKeyboardMarkup {
+	// Four buttons instead of three: "провів" alone left revenue counted with
+	// nobody knowing whether the money arrived. The tokens are short on purpose
+	// — callback_data is capped at 64 bytes and "cstatus:" plus a uuid already
+	// eats 45 of them.
 	return tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData(b.tr(ctx, chatID, "✅ Провів"), "cstatus:"+consultationID+":"+consultations.StatusCompleted),
+			tgbotapi.NewInlineKeyboardButtonData(b.tr(ctx, chatID, "✅ Провів, оплатив"), "cstatus:"+consultationID+":paid"),
+			tgbotapi.NewInlineKeyboardButtonData(b.tr(ctx, chatID, "⏳ Провів, не оплатив"), "cstatus:"+consultationID+":unpaid"),
+		),
+		tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData(b.tr(ctx, chatID, "❌ Скасував"), "cstatus:"+consultationID+":"+consultations.StatusCancelled),
 			tgbotapi.NewInlineKeyboardButtonData(b.tr(ctx, chatID, "🚫 Не прийшов"), "cstatus:"+consultationID+":"+consultations.StatusNoShow),
 		),
@@ -1477,13 +1484,28 @@ func (b *AdminBot) handleCallback(ctx context.Context, cb *tgbotapi.CallbackQuer
 	}
 }
 
+// "paid" and "unpaid" are not statuses — both mean completed and carry the
+// payment answer with them. Revenue is recognised on the paid one only, so this
+// one tap is what stops the P&L booking money that never arrived.
 func (b *AdminBot) handleStatusCallback(ctx context.Context, cb *tgbotapi.CallbackQuery, consultationID, status string) {
-	if err := b.store.UpdateStatus(ctx, consultationID, status); err != nil {
+	var err error
+	var label string
+	switch status {
+	case "paid":
+		err = b.store.MarkCompleted(ctx, consultationID, true, time.Now())
+		label = b.tr(ctx, cb.From.ID, "Провів, оплатив ✅")
+	case "unpaid":
+		err = b.store.MarkCompleted(ctx, consultationID, false, time.Time{})
+		label = b.tr(ctx, cb.From.ID, "Провів, не оплатив ⏳")
+	default:
+		err = b.store.UpdateStatus(ctx, consultationID, status)
+		label = b.tr(ctx, cb.From.ID, statusLabel(status))
+	}
+	if err != nil {
 		b.log.ErrorContext(ctx, "telegram: update consultation status failed", "err", err)
 		b.answerCallback(ctx, cb, "Не вдалося зберегти")
 		return
 	}
-	label := b.tr(ctx, cb.From.ID, statusLabel(status))
 	b.answerCallback(ctx, cb, fmt.Sprintf(b.tr(ctx, cb.From.ID, "Статус: %s"), label))
 
 	if cb.Message == nil {
@@ -2519,11 +2541,15 @@ var ukToRu = map[string]string{
 	"✅ Вже відбулася, оплачена":  "✅ Уже состоялась, оплачена",
 	"Готово. Перешліть клієнту:": "Готово. Перешлите клиенту:",
 	"Додано заднім числом (%s). За бажанням перешліть клієнту:\n\n%s": "Добавлено задним числом (%s). При желании перешлите клиенту:\n\n%s",
-	"✅ Провів":       "✅ Провёл",
-	"❌ Скасував":     "❌ Отменил",
-	"🚫 Не прийшов":   "🚫 Не пришёл",
-	"Статус: %s":     "Статус: %s",
-	"\n\nСтатус: %s": "\n\nСтатус: %s",
+	"✅ Провів, оплатив":    "✅ Провёл, оплатил",
+	"⏳ Провів, не оплатив": "⏳ Провёл, не оплатил",
+	"Провів, оплатив ✅":    "Провёл, оплатил ✅",
+	"Провів, не оплатив ⏳": "Провёл, не оплатил ⏳",
+	"✅ Провів":             "✅ Провёл",
+	"❌ Скасував":           "❌ Отменил",
+	"🚫 Не прийшов":         "🚫 Не пришёл",
+	"Статус: %s":           "Статус: %s",
+	"\n\nСтатус: %s":       "\n\nСтатус: %s",
 	"Не розпізнав дату/час. Спробуйте ще раз: /book <code>%s</code>": "Не распознал дату/время. Попробуйте ещё раз: /book <code>%s</code>",
 	"Не вдалося зберегти консультацію, спробуйте ще раз.":            "Не удалось сохранить консультацию, попробуйте ещё раз.",
 

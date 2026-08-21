@@ -240,6 +240,7 @@ const (
 	GapNoShowPriced            = "no_show_priced"
 	GapZeroPricedCompleted     = "zero_priced_completed"
 	GapFutureConsultations     = "future_consultations"
+	GapUnpaidCompleted         = "unpaid_completed"
 	GapUnlinkedCases           = "unlinked_cases"
 	GapDuplicateAdvocates      = "duplicate_advocates"
 )

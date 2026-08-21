@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"multiagent-seo/internal/domain/consultations"
@@ -223,6 +224,10 @@ func (r *ConsultationRepository) UpdateClient(ctx context.Context, clientID stri
 		"id":           clientID,
 	})
 	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "uq_clients_phone" {
+			return fmt.Errorf("update client %q: %w", clientID, consultations.ErrPhoneInUse)
+		}
 		return fmt.Errorf("update client %q: %w", clientID, err)
 	}
 	if tag.RowsAffected() == 0 {
@@ -278,6 +283,24 @@ func (r *ConsultationRepository) UpdateStatus(ctx context.Context, consultationI
 	}
 	if tag.RowsAffected() == 0 {
 		return fmt.Errorf("update consultation status: no consultation with id %q", consultationID)
+	}
+	return nil
+}
+
+// MarkCompleted writes the status and the payment answer together: they come
+// from one tap in the bot, and a half-applied pair would leave revenue that the
+// P&L counts with nobody knowing whether it arrived.
+func (r *ConsultationRepository) MarkCompleted(ctx context.Context, consultationID string, paid bool, paidAt time.Time) error {
+	const q = `UPDATE consultations
+		SET status = 'completed', paid = @paid, paid_at = CASE WHEN @paid::boolean THEN @paid_at::date ELSE NULL END
+		WHERE id = @id`
+
+	tag, err := r.db.Exec(ctx, q, pgx.NamedArgs{"paid": paid, "paid_at": paidAt, "id": consultationID})
+	if err != nil {
+		return fmt.Errorf("mark consultation completed %q: %w", consultationID, err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("mark consultation completed: no consultation with id %q", consultationID)
 	}
 	return nil
 }

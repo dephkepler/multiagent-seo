@@ -131,7 +131,8 @@ var clientDetailErrMap = newErrMap("handlers.clientdetail",
 	EMsg(domain.ErrEmptyNote, http.StatusBadRequest),
 	EMsg(domain.ErrInvalidGender, http.StatusBadRequest),
 	EMsg(domain.ErrInvalidClientType, http.StatusBadRequest),
-	EMsg(domain.ErrHasHistory, http.StatusConflict),
+	E(domain.ErrHasHistory, http.StatusConflict, "У клиента есть история (заявки/консультации/дела) — удаление запрещено."),
+	E(consultations.ErrPhoneInUse, http.StatusConflict, "этот номер телефона уже используется другим клиентом"),
 )
 
 func (h *ClientDetailHandler) writeError(ctx context.Context, w http.ResponseWriter, op string, err error) {

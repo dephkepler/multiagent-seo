@@ -1,0 +1,2 @@
+ALTER TABLE consultations DROP COLUMN IF EXISTS paid_at;
+ALTER TABLE consultations DROP COLUMN IF EXISTS paid;
