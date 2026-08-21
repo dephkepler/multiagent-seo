@@ -103,9 +103,9 @@ const CLIENT_TYPE_LABEL: Record<ClientType, string> = { individual: 'Фізич�
 
 const CONSULT_STATUS_LABEL: Record<ConsultationStatus, string> = {
   scheduled: 'Запланирована',
-  completed: 'Провёл',
-  cancelled: 'Отменил',
-  no_show: 'Не пришёл',
+  completed: 'Проведена',
+  cancelled: 'Отменена',
+  no_show: 'Клиент не пришёл',
 }
 const CASE_STATUS_LABEL: Record<CaseStatus, string> = {
   in_progress: 'В работе',
@@ -259,7 +259,8 @@ export default function ClientDetailPage() {
   // from) without an Effect, so typing doesn't fight a re-render.
   const [loadedFor, setLoadedFor] = useState<ClientDetail | undefined>(undefined)
   const [form, setForm] = useState<ClientForm | null>(null)
-  if (detail.data && detail.data !== loadedFor) {
+  const dirtyNow = form != null && loadedFor != null && !formsEqual(form, toForm(loadedFor.client))
+  if (detail.data && detail.data !== loadedFor && !dirtyNow) {
     setLoadedFor(detail.data)
     setForm(toForm(detail.data.client))
   }
@@ -336,23 +337,31 @@ export default function ClientDetailPage() {
 
   return (
     <div className='space-y-6'>
-      <div className='flex flex-wrap items-center justify-between gap-2'>
-        <Link href='/clients' className='text-sm text-gray-500 hover:text-gray-700'>
-          ← Все клиенты
-        </Link>
+      <div className='flex flex-wrap items-center justify-between gap-3'>
         <div className='flex min-w-0 items-center gap-3'>
-          <span className='truncate font-mono text-xs text-gray-400 select-all'>Client ID: {d.client.id}</span>
-          <button
-            type='button'
-            disabled={deleteClient.isPending}
-            onClick={() => {
-              if (window.confirm(`Удалить клиента «${d.client.name || d.client.id}»? Это необратимо.`)) deleteClient.mutate()
+          <Link
+            href='/clients'
+            onClick={(e) => {
+              if (dirty && !window.confirm('Есть несохранённые изменения в карточке клиента. Уйти без сохранения?')) {
+                e.preventDefault()
+              }
             }}
-            className='rounded px-1.5 py-1 text-xs text-rose-400 hover:bg-rose-50 hover:text-rose-600 disabled:cursor-wait disabled:text-gray-300'
+            className='text-sm text-gray-500 hover:text-gray-700'
           >
-            {deleteClient.isPending ? 'Удаление…' : 'Удалить клиента'}
-          </button>
+            ← Все клиенты
+          </Link>
+          <span className='truncate font-mono text-xs text-gray-400 select-all'>Client ID: {d.client.id}</span>
         </div>
+        <button
+          type='button'
+          disabled={deleteClient.isPending}
+          onClick={() => {
+            if (window.confirm(`Удалить клиента «${d.client.name || d.client.id}»? Это необратимо.`)) deleteClient.mutate()
+          }}
+          className='shrink-0 rounded-md border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-medium text-rose-600 hover:border-rose-300 hover:bg-rose-100 disabled:cursor-wait disabled:opacity-50'
+        >
+          {deleteClient.isPending ? 'Удаление…' : 'Удалить клиента'}
+        </button>
       </div>
 
       <Card>
@@ -366,7 +375,7 @@ export default function ClientDetailPage() {
                   <select
                     value={segment.segment}
                     disabled={setOverride.isPending}
-                    onChange={(e) => setOverride.mutate(e.target.value as Segment)}
+                    onChange={(e) => setOverride.mutate(e.target.value === '' ? null : (e.target.value as Segment))}
                     className={cx(
                       'cursor-pointer rounded px-1.5 py-0.5 text-xs font-medium outline-none disabled:cursor-wait disabled:opacity-60',
                       SEGMENT_COLOR[segment.segment]
@@ -377,6 +386,7 @@ export default function ClientDetailPage() {
                         {SEGMENT_LABEL[s]}
                       </option>
                     ))}
+                    {segment.overridden && <option value=''>Авто (по правилам)</option>}
                   </select>
                   {setOverride.isPending && <span className='text-[10px] text-gray-400'>сохранение…</span>}
                 </>
@@ -412,19 +422,22 @@ export default function ClientDetailPage() {
       </Card>
 
       <Card>
-        <SectionHeader title='Личные данные' />
+        <SectionHeader
+          title='Личные данные'
+          action={dirty && <Badge variant='warning'>Есть несохранённые изменения</Badge>}
+        />
         <div className='grid grid-cols-1 gap-4 md:grid-cols-3'>
           <div>
             <Label>Фамилия</Label>
-            <Input value={form.lastName} onChange={(e) => set('lastName', e.target.value)} placeholder='Фамілія' />
+            <Input value={form.lastName} onChange={(e) => set('lastName', e.target.value)} placeholder='Фамилия' />
           </div>
           <div>
             <Label>Имя</Label>
-            <Input value={form.firstName} onChange={(e) => set('firstName', e.target.value)} placeholder="Ім'я" />
+            <Input value={form.firstName} onChange={(e) => set('firstName', e.target.value)} placeholder='Имя' />
           </div>
           <div>
             <Label>Отчество</Label>
-            <Input value={form.patronymic} onChange={(e) => set('patronymic', e.target.value)} placeholder='По батькові' />
+            <Input value={form.patronymic} onChange={(e) => set('patronymic', e.target.value)} placeholder='Отчество' />
           </div>
           <div>
             <Label>Пол</Label>
@@ -459,19 +472,19 @@ export default function ClientDetailPage() {
                 ))}
               </Select>
             </div>
-            {form.clientType === 'legal_entity' && (
-              <>
-                <div>
-                  <Label>Название компании</Label>
-                  <Input value={form.companyName} onChange={(e) => set('companyName', e.target.value)} placeholder='ТОВ «...»' />
-                </div>
-                <div>
-                  <Label>ЄДРПОУ</Label>
-                  <Input value={form.companyCode} onChange={(e) => set('companyCode', e.target.value)} placeholder='12345678' />
-                </div>
-              </>
-            )}
           </div>
+          {form.clientType === 'legal_entity' && (
+            <div className='mt-4 grid grid-cols-1 gap-4 md:grid-cols-3'>
+              <div>
+                <Label>Название компании</Label>
+                <Input value={form.companyName} onChange={(e) => set('companyName', e.target.value)} placeholder='ТОВ «...»' />
+              </div>
+              <div>
+                <Label>ЄДРПОУ</Label>
+                <Input value={form.companyCode} onChange={(e) => set('companyCode', e.target.value)} placeholder='12345678' />
+              </div>
+            </div>
+          )}
         </div>
 
         <div className='mt-6'>
@@ -483,15 +496,15 @@ export default function ClientDetailPage() {
             }
           />
           <p className='mb-3 text-xs text-gray-400'>
-            Для позовних заяв/клопотань — не для аналитики. Хранятся в базе зашифрованными, не в открытом виде.
+            Для исковых заявлений/ходатайств — не для аналитики. Хранятся в базе зашифрованными, не в открытом виде.
           </p>
           <div className='grid grid-cols-1 gap-4 md:grid-cols-3'>
             <div>
-              <Label>Адреса реєстрації</Label>
-              <Input value={form.address} onChange={(e) => set('address', e.target.value)} placeholder='м. Київ, вул. ...' />
+              <Label>Адрес регистрации</Label>
+              <Input value={form.address} onChange={(e) => set('address', e.target.value)} placeholder='г. Киев, ул. ...' />
             </div>
             <div>
-              <Label>Дата народження</Label>
+              <Label>Дата рождения</Label>
               <Input type='date' value={form.birthdate} onChange={(e) => set('birthdate', e.target.value)} />
             </div>
             <div>
@@ -609,12 +622,14 @@ export default function ClientDetailPage() {
           Ручной журнал звонков/контактов — система не подключена ни к какой телефонии, это то, что вы сами сюда впишете.
         </p>
         <div className='mb-4 flex gap-2'>
-          <Input
+          <textarea
             value={noteText}
             onChange={(e) => setNoteText(e.target.value)}
-            placeholder='Например: звонил, уточнил сроки подачи документов…'
+            placeholder='Например: звонил, уточнил сроки подачи документов… (Ctrl/Cmd+Enter — добавить)'
+            rows={2}
+            className='w-full resize-y rounded-md border border-gray-200 bg-white px-3 py-2 text-sm outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 disabled:cursor-not-allowed disabled:opacity-50'
             onKeyDown={(e) => {
-              if (e.key === 'Enter' && noteText.trim()) addNote.mutate()
+              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && noteText.trim() && !addNote.isPending) addNote.mutate()
             }}
           />
           <Button disabled={!noteText.trim() || addNote.isPending} onClick={() => addNote.mutate()}>
