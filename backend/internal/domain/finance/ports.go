@@ -55,6 +55,9 @@ type ReportSource interface {
 	// BalanceBefore is the cumulative balance of everything before from, so a
 	// report window that starts mid-history still shows a true running total.
 	BalanceBefore(ctx context.Context, from time.Time) (float64, error)
+	// Receivable is what is still owed across every case — live, not scoped to
+	// any window.
+	Receivable(ctx context.Context) (float64, error)
 	// AdvocateCollections is per-advocate case_payments received in month,
 	// paired with that advocate's commission percent.
 	AdvocateCollections(ctx context.Context, month time.Time) ([]AdvocateCollection, error)

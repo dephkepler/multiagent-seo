@@ -1016,6 +1016,10 @@ paths:
           in: query
           schema:
             $ref: "#/components/schemas/ExpenseOrigin"
+        - name: payment_method
+          in: query
+          schema:
+            $ref: "#/components/schemas/ExpensePaymentMethod"
         - name: search
           in: query
           description: Case-insensitive substring match against vendor or description
@@ -2883,7 +2887,7 @@ components:
 
     FinanceMonth:
       type: object
-      required: [ month, income_consult, income_cases, income_other, income_total, expense_by_category, expense_by_kind, expense_total, balance, cumulative, marketing_spend, direct_cost, gross_profit, leads, new_clients, cac, cpl, romi ]
+      required: [ month, income_consult, income_cases, income_other, income_total, expense_by_category, expense_by_kind, expense_total, balance, cumulative, marketing_spend, direct_cost, gross_profit, leads, new_clients, consult_count, case_payment_count, cac, cpl, romi, avg_consult_ticket, avg_case_ticket, margin_percent, marketing_share, revenue_per_client, ltv_to_cac, lead_to_consult, break_even_consults, income_growth ]
       properties:
         month:
           type: string
@@ -2934,6 +2938,11 @@ components:
         new_clients:
           type: integer
           description: Clients whose first-ever lead landed in this month — the CAC denominator
+        consult_count:
+          type: integer
+          description: Priced, completed consultations behind income_consult — the average-ticket divisor
+        case_payment_count:
+          type: integer
         cac:
           type: number
           format: double
@@ -2944,10 +2953,43 @@ components:
         romi:
           type: number
           format: double
+        avg_consult_ticket:
+          type: number
+          format: double
+        avg_case_ticket:
+          type: number
+          format: double
+        margin_percent:
+          type: number
+          format: double
+          description: Balance as a share of income — 0.5 is a 50% margin, negative means the month lost money
+        marketing_share:
+          type: number
+          format: double
+          description: Marketing spend as a share of all spend
+        revenue_per_client:
+          type: number
+          format: double
+          description: Period revenue over clients acquired in it — an LTV proxy, read next to ltv_to_cac
+        ltv_to_cac:
+          type: number
+          format: double
+        lead_to_consult:
+          type: number
+          format: double
+          description: Share of this month's leads that became a paid consultation — a period ratio, not a cohort conversion
+        break_even_consults:
+          type: number
+          format: double
+          description: How many average-ticket consultations the month's spend would have needed to pay for itself
+        income_growth:
+          type: number
+          format: double
+          description: Income against the previous month in the report; 0 for the first month
 
     FinanceReport:
       type: object
-      required: [ months, total ]
+      required: [ months, total, receivable ]
       properties:
         months:
           type: array
@@ -2955,6 +2997,10 @@ components:
             $ref: "#/components/schemas/FinanceMonth"
         total:
           $ref: "#/components/schemas/FinanceMonth"
+        receivable:
+          type: number
+          format: double
+          description: Live sum of what clients still owe across every case (fee minus paid), never scoped to the report window
 
     AdvocateRate:
       type: object

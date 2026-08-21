@@ -2,7 +2,7 @@
 
 import { useMemo } from 'react'
 import { cx } from '@/lib/cx'
-import { moneyShort, monthLabel } from './format'
+import { moneyShort, monthLabel, percent, times } from './format'
 import { KIND_LABEL, type Category, type ExpenseKind, type FinanceReport } from './types'
 
 const KIND_ORDER: ExpenseKind[] = ['marketing', 'direct', 'payroll', 'development', 'infra', 'admin']
@@ -109,10 +109,21 @@ export function PLTable({ report, categories, activeMonth, onPickMonth }: Props)
           <Row label='Баланс' values={months.map((m) => m.balance)} total={report.total.balance} activeIndex={activeIndex} strong signed />
           <Row
             label='Нарастающий итог'
+            hint='на конец месяца, за всё время'
             values={months.map((m) => m.cumulative)}
             total={report.total.cumulative}
             activeIndex={activeIndex}
             signed
+          />
+          <Row
+            label='Маржа'
+            hint='баланс / доход'
+            values={months.map((m) => m.margin_percent)}
+            total={report.total.margin_percent}
+            activeIndex={activeIndex}
+            share
+            undefinedAt={months.map((m) => m.income_total === 0)}
+            totalUndefined={report.total.income_total === 0}
           />
           <Row
             label='Валовая прибыль'
@@ -149,6 +160,92 @@ export function PLTable({ report, categories, activeMonth, onPickMonth }: Props)
             ratio
             undefinedAt={noSpend}
             totalUndefined={report.total.marketing_spend === 0}
+          />
+          <Row
+            label='Доля маркетинга'
+            hint='в расходах'
+            values={months.map((m) => m.marketing_share)}
+            total={report.total.marketing_share}
+            activeIndex={activeIndex}
+            share
+            undefinedAt={months.map((m) => m.expense_total === 0)}
+            totalUndefined={report.total.expense_total === 0}
+          />
+          <Row
+            label='Лид → консультация'
+            values={months.map((m) => m.lead_to_consult)}
+            total={report.total.lead_to_consult}
+            activeIndex={activeIndex}
+            share
+            undefinedAt={months.map((m) => m.leads === 0)}
+            totalUndefined={report.total.leads === 0}
+          />
+          <Row
+            label='Доход на клиента'
+            hint='за период / новых клиентов'
+            values={months.map((m) => m.revenue_per_client)}
+            total={report.total.revenue_per_client}
+            activeIndex={activeIndex}
+          />
+          <Row
+            label='LTV / CAC'
+            hint='<1 — клиент дешевле не окупается'
+            values={months.map((m) => m.ltv_to_cac)}
+            total={report.total.ltv_to_cac}
+            activeIndex={activeIndex}
+            ratio
+            undefinedAt={months.map((m) => m.cac === 0)}
+            totalUndefined={report.total.cac === 0}
+          />
+
+          <GroupRow label='Средние и порог' colSpan={colSpan} />
+          <Row
+            label='Средний чек консультации'
+            values={months.map((m) => m.avg_consult_ticket)}
+            total={report.total.avg_consult_ticket}
+            activeIndex={activeIndex}
+          />
+          <Row
+            label='Консультаций проведено'
+            values={months.map((m) => m.consult_count)}
+            total={report.total.consult_count}
+            activeIndex={activeIndex}
+            plain
+          />
+          <Row
+            label='Средний чек по делу'
+            hint='на одну оплату'
+            values={months.map((m) => m.avg_case_ticket)}
+            total={report.total.avg_case_ticket}
+            activeIndex={activeIndex}
+          />
+          <Row
+            label='Оплат по делам'
+            values={months.map((m) => m.case_payment_count)}
+            total={report.total.case_payment_count}
+            activeIndex={activeIndex}
+            plain
+          />
+          <Row
+            label='Точка безубыточности'
+            hint='консультаций нужно, чтобы покрыть расходы'
+            values={months.map((m) => m.break_even_consults)}
+            total={report.total.break_even_consults}
+            activeIndex={activeIndex}
+            plainRounded
+            undefinedAt={months.map((m) => m.avg_consult_ticket === 0)}
+            totalUndefined={report.total.avg_consult_ticket === 0}
+          />
+          <Row
+            label='Рост дохода'
+            hint='к предыдущему месяцу'
+            values={months.map((m) => m.income_growth)}
+            total={0}
+            activeIndex={activeIndex}
+            share
+            signed
+            undefinedAt={months.map((m, i) => i === 0 || months[i - 1].income_total === 0)}
+            totalUndefined
           />
         </tbody>
       </table>
@@ -193,15 +290,33 @@ interface RowProps {
   strong?: boolean
   signed?: boolean
   plain?: boolean
+  plainRounded?: boolean
   ratio?: boolean
+  share?: boolean
   undefinedAt?: boolean[]
   totalUndefined?: boolean
 }
 
-function Row({ label, hint, values, total, activeIndex, strong, signed, plain, ratio, undefinedAt, totalUndefined }: RowProps) {
+function Row({
+  label,
+  hint,
+  values,
+  total,
+  activeIndex,
+  strong,
+  signed,
+  plain,
+  plainRounded,
+  ratio,
+  share,
+  undefinedAt,
+  totalUndefined,
+}: RowProps) {
   const fmt = (v: number, undef: boolean) => {
     if (plain) return v === 0 ? '—' : String(v)
-    if (ratio) return undef ? '—' : v.toFixed(2) + '×'
+    if (plainRounded) return undef || v === 0 ? '—' : String(Math.round(v))
+    if (ratio) return times(v, undef)
+    if (share) return percent(v, undef)
     return moneyShort(v)
   }
   return (
@@ -217,7 +332,7 @@ function Row({ label, hint, values, total, activeIndex, strong, signed, plain, r
           key={i}
           className={cx(
             'border-b border-gray-100 px-3 py-1.5 text-right tabular-nums group-hover:bg-gray-50',
-            i === activeIndex && 'bg-emerald-50/60',
+            i === activeIndex && 'bg-emerald-50',
             strong && 'font-semibold',
             signed && v < 0 && 'text-rose-600',
             signed && v > 0 && 'text-emerald-700'
@@ -228,7 +343,7 @@ function Row({ label, hint, values, total, activeIndex, strong, signed, plain, r
       ))}
       <td
         className={cx(
-          'border-b border-gray-100 bg-gray-50/60 px-3 py-1.5 text-right font-medium tabular-nums',
+          'border-b border-gray-100 bg-gray-50 px-3 py-1.5 text-right font-medium tabular-nums',
           signed && total < 0 && 'text-rose-600',
           signed && total > 0 && 'text-emerald-700'
         )}

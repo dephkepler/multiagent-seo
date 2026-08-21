@@ -245,6 +245,12 @@ type fakeReportSource struct {
 	openingCalls   []time.Time
 	collections    []domain.AdvocateCollection
 	collectionsErr error
+	receivable     float64
+	receivableErr  error
+}
+
+func (f *fakeReportSource) Receivable(context.Context) (float64, error) {
+	return f.receivable, f.receivableErr
 }
 
 func (f *fakeReportSource) MonthlyFacts(context.Context, time.Time, time.Time) ([]domain.MonthFacts, error) {

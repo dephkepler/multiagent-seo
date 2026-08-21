@@ -70,8 +70,9 @@ func (h *FinanceHandler) GetFinanceReport(w http.ResponseWriter, r *http.Request
 		months[i] = toAPIFinanceMonth(m)
 	}
 	response.WriteJSON(r.Context(), w, http.StatusOK, oapigen.FinanceReport{
-		Months: months,
-		Total:  toAPIFinanceMonth(report.Total),
+		Months:     months,
+		Total:      toAPIFinanceMonth(report.Total),
+		Receivable: report.Receivable,
 	})
 }
 
@@ -96,6 +97,9 @@ func (h *FinanceHandler) ListExpenses(w http.ResponseWriter, r *http.Request, pa
 	}
 	if params.Origin != nil {
 		filter.Origin = domain.Origin(*params.Origin)
+	}
+	if params.PaymentMethod != nil {
+		filter.PaymentMethod = domain.PaymentMethod(*params.PaymentMethod)
 	}
 	if params.Search != nil {
 		filter.Search = *params.Search
@@ -644,9 +648,20 @@ func toAPIFinanceMonth(m domain.MonthReport) oapigen.FinanceMonth {
 		GrossProfit:       m.GrossProfit,
 		Leads:             m.Leads,
 		NewClients:        m.NewClients,
+		ConsultCount:      m.ConsultCount,
+		CasePaymentCount:  m.CasePaymentCount,
 		Cac:               m.CAC,
 		Cpl:               m.CPL,
 		Romi:              m.ROMI,
+		AvgConsultTicket:  m.AvgConsultTicket,
+		AvgCaseTicket:     m.AvgCaseTicket,
+		MarginPercent:     m.MarginPercent,
+		MarketingShare:    m.MarketingShare,
+		RevenuePerClient:  m.RevenuePerClient,
+		LtvToCac:          m.LtvToCac,
+		LeadToConsult:     m.LeadToConsult,
+		BreakEvenConsults: m.BreakEvenConsults,
+		IncomeGrowth:      m.IncomeGrowth,
 	}
 }
 

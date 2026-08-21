@@ -323,7 +323,14 @@ func (s *Service) Report(ctx context.Context, from, to time.Time) (domain.Report
 	if err != nil {
 		return domain.Report{}, fmt.Errorf("finance: opening balance: %w", err)
 	}
-	return domain.BuildReport(facts, categories, opening), nil
+	receivable, err := s.report.Receivable(ctx)
+	if err != nil {
+		return domain.Report{}, fmt.Errorf("finance: receivable: %w", err)
+	}
+
+	report := domain.BuildReport(facts, categories, opening)
+	report.Receivable = receivable
+	return report, nil
 }
 
 // RunAutoExpenses materializes the recurring templates and advocate payouts

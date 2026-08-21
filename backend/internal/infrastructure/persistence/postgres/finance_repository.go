@@ -113,6 +113,7 @@ const expenseFilterWhere = `
 		AND (@category_code::text = '' OR e.category_code = @category_code::text)
 		AND (@status::text = '' OR e.status = @status::text)
 		AND (@origin::text = '' OR e.origin = @origin::text)
+		AND (@payment_method::text = '' OR e.payment_method = @payment_method::text)
 		AND (@search::text = ''
 			OR e.vendor ILIKE '%' || @search::text || '%' ESCAPE '\'
 			OR e.description ILIKE '%' || @search::text || '%' ESCAPE '\')`
@@ -127,14 +128,15 @@ const insertExpense = `INSERT INTO expenses
 // Both cover the whole filtered set, not the returned page.
 func (r *FinanceRepository) ListExpenses(ctx context.Context, filter finance.ExpenseFilter) (finance.ExpenseList, error) {
 	args := pgx.NamedArgs{
-		"from":          nullTime(filter.From),
-		"to":            nullTime(filter.To),
-		"category_code": filter.CategoryCode,
-		"status":        string(filter.Status),
-		"origin":        string(filter.Origin),
-		"search":        escapeLike(filter.Search),
-		"limit":         filter.Limit,
-		"offset":        filter.Offset,
+		"from":           nullTime(filter.From),
+		"to":             nullTime(filter.To),
+		"category_code":  filter.CategoryCode,
+		"status":         string(filter.Status),
+		"origin":         string(filter.Origin),
+		"payment_method": string(filter.PaymentMethod),
+		"search":         escapeLike(filter.Search),
+		"limit":          filter.Limit,
+		"offset":         filter.Offset,
 	}
 
 	var list finance.ExpenseList
@@ -463,13 +465,14 @@ func (r *FinanceRepository) MonthlyFacts(ctx context.Context, from, to time.Time
 		),
 		consult AS (
 			SELECT date_trunc('month', c.scheduled_at AT TIME ZONE '` + businessTZ + `')::date AS month,
-				coalesce(sum(c.price) FILTER (WHERE c.price > 0 AND c.status = 'completed'), 0) AS revenue
+				coalesce(sum(c.price) FILTER (WHERE c.price > 0 AND c.status = 'completed'), 0) AS revenue,
+				count(*) FILTER (WHERE c.price > 0 AND c.status = 'completed') AS held
 			FROM consultations c, bounds b
 			WHERE c.scheduled_at >= b.lo AND c.scheduled_at < b.hi
 			GROUP BY 1
 		),
 		case_paid AS (
-			SELECT date_trunc('month', p.paid_at)::date AS month, sum(p.amount) AS paid
+			SELECT date_trunc('month', p.paid_at)::date AS month, sum(p.amount) AS paid, count(*) AS payments
 			FROM case_payments p, bounds b
 			WHERE p.paid_at >= b.lo AND p.paid_at < b.hi
 			GROUP BY 1
@@ -500,7 +503,9 @@ func (r *FinanceRepository) MonthlyFacts(ctx context.Context, from, to time.Time
 		)
 		SELECT m.month,
 			coalesce(cr.revenue, 0),
+			coalesce(cr.held, 0),
 			coalesce(cp.paid, 0),
+			coalesce(cp.payments, 0),
 			coalesce(oi.amount, 0),
 			coalesce(lc.leads, 0),
 			coalesce(nc.clients, 0)
@@ -524,7 +529,17 @@ func (r *FinanceRepository) MonthlyFacts(ctx context.Context, from, to time.Time
 	for rows.Next() {
 		var monthAt time.Time
 		var f finance.MonthFacts
-		if err := rows.Scan(&monthAt, &f.ConsultRevenue, &f.CasePaid, &f.OtherIncome, &f.Leads, &f.NewClients); err != nil {
+		err := rows.Scan(
+			&monthAt,
+			&f.ConsultRevenue,
+			&f.ConsultCount,
+			&f.CasePaid,
+			&f.CasePaymentCount,
+			&f.OtherIncome,
+			&f.Leads,
+			&f.NewClients,
+		)
+		if err != nil {
 			return nil, fmt.Errorf("monthly facts: scan: %w", err)
 		}
 		f.Month = finance.MonthKey(monthAt)
@@ -585,6 +600,20 @@ func (r *FinanceRepository) BalanceBefore(ctx context.Context, from time.Time) (
 		return 0, fmt.Errorf("balance before: %w", err)
 	}
 	return balance, nil
+}
+
+// Receivable is what clients still owe across every case, ignoring the report
+// window on purpose: money owed on a case opened last year is owed today, and a
+// short window must not make it disappear from the number. Same definition as
+// leadstats' CaseOwed, so the two pages can't disagree about the debt.
+func (r *FinanceRepository) Receivable(ctx context.Context) (float64, error) {
+	const q = `SELECT coalesce(sum(greatest(fee - paid_amount, 0)), 0) FROM cases`
+
+	var owed float64
+	if err := r.db.QueryRow(ctx, q).Scan(&owed); err != nil {
+		return 0, fmt.Errorf("receivable: %w", err)
+	}
+	return owed, nil
 }
 
 // Cases created before the advocates roster only carry free-text

@@ -4,9 +4,13 @@ package finance
 // consultations/case_payments/other_income, expenses already summed per
 // category, plus the two counters the acquisition metrics need.
 type MonthFacts struct {
-	Month             string // MonthKey format, "2026-08"
-	ConsultRevenue    float64
+	Month          string // MonthKey format, "2026-08"
+	ConsultRevenue float64
+	// how many priced, completed consultations made up ConsultRevenue — the
+	// divisor for the average ticket, which a sum alone can't give
+	ConsultCount      int
 	CasePaid          float64
+	CasePaymentCount  int
 	OtherIncome       float64
 	ExpenseByCategory map[string]float64
 	Leads             int
@@ -33,17 +37,49 @@ type MonthReport struct {
 	DirectCost     float64
 	GrossProfit    float64
 
-	Leads      int
-	NewClients int
+	Leads            int
+	NewClients       int
+	ConsultCount     int
+	CasePaymentCount int
 	// 0 when the denominator is 0 — an undefined ratio is not a real zero, but
 	// the alternative (NaN/Inf) crosses JSON as null and breaks the page.
 	CAC  float64
 	CPL  float64
 	ROMI float64
+
+	// Derived numbers the spreadsheet never had. All of them are 0 on a zero
+	// denominator, same rule as the ratios above.
+	AvgConsultTicket float64
+	AvgCaseTicket    float64
+	// MarginPercent is balance as a share of income — the sign matters more than
+	// the magnitude in a month that lost money.
+	MarginPercent float64
+	// MarketingShare is marketing spend as a share of all spend, which is what
+	// makes a heavy month legible: 599 967 ₴ means little, "39% of it is ads" a lot.
+	MarketingShare float64
+	// RevenuePerClient is period revenue over clients acquired in it — a proxy
+	// for LTV, honest only because LtvToCac is read next to it.
+	RevenuePerClient float64
+	LtvToCac         float64
+	// LeadToConsult is the share of this month's leads that turned into a paid
+	// consultation. Not a cohort conversion (a lead converts weeks later — see
+	// leadstats.Funnel for that), just this month's ratio.
+	LeadToConsult float64
+	// BreakEvenConsults is how many average-ticket consultations the month's
+	// spend would have needed to pay for itself.
+	BreakEvenConsults float64
+	// IncomeGrowth is income against the previous month in the report, as a
+	// share: +0.35 is a 35% rise. 0 for the first month, which has nothing to
+	// compare against.
+	IncomeGrowth float64
 }
 
 type Report struct {
 	Months []MonthReport
+	// Receivable is a live figure across every case still owing (fee minus
+	// paid), deliberately not scoped to the report window: money owed from a
+	// case opened last year is still owed today.
+	Receivable float64
 	// Total is the "Итого" column: sums for money, and ratios recomputed from
 	// those sums — averaging per-month CAC/ROMI would weight a quiet month the
 	// same as a loud one.
@@ -77,6 +113,8 @@ func BuildReport(facts []MonthFacts, categories []Category, startingBalance floa
 			ExpenseByKind:     map[Kind]float64{},
 			Leads:             f.Leads,
 			NewClients:        f.NewClients,
+			ConsultCount:      f.ConsultCount,
+			CasePaymentCount:  f.CasePaymentCount,
 		}
 		m.IncomeTotal = roundMoney(f.ConsultRevenue + f.CasePaid + f.OtherIncome)
 
@@ -101,6 +139,10 @@ func BuildReport(facts []MonthFacts, categories []Category, startingBalance floa
 		m.CAC = ratio(m.MarketingSpend, float64(m.NewClients))
 		m.CPL = ratio(m.MarketingSpend, float64(m.Leads))
 		m.ROMI = ratio(m.IncomeTotal-m.MarketingSpend, m.MarketingSpend)
+		deriveExtras(&m, f)
+		if len(months) > 0 {
+			m.IncomeGrowth = ratio(m.IncomeTotal-months[len(months)-1].IncomeTotal, months[len(months)-1].IncomeTotal)
+		}
 
 		total.IncomeConsult += f.ConsultRevenue
 		total.IncomeCases += f.CasePaid
@@ -108,6 +150,8 @@ func BuildReport(facts []MonthFacts, categories []Category, startingBalance floa
 		total.ExpenseTotal += m.ExpenseTotal
 		total.Leads += f.Leads
 		total.NewClients += f.NewClients
+		total.ConsultCount += f.ConsultCount
+		total.CasePaymentCount += f.CasePaymentCount
 
 		months = append(months, m)
 	}
@@ -133,8 +177,32 @@ func BuildReport(facts []MonthFacts, categories []Category, startingBalance floa
 	total.CAC = ratio(total.MarketingSpend, float64(total.NewClients))
 	total.CPL = ratio(total.MarketingSpend, float64(total.Leads))
 	total.ROMI = ratio(total.IncomeTotal-total.MarketingSpend, total.MarketingSpend)
+	deriveExtras(&total, MonthFacts{
+		ConsultRevenue:   total.IncomeConsult,
+		ConsultCount:     total.ConsultCount,
+		CasePaid:         total.IncomeCases,
+		CasePaymentCount: total.CasePaymentCount,
+		Leads:            total.Leads,
+		NewClients:       total.NewClients,
+	})
+	// growth over a whole period has no previous period to compare against
+	total.IncomeGrowth = 0
 
 	return Report{Months: months, Total: total}
+}
+
+// deriveExtras fills the numbers that are pure arithmetic over what is already
+// in the row — kept in one place so the "Итого" column computes them from its
+// own sums instead of averaging the months.
+func deriveExtras(m *MonthReport, f MonthFacts) {
+	m.AvgConsultTicket = ratio(f.ConsultRevenue, float64(f.ConsultCount))
+	m.AvgCaseTicket = ratio(f.CasePaid, float64(f.CasePaymentCount))
+	m.MarginPercent = ratio(m.Balance, m.IncomeTotal)
+	m.MarketingShare = ratio(m.MarketingSpend, m.ExpenseTotal)
+	m.RevenuePerClient = ratio(m.IncomeTotal, float64(f.NewClients))
+	m.LtvToCac = ratio(m.RevenuePerClient, m.CAC)
+	m.LeadToConsult = ratio(float64(f.ConsultCount), float64(f.Leads))
+	m.BreakEvenConsults = ratio(m.ExpenseTotal, m.AvgConsultTicket)
 }
 
 func ratio(numerator, denominator float64) float64 {

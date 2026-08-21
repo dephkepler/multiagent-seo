@@ -73,14 +73,26 @@ export interface FinanceMonth {
   gross_profit: number
   leads: number
   new_clients: number
+  consult_count: number
+  case_payment_count: number
   cac: number
   cpl: number
   romi: number
+  avg_consult_ticket: number
+  avg_case_ticket: number
+  margin_percent: number
+  marketing_share: number
+  revenue_per_client: number
+  ltv_to_cac: number
+  lead_to_consult: number
+  break_even_consults: number
+  income_growth: number
 }
 
 export interface FinanceReport {
   months: FinanceMonth[]
   total: FinanceMonth
+  receivable: number
 }
 
 export interface AdvocateRate {

@@ -161,14 +161,15 @@ type Generated struct {
 
 // zero field = no filter, except Limit (defaults to defaultLimit in the service)
 type ExpenseFilter struct {
-	From         time.Time
-	To           time.Time
-	CategoryCode string
-	Status       Status
-	Origin       Origin
-	Search       string
-	Limit        int
-	Offset       int
+	From          time.Time
+	To            time.Time
+	CategoryCode  string
+	Status        Status
+	Origin        Origin
+	PaymentMethod PaymentMethod
+	Search        string
+	Limit         int
+	Offset        int
 }
 
 type ExpenseList struct {

@@ -134,3 +134,94 @@ func TestBuildReportTotalRatiosRecomputedFromSums(t *testing.T) {
 		t.Errorf("total google_ads = %v, want 40000", got.Total.ExpenseByCategory["google_ads"])
 	}
 }
+
+func TestBuildReportDerivedNumbers(t *testing.T) {
+	facts := []MonthFacts{
+		{
+			Month:             "2026-07",
+			ConsultRevenue:    10000,
+			ConsultCount:      10,
+			ExpenseByCategory: map[string]float64{"google_ads": 8000, "advocates": 2000},
+			Leads:             50,
+			NewClients:        10,
+		},
+		{
+			Month:             "2026-08",
+			ConsultRevenue:    20000,
+			ConsultCount:      20,
+			CasePaid:          30000,
+			CasePaymentCount:  3,
+			ExpenseByCategory: map[string]float64{"google_ads": 20000, "advocates": 5000},
+			Leads:             100,
+			NewClients:        25,
+		},
+	}
+
+	got := BuildReport(facts, testCategories, 0)
+	july, august := got.Months[0], got.Months[1]
+
+	if august.AvgConsultTicket != 1000 {
+		t.Errorf("avg consult = %v, want 1000", august.AvgConsultTicket)
+	}
+	if august.AvgCaseTicket != 10000 {
+		t.Errorf("avg case = %v, want 10000", august.AvgCaseTicket)
+	}
+	if august.MarginPercent != 0.5 {
+		t.Errorf("margin = %v, want 0.5 (50000 income, 25000 spend)", august.MarginPercent)
+	}
+	if august.MarketingShare != 0.8 {
+		t.Errorf("marketing share = %v, want 0.8 (20000 of 25000)", august.MarketingShare)
+	}
+	if august.RevenuePerClient != 2000 {
+		t.Errorf("revenue per client = %v, want 2000", august.RevenuePerClient)
+	}
+	if august.CAC != 800 || august.LtvToCac != 2.5 {
+		t.Errorf("CAC = %v, LTV/CAC = %v, want 800 and 2.5", august.CAC, august.LtvToCac)
+	}
+	if august.LeadToConsult != 0.2 {
+		t.Errorf("lead→consult = %v, want 0.2 (20 of 100)", august.LeadToConsult)
+	}
+	if august.BreakEvenConsults != 25 {
+		t.Errorf("break-even = %v, want 25 (25000 spend / 1000 ticket)", august.BreakEvenConsults)
+	}
+	if august.IncomeGrowth != 4 {
+		t.Errorf("growth = %v, want 4 (10000 -> 50000)", august.IncomeGrowth)
+	}
+	if july.IncomeGrowth != 0 {
+		t.Errorf("first month growth = %v, want 0 — nothing to compare against", july.IncomeGrowth)
+	}
+
+	// The total column derives from its own sums, not from averaging the months:
+	// 30000 consultation revenue over 30 held consultations.
+	if got.Total.AvgConsultTicket != 1000 {
+		t.Errorf("total avg consult = %v, want 1000", got.Total.AvgConsultTicket)
+	}
+	if got.Total.IncomeGrowth != 0 {
+		t.Errorf("total growth = %v, want 0 — a period has no previous period here", got.Total.IncomeGrowth)
+	}
+}
+
+// A month with income but nothing to divide by must not produce NaN or Inf,
+// which cross JSON as null and blank the page.
+func TestBuildReportDerivedZeroDenominators(t *testing.T) {
+	facts := []MonthFacts{{Month: "2026-08", ConsultRevenue: 5000}}
+
+	m := BuildReport(facts, testCategories, 0).Months[0]
+
+	for name, v := range map[string]float64{
+		"avg consult":  m.AvgConsultTicket,
+		"avg case":     m.AvgCaseTicket,
+		"marketing":    m.MarketingShare,
+		"per client":   m.RevenuePerClient,
+		"ltv/cac":      m.LtvToCac,
+		"lead→consult": m.LeadToConsult,
+		"break-even":   m.BreakEvenConsults,
+	} {
+		if v != 0 {
+			t.Errorf("%s = %v, want 0", name, v)
+		}
+	}
+	if m.MarginPercent != 1 {
+		t.Errorf("margin = %v, want 1 — 5000 income and no spend is a 100%% margin", m.MarginPercent)
+	}
+}

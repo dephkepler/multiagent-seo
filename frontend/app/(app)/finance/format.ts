@@ -12,6 +12,16 @@ export function moneyShort(n: number): string {
   return Math.round(n).toLocaleString('ru-RU')
 }
 
+// Ratios cross the wire as 0 when their denominator was 0 — an undefined value,
+// not a real zero — so the caller decides when to show a dash instead.
+export function percent(n: number, undefinedWhen = false): string {
+  return undefinedWhen ? '—' : (n * 100).toFixed(0) + '%'
+}
+
+export function times(n: number, undefinedWhen = false): string {
+  return undefinedWhen ? '—' : n.toFixed(2) + '×'
+}
+
 export function monthLabel(key: string): string {
   if (key === 'total') return 'Итого'
   const [year, month] = key.split('-')
