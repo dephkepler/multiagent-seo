@@ -58,11 +58,13 @@ func (r *LeadRepository) ResolveClient(ctx context.Context, phone, name string) 
 func (r *LeadRepository) Save(ctx context.Context, lead webleads.Lead) error {
 	const q = `INSERT INTO leads (
 			message_id, received_at, from_email, subject,
-			name, phone, message, page, raw_body, telegram_sent_at, client_id, telegram_username
+			name, phone, message, page, raw_body, telegram_sent_at, client_id, telegram_username,
+			telegram_message_id
 		)
 		VALUES (
 			@message_id, @received_at, @from_email, @subject,
-			@name, @phone, @message, @page, @raw_body, now(), @client_id, @telegram_username
+			@name, @phone, @message, @page, @raw_body, now(), @client_id, @telegram_username,
+			@telegram_message_id
 		)
 		ON CONFLICT (message_id) DO NOTHING`
 
@@ -72,17 +74,18 @@ func (r *LeadRepository) Save(ctx context.Context, lead webleads.Lead) error {
 	}
 
 	if _, err := r.db.Exec(ctx, q, pgx.NamedArgs{
-		"message_id":        lead.MessageID,
-		"received_at":       lead.ReceivedAt,
-		"from_email":        lead.FromEmail,
-		"subject":           lead.Subject,
-		"name":              lead.Name,
-		"phone":             lead.Phone,
-		"message":           lead.Message,
-		"page":              lead.Page,
-		"raw_body":          lead.RawBody,
-		"client_id":         clientID,
-		"telegram_username": lead.TelegramUsername,
+		"message_id":          lead.MessageID,
+		"received_at":         lead.ReceivedAt,
+		"from_email":          lead.FromEmail,
+		"subject":             lead.Subject,
+		"name":                lead.Name,
+		"phone":               lead.Phone,
+		"message":             lead.Message,
+		"page":                lead.Page,
+		"raw_body":            lead.RawBody,
+		"client_id":           clientID,
+		"telegram_username":   lead.TelegramUsername,
+		"telegram_message_id": lead.TelegramMessageID,
 	}); err != nil {
 		return fmt.Errorf("save lead %q: %w", lead.MessageID, err)
 	}
@@ -93,6 +96,22 @@ func (r *LeadRepository) MarkSheetSynced(ctx context.Context, messageID string) 
 	const q = `UPDATE leads SET sheet_synced_at = now() WHERE message_id = @message_id`
 	if _, err := r.db.Exec(ctx, q, pgx.NamedArgs{"message_id": messageID}); err != nil {
 		return fmt.Errorf("mark sheet synced %q: %w", messageID, err)
+	}
+	return nil
+}
+
+// SetPracticeArea is keyed by telegram_message_id, not message_id — see
+// the Store.SetPracticeArea doc for why. 0 rows affected means the tapped
+// message doesn't match any lead (stale data, or a lead predating this
+// column) — worth surfacing as an error rather than a silent no-op.
+func (r *LeadRepository) SetPracticeArea(ctx context.Context, telegramMessageID int, area string) error {
+	const q = `UPDATE leads SET practice_area = @area WHERE telegram_message_id = @telegram_message_id`
+	tag, err := r.db.Exec(ctx, q, pgx.NamedArgs{"area": area, "telegram_message_id": telegramMessageID})
+	if err != nil {
+		return fmt.Errorf("set practice area (telegram message %d): %w", telegramMessageID, err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("set practice area (telegram message %d): no matching lead", telegramMessageID)
 	}
 	return nil
 }

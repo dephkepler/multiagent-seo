@@ -26,6 +26,11 @@ type Repository interface {
 	// ByWeekday is leads by ISO day-of-week, Key "1".."7" — see the
 	// Stats.ByWeekday doc for why there's no by-hour equivalent.
 	ByWeekday(ctx context.Context, from, to time.Time) ([]Count, error)
+	// ByLeadPracticeArea is every lead grouped by practice_area (staff-set
+	// via Telegram buttons at intake, see webleads.PracticeAreaButtons) —
+	// unlike ByCaseCategory, this covers leads that never became a case,
+	// not just the ones that converted.
+	ByLeadPracticeArea(ctx context.Context, from, to time.Time) ([]Count, error)
 }
 
 // TrafficSource is GA4 — optional (the service works fine with it nil, same

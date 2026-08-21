@@ -71,24 +71,29 @@ func (s *Service) GetStats(ctx context.Context, from, to time.Time, groupBy stri
 	if err != nil {
 		return domain.Stats{}, fmt.Errorf("leadstats: by weekday: %w", err)
 	}
+	byLeadPracticeArea, err := s.repo.ByLeadPracticeArea(ctx, from, toInclusive)
+	if err != nil {
+		return domain.Stats{}, fmt.Errorf("leadstats: by lead practice area: %w", err)
+	}
 
 	s.mergeTraffic(ctx, from, toInclusive, groupBy, &totals, trend)
 	audience := s.fetchAudience(ctx, from, toInclusive)
 
 	return domain.Stats{
-		From:       from,
-		To:         to,
-		GroupBy:    groupBy,
-		Totals:     totals,
-		Trend:      trend,
-		BySource:   bySource,
-		ByCreator:  byCreator,
-		ByStatus:   byStatus,
-		ByCategory: byCategory,
-		ByAdvocate: byAdvocate,
-		Funnel:     funnel,
-		ByWeekday:  byWeekday,
-		Audience:   audience,
+		From:               from,
+		To:                 to,
+		GroupBy:            groupBy,
+		Totals:             totals,
+		Trend:              trend,
+		BySource:           bySource,
+		ByCreator:          byCreator,
+		ByStatus:           byStatus,
+		ByCategory:         byCategory,
+		ByAdvocate:         byAdvocate,
+		Funnel:             funnel,
+		ByWeekday:          byWeekday,
+		Audience:           audience,
+		ByLeadPracticeArea: byLeadPracticeArea,
 	}, nil
 }
 

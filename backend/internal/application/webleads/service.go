@@ -81,9 +81,11 @@ func (s *Service) SubmitLead(ctx context.Context, lead domain.Lead) (string, err
 		}
 	}
 
-	if err := s.notifier.SendMessage(ctx, domain.FormatTelegram(lead)); err != nil {
+	messageID, err := s.notifier.SendMessage(ctx, domain.FormatTelegram(lead), domain.PracticeAreaButtons())
+	if err != nil {
 		return "", fmt.Errorf("webleads: telegram send: %w", err)
 	}
+	lead.TelegramMessageID = messageID
 
 	if err := s.store.Save(ctx, lead); err != nil {
 		s.log.ErrorContext(ctx, "webleads: save to db failed",
@@ -106,4 +108,14 @@ func (s *Service) SubmitLead(ctx context.Context, lead domain.Lead) (string, err
 		)
 	}
 	return lead.ClientID, nil
+}
+
+// SetLeadPracticeArea records what a lead is about — called from
+// AdminBot's "leadpa:" callback handler when staff taps a button on the
+// lead's own Telegram notification (see domain.PracticeAreaButtons).
+func (s *Service) SetLeadPracticeArea(ctx context.Context, telegramMessageID int, area string) error {
+	if err := s.store.SetPracticeArea(ctx, telegramMessageID, area); err != nil {
+		return fmt.Errorf("webleads: set practice area: %w", err)
+	}
+	return nil
 }

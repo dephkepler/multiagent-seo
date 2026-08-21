@@ -35,20 +35,22 @@ type fakeNotifier struct {
 	sent    []string
 }
 
-func (f *fakeNotifier) SendMessage(_ context.Context, text string) error {
+func (f *fakeNotifier) SendMessage(_ context.Context, text string, _ []domain.InlineButton) (int, error) {
 	if f.sendErr != nil {
-		return f.sendErr
+		return 0, f.sendErr
 	}
 	f.sent = append(f.sent, text)
-	return nil
+	return 1, nil
 }
 
 type fakeStore struct {
-	saveErr           error
-	resolveClientErr  error
-	markSyncedErr     error
-	saved             []domain.Lead
-	sheetSyncedForIDs []string
+	saveErr             error
+	resolveClientErr    error
+	markSyncedErr       error
+	setPracticeAreaErr  error
+	saved               []domain.Lead
+	sheetSyncedForIDs   []string
+	practiceAreasForMsg map[int]string
 }
 
 // ResolveClient fakes the real repository's phone -> client matching: a
@@ -77,6 +79,17 @@ func (f *fakeStore) MarkSheetSynced(_ context.Context, messageID string) error {
 		return f.markSyncedErr
 	}
 	f.sheetSyncedForIDs = append(f.sheetSyncedForIDs, messageID)
+	return nil
+}
+
+func (f *fakeStore) SetPracticeArea(_ context.Context, telegramMessageID int, area string) error {
+	if f.setPracticeAreaErr != nil {
+		return f.setPracticeAreaErr
+	}
+	if f.practiceAreasForMsg == nil {
+		f.practiceAreasForMsg = map[int]string{}
+	}
+	f.practiceAreasForMsg[telegramMessageID] = area
 	return nil
 }
 

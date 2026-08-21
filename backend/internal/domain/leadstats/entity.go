@@ -144,6 +144,10 @@ type Stats struct {
 	// hour breakdown would mostly be showing that artifact back. The date
 	// itself is real even for imported rows, so weekday is fine.
 	ByWeekday []Count
+	// ByLeadPracticeArea is every lead grouped by what it's about — see
+	// Repository.ByLeadPracticeArea for how this differs from ByCategory
+	// (which only covers leads that became a case).
+	ByLeadPracticeArea []Count
 	// Audience is who visits the site — GA4 demographics/geography, not
 	// anything tied to a specific lead (the CRM has no age/gender/city on
 	// a lead itself, see webleads.Lead). Zero value (all nil) when GA4

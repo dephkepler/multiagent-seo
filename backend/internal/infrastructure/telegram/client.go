@@ -6,6 +6,8 @@ import (
 	"log/slog"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+
+	"multiagent-seo/internal/domain/webleads"
 )
 
 type Client struct {
@@ -25,12 +27,23 @@ func New(token string, chatID int64, log *slog.Logger) (*Client, error) {
 	return &Client{bot: bot, chatID: chatID, log: log}, nil
 }
 
-func (c *Client) SendMessage(ctx context.Context, text string) error {
+func (c *Client) SendMessage(ctx context.Context, text string, buttons []webleads.InlineButton) (int, error) {
 	msg := tgbotapi.NewMessage(c.chatID, text)
 	msg.ParseMode = tgbotapi.ModeHTML
-	if _, err := c.bot.Send(msg); err != nil {
-		return fmt.Errorf("telegram: send message: %w", err)
+	if len(buttons) > 0 {
+		// One button per row — several of these labels (see
+		// webleads.PracticeAreas) are long enough that packing more than
+		// one per row would wrap awkwardly.
+		rows := make([][]tgbotapi.InlineKeyboardButton, len(buttons))
+		for i, b := range buttons {
+			rows[i] = tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData(b.Label, b.CallbackData))
+		}
+		msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(rows...)
+	}
+	sent, err := c.bot.Send(msg)
+	if err != nil {
+		return 0, fmt.Errorf("telegram: send message: %w", err)
 	}
 	c.log.InfoContext(ctx, "telegram: message sent", "chat_id", c.chatID)
-	return nil
+	return sent.MessageID, nil
 }

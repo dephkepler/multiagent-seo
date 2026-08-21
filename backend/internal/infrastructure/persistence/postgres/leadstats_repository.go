@@ -249,6 +249,21 @@ func (r *LeadStatsRepository) ByConsultationStatus(ctx context.Context, from, to
 	return r.queryCounts(ctx, q, from, to)
 }
 
+// ByLeadPracticeArea answers "what are people asking about" at the lead
+// stage — unlike ByCaseCategory (only covers leads that eventually became
+// a paying case, often weeks later), this counts every lead, tagged by
+// staff via buttons on its own Telegram notification (see
+// webleads.PracticeAreaButtons) right when it comes in. Untagged leads
+// (not yet tapped, or predating this column) group under an empty key,
+// same convention as ByCaseCategory's empty category.
+func (r *LeadStatsRepository) ByLeadPracticeArea(ctx context.Context, from, to time.Time) ([]leadstats.Count, error) {
+	const q = `
+		SELECT practice_area, count(*) FROM leads
+		WHERE received_at BETWEEN @from AND @to
+		GROUP BY practice_area ORDER BY count(*) DESC`
+	return r.queryCounts(ctx, q, from, to)
+}
+
 // ByCaseCategory answers "which direction actually makes money" — grouped
 // by created_at same as everything else in this file, empty category
 // (nothing picked in the bot flow, or an un-categorized historical import)

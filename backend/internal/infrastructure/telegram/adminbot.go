@@ -22,6 +22,9 @@ import (
 
 type LeadSubmitter interface {
 	SubmitLead(ctx context.Context, lead domainleads.Lead) (string, error)
+	// SetLeadPracticeArea is called from the "leadpa:" callback — see
+	// handlePracticeAreaCallback.
+	SetLeadPracticeArea(ctx context.Context, telegramMessageID int, area string) error
 }
 
 // backed by the personal-account MTProto session — the Bot API this bot otherwise uses can't create chats
@@ -1465,6 +1468,8 @@ func (b *AdminBot) handleCallback(ctx context.Context, cb *tgbotapi.CallbackQuer
 		b.pickPaymentDate(ctx, cb, rest)
 	case "lang":
 		b.pickLanguage(ctx, cb, rest)
+	case "leadpa":
+		b.handlePracticeAreaCallback(ctx, cb, rest)
 	case "tagpick":
 		b.pickClientForTags(ctx, cb, rest)
 	case "tagdel":
@@ -1515,6 +1520,35 @@ func (b *AdminBot) handleStatusCallback(ctx context.Context, cb *tgbotapi.Callba
 	edited := tgbotapi.NewEditMessageText(cb.Message.Chat.ID, cb.Message.MessageID, cb.Message.Text+suffix)
 	if _, err := b.bot.Send(edited); err != nil {
 		b.log.WarnContext(ctx, "telegram: edit booking confirmation failed", "err", err)
+	}
+}
+
+// handlePracticeAreaCallback resolves the tapped index against
+// domainleads.PracticeAreas and records it against whichever lead this
+// exact Telegram message announced — see domainleads.Lead.TelegramMessageID
+// for why the message being tapped, not anything in callback_data, is the
+// join key. Mirrors handleStatusCallback's edit-in-place pattern: the
+// keyboard is left in place (a repeat tap just overwrites the choice),
+// consistent with how consultation-status buttons already behave here.
+func (b *AdminBot) handlePracticeAreaCallback(ctx context.Context, cb *tgbotapi.CallbackQuery, indexStr string) {
+	idx, err := strconv.Atoi(indexStr)
+	if err != nil || idx < 0 || idx >= len(domainleads.PracticeAreas) || cb.Message == nil {
+		b.answerCallback(ctx, cb, "")
+		return
+	}
+	area := domainleads.PracticeAreas[idx]
+
+	if err := b.leads.SetLeadPracticeArea(ctx, cb.Message.MessageID, area); err != nil {
+		b.log.ErrorContext(ctx, "telegram: set lead practice area failed", "err", err)
+		b.answerCallback(ctx, cb, b.tr(ctx, cb.From.ID, "Не вдалося зберегти"))
+		return
+	}
+	b.answerCallback(ctx, cb, fmt.Sprintf(b.tr(ctx, cb.From.ID, "Напрямок: %s"), area))
+
+	suffix := fmt.Sprintf(b.tr(ctx, cb.Message.Chat.ID, "\n\nНапрямок: %s"), area)
+	edited := tgbotapi.NewEditMessageText(cb.Message.Chat.ID, cb.Message.MessageID, cb.Message.Text+suffix)
+	if _, err := b.bot.Send(edited); err != nil {
+		b.log.WarnContext(ctx, "telegram: edit lead notification failed", "err", err)
 	}
 }
 
@@ -2600,22 +2634,24 @@ var ukToRu = map[string]string{
 	"Введіть справу/коментар (наприклад: справа про мікрокредити, треба позов):": "Введите дело/комментарий (например: дело о микрокредитах, нужен иск):",
 	"Не розпізнав суму. Введіть число, наприклад 15000.":                         "Не распознал сумму. Введите число, например 15000.",
 	"Напрямок справи (%s) — введіть один з варіантів або свій:":                  "Направление дела (%s) — введите один из вариантов или свой:",
-	"Не розпізнав суму.":                                                         "Не распознал сумму.",
-	"Формат: /caseclose <Case ID>":                                               "Формат: /caseclose <Case ID>",
-	"Не вдалося оновити справу — перевірте Case ID.":                             "Не удалось обновить дело — проверьте Case ID.",
-	"Справу позначено виконаною ✅":                                               "Дело отмечено выполненным ✅",
-	"Не вдалося зберегти оплату — перевірте Case ID.":                            "Не удалось сохранить оплату — проверьте Case ID.",
-	"ПІБ не може бути порожнім.":                                                 "ФИО не может быть пустым.",
-	"Помилка пошуку, спробуйте ще раз.":                                          "Ошибка поиска, попробуйте ещё раз.",
-	"Коли внесена оплата?":                                                       "Когда внесена оплата?",
-	"Введіть дату (наприклад 19.08.2026):":                                       "Введите дату (например 19.08.2026):",
-	"Оплата за сьогодні…":                                                        "Оплата за сегодня…",
-	"Сесія застаріла, почніть з /book":                                           "Сессия устарела, начните с /book",
-	"Сесія застаріла, почніть з /case":                                           "Сессия устарела, начните с /case",
-	"Сесія застаріла, почніть з /pay":                                            "Сессия устарела, начните с /pay",
-	"Сесія застаріла, почніть з /creategroup":                                    "Сессия устарела, начните с /creategroup",
-	"Сесія застаріла, почніть заново":                                            "Сессия устарела, начните заново",
-	"Не вдалося зберегти":                                                        "Не удалось сохранить",
+	"Напрямок: %s":                 "Направление: %s",
+	"\n\nНапрямок: %s":             "\n\nНаправление: %s",
+	"Не розпізнав суму.":           "Не распознал сумму.",
+	"Формат: /caseclose <Case ID>": "Формат: /caseclose <Case ID>",
+	"Не вдалося оновити справу — перевірте Case ID.":  "Не удалось обновить дело — проверьте Case ID.",
+	"Справу позначено виконаною ✅":                    "Дело отмечено выполненным ✅",
+	"Не вдалося зберегти оплату — перевірте Case ID.": "Не удалось сохранить оплату — проверьте Case ID.",
+	"ПІБ не може бути порожнім.":                      "ФИО не может быть пустым.",
+	"Помилка пошуку, спробуйте ще раз.":               "Ошибка поиска, попробуйте ещё раз.",
+	"Коли внесена оплата?":                            "Когда внесена оплата?",
+	"Введіть дату (наприклад 19.08.2026):":            "Введите дату (например 19.08.2026):",
+	"Оплата за сьогодні…":                             "Оплата за сегодня…",
+	"Сесія застаріла, почніть з /book":                "Сессия устарела, начните с /book",
+	"Сесія застаріла, почніть з /case":                "Сессия устарела, начните с /case",
+	"Сесія застаріла, почніть з /pay":                 "Сессия устарела, начните с /pay",
+	"Сесія застаріла, почніть з /creategroup":         "Сессия устарела, начните с /creategroup",
+	"Сесія застаріла, почніть заново":                 "Сессия устарела, начните заново",
+	"Не вдалося зберегти":                             "Не удалось сохранить",
 
 	"Меню:": "Меню:",
 	"Це посилання для клієнта — перешліть його, не переходьте самі.": "Эта ссылка для клиента — перешлите её, не переходите сами.",

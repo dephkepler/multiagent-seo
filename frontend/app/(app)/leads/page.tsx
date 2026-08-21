@@ -58,6 +58,7 @@ interface LeadStats {
     avg_days_consult_to_case: number
   }
   by_weekday: { key: string; count: number }[]
+  by_lead_practice_area: { key: string; count: number }[]
   audience: {
     by_age: { key: string; count: number }[]
     by_gender: { key: string; count: number }[]
@@ -396,6 +397,18 @@ export default function LeadsPage() {
                 заведении дела в боте.
               </p>
               <CategoryList rows={data.by_category} />
+            </CollapsibleChart>
+
+            <CollapsibleChart icon='📨' title='О чём спрашивают на этапе заявки'>
+              <p className='mb-4 text-xs text-gray-400'>
+                Каждая заявка, а не только те, что дошли до дела (в отличие от графика выше). Направление сотрудник
+                ставит кнопкой прямо под уведомлением о заявке в Telegram — «(без направления)» значит ещё не
+                отметили.
+              </p>
+              <HBarList
+                rows={data.by_lead_practice_area.map((r) => ({ key: r.key, count: r.count }))}
+                emptyLabel='(без направления)'
+              />
             </CollapsibleChart>
 
             <CollapsibleChart icon='📈' title='Обращения по периоду' subtitle={groupBy === 'day' ? 'по дням' : 'по месяцам'}>

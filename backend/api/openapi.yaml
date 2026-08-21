@@ -2050,7 +2050,7 @@ components:
 
     LeadStats:
       type: object
-      required: [ range, totals, trend, by_source, by_creator, by_status, by_category, by_advocate, funnel, by_weekday, audience ]
+      required: [ range, totals, trend, by_source, by_creator, by_status, by_category, by_advocate, funnel, by_weekday, audience, by_lead_practice_area ]
       properties:
         range:
           type: object
@@ -2136,6 +2136,15 @@ components:
             $ref: "#/components/schemas/LeadStatsCount"
         audience:
           $ref: "#/components/schemas/LeadStatsAudience"
+        by_lead_practice_area:
+          type: array
+          description: >-
+            Every lead grouped by practice_area, staff-tagged via buttons on
+            its own Telegram notification at intake — unlike by_category
+            (cases only), this covers leads that never converted. Untagged
+            leads group under an empty key.
+          items:
+            $ref: "#/components/schemas/LeadStatsCount"
 
     LeadStatsAudience:
       type: object

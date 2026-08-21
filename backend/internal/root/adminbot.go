@@ -90,6 +90,10 @@ func (noopLeadSubmitter) SubmitLead(context.Context, domainleads.Lead) (string, 
 	return "", fmt.Errorf("webleads service unavailable")
 }
 
+func (noopLeadSubmitter) SetLeadPracticeArea(context.Context, int, string) error {
+	return fmt.Errorf("webleads service unavailable")
+}
+
 type noopGroupCreator struct{}
 
 func (noopGroupCreator) CreateGroup(context.Context, string, []string) (int64, error) {
