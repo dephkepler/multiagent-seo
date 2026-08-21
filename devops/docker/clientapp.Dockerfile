@@ -1,5 +1,6 @@
-# The client Mini App: a static export served by Caddy, which also terminates
-# TLS and proxies /api to the backend.
+# The client Mini App: a static export served by Caddy, which also proxies /api
+# to the backend. TLS is terminated by the host's front-door Caddy — see the
+# Caddyfile for why this container has none.
 #
 # No Node in the final image. Every page is a client component authenticating
 # with a signed launch the server here could not use anyway, so there is nothing
@@ -27,4 +28,4 @@ RUN npm run build
 FROM caddy:2-alpine AS runner
 COPY --from=builder /app/out /srv
 COPY Caddyfile /etc/caddy/Caddyfile
-EXPOSE 80 443
+EXPOSE 3002

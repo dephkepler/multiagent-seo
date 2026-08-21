@@ -1,18 +1,17 @@
-# Serves the client Mini App over HTTPS and proxies its API calls to the Go
-# listener on the compose network.
+# Serves the client Mini App over plain HTTP on one port, and proxies its API
+# calls to the Go listener on the compose network.
 #
-# HTTPS is not a nicety here: Telegram refuses to open a Mini App on a plain
-# http origin, so without a certificate the app cannot be opened from the bot at
-# all. Caddy gets one from Let's Encrypt on first start, which needs port 80
-# reachable from the internet for the challenge.
+# No TLS here, and no ACME. Both 80 and 443 on the prod host were already taken
+# — 80 by the tracker-bot project's Caddy, 443 by an unrelated relay — so that
+# Caddy is the host's TLS front door and this container sits behind it. Which
+# means the certificate, the hostname and the HTTPS port all live over there,
+# and everything about *this* app's routing still lives here: the neighbour
+# needs one reverse_proxy line and nothing else.
 #
-# CLIENTAPP_DOMAIN has to be a name that resolves to this host. With a real
-# domain, point an A record at it. Without one, a wildcard-DNS name works —
-# 132-243-194-137.sslip.io resolves to that address with no registration — but
-# Let's Encrypt rate-limits per registered domain, and sslip.io is shared with
-# everyone else using it, so issuance can fail for reasons nothing here
-# controls. A domain you own is the reliable answer.
-{$CLIENTAPP_DOMAIN} {
+# Telegram refuses to open a Mini App on a plain http origin, so this container
+# must never be reachable from the internet directly — compose publishes it on
+# 127.0.0.1 only.
+:3002 {
 	encode zstd gzip
 
 	# The app calls /api/... same-origin; the Go routes have no /api prefix.
@@ -29,17 +28,28 @@
 		file_server
 	}
 
-	# Content-hashed filenames, so they can never go stale. Worth saying out
-	# loud because a Mini App cold-starts in a WebView on mobile data every
-	# time it opens, and this is what keeps that from re-downloading the bundle.
-	header /_next/static/* Cache-Control "public, max-age=31536000, immutable"
-	# The HTML must not be cached: it names the current chunk hashes.
-	header / Cache-Control "no-cache"
+	# Content-hashed filenames, so they can never go stale. Worth setting
+	# because a Mini App cold-starts in a WebView on mobile data every time it
+	# opens, and this is what keeps that from re-downloading the bundle.
+	@immutable path /_next/static/*
+	header @immutable Cache-Control "public, max-age=31536000, immutable"
+	# The HTML names the current chunk hashes, so caching it leaves the old app
+	# running inside a WebView that caches hard.
+	@html path *.html /
+	header @html Cache-Control "no-cache"
 
 	header {
 		X-Content-Type-Options nosniff
 		Referrer-Policy no-referrer
-		# Telegram loads the app inside its own WebView, so framing must stay
-		# allowed — no X-Frame-Options here on purpose.
+		# Telegram Desktop and Web render a Mini App inside an iframe, so
+		# framing has to stay allowed for Telegram's own origins — DENY or
+		# frame-ancestors 'none' here produces a blank app with no error
+		# anywhere, which is how the neighbouring project lost an afternoon.
+		Content-Security-Policy "frame-ancestors https://web.telegram.org https://*.telegram.org"
+	}
+
+	log {
+		output stdout
+		format console
 	}
 }

@@ -62,9 +62,12 @@ services:
   # audience with a different login: clients authenticate by a signed Telegram
   # launch, staff by a password, and the two must not share a bundle.
   #
-  # Only started when CLIENTAPP_DOMAIN is set — Telegram will not open a Mini
-  # App without HTTPS, and Caddy cannot get a certificate for a name that does
-  # not resolve here. Enable it with `--profile clientapp`.
+  # Enable it with `--profile clientapp`, so a plain `up` on a host that has no
+  # front door for it changes nothing.
+  #
+  # Published on 127.0.0.1 only, and deliberately: this serves plain HTTP, and
+  # Telegram will not open a Mini App on a plain http origin. HTTPS comes from
+  # the Caddy that owns port 80 and 8443 on the host — see clientapp/Caddyfile.
   clientapp:
     profiles: [ clientapp ]
     build:
@@ -72,23 +75,11 @@ services:
       dockerfile: ../devops/docker/clientapp.Dockerfile
       args:
         NEXT_PUBLIC_TG_LINK: ${NEXT_PUBLIC_TG_LINK:-}
-    environment:
-      CLIENTAPP_DOMAIN: ${CLIENTAPP_DOMAIN:?set CLIENTAPP_DOMAIN in backend/.env to a hostname that resolves to this server}
     ports:
-      # 80 is not optional: Let's Encrypt's HTTP challenge needs it, and
-      # without the challenge there is no certificate and no Mini App.
-      - "80:80"
-      - "443:443"
-    volumes:
-      # Certificates and the ACME account key. Without this every restart asks
-      # Let's Encrypt for a new certificate and walks into their rate limit.
-      - caddy_data:/data
-      - caddy_config:/config
+      - "127.0.0.1:${CLIENTAPP_HOST_PORT:-3002}:3002"
     depends_on:
       - app
 
 volumes:
   postgres_data:
     name: contentflow_postgres_data
-  caddy_data:
-  caddy_config:
