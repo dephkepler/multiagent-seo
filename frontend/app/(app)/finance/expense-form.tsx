@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Input, Label } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
 import { PAYMENT_LABEL, type Category, type Expense, type PaymentMethod } from './types'
-import { todayISO } from './format'
+import { todayISO } from '@/lib/format'
 
 export interface ExpenseValues {
   spent_at: string

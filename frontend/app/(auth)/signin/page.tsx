@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
-import { setToken } from '@/lib/auth'
+import { setRole, setToken } from '@/lib/auth'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input, Label } from '@/components/ui/input'
@@ -21,12 +21,15 @@ export default function SignInPage() {
     setBusy(true)
     setError(null)
     try {
-      const res = await api<{ token: string }>('/auth/login', {
+      const res = await api<{ token: string; role: string }>('/auth/login', {
         method: 'POST',
         body: JSON.stringify({ email, password }),
       })
       setToken(res.token)
-      router.push('/generate')
+      setRole(res.role)
+      // An advocate has no business on /generate — that page, and most of the
+      // menu, is not theirs.
+      router.push(res.role === 'advocate' ? '/my' : '/generate')
     } catch (e) {
       const message = (e as Error).message
       setError(message)

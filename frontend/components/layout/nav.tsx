@@ -4,13 +4,26 @@ import Image from 'next/image'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
-import { clearToken, getToken } from '@/lib/auth'
+import { clearToken, getToken, type Role } from '@/lib/auth'
+import { useRole } from '@/lib/use-role'
 import { Button } from '@/components/ui/button'
 import { cx } from '@/lib/cx'
 
-const groups = [
+// roles is who sees the group in the menu. Hiding a link hides nothing on the
+// server — the API decides per request (see backend middleware/auth.go). This
+// list exists so an advocate is not shown seven sections that would all answer
+// 403.
+const groups: { label: string; roles: Role[]; links: { href: string; label: string }[] }[] = [
+  {
+    label: 'Моё',
+    roles: ['advocate'],
+    links: [
+      { href: '/my', label: 'Мои дела' },
+    ],
+  },
   {
     label: 'Контент',
+    roles: ['admin'],
     links: [
       { href: '/generate', label: 'Generate' },
       { href: '/sites', label: 'Sites' },
@@ -18,6 +31,7 @@ const groups = [
   },
   {
     label: 'Линкбилдинг',
+    roles: ['admin'],
     links: [
       { href: '/linkbuilding/place-backlinks', label: 'Place backlinks' },
       { href: '/emailscrape', label: 'Email scrape' },
@@ -25,6 +39,7 @@ const groups = [
   },
   {
     label: 'CRM',
+    roles: ['admin'],
     links: [
       { href: '/leads', label: 'Leads' },
       { href: '/clients', label: 'Clients' },
@@ -32,6 +47,7 @@ const groups = [
   },
   {
     label: 'Админ',
+    roles: ['admin'],
     links: [
       { href: '/finance', label: 'Finance' },
       { href: '/vault', label: 'Vault' },
@@ -44,6 +60,8 @@ export function Nav() {
   const router = useRouter()
   const [open, setOpen] = useState(false)
   const hasToken = typeof window !== 'undefined' && !!getToken()
+  const role = useRole()
+  const visibleGroups = groups.filter((g) => g.roles.includes(role))
   const toggleRef = useRef<HTMLButtonElement>(null)
   const firstLinkRef = useRef<HTMLAnchorElement>(null)
   const mountedRef = useRef(false)
@@ -115,13 +133,13 @@ export function Nav() {
         </div>
 
         <nav className='flex-1 space-y-4 overflow-y-auto px-3 py-4'>
-          {groups.map((group) => (
+          {visibleGroups.map((group) => (
             <div key={group.label}>
               <div className='mb-1 px-3 text-[11px] font-semibold tracking-wide text-gray-400 uppercase'>{group.label}</div>
               <div className='flex flex-col gap-0.5'>
                 {group.links.map((l) => {
                   const active = pathname === l.href || pathname.startsWith(l.href + '/')
-                  const isFirstLink = group.label === groups[0].label && l.href === groups[0].links[0].href
+                  const isFirstLink = group.label === visibleGroups[0].label && l.href === visibleGroups[0].links[0].href
                   return (
                     <Link
                       key={l.href}

@@ -3,7 +3,7 @@
 import { useId, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input, Label } from '@/components/ui/input'
-import { dateLabel, money, todayISO } from './format'
+import { dateLabel, money, todayISO } from '@/lib/format'
 import type { OtherIncome } from './types'
 
 export interface OtherIncomeValues {

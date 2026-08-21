@@ -2,7 +2,7 @@
 
 import { useMemo } from 'react'
 import { cx } from '@/lib/cx'
-import { moneyShort, monthLabel, percent, times } from './format'
+import { moneyShort, monthLabel, percent, times } from '@/lib/format'
 import { KIND_LABEL, type Category, type ExpenseKind, type FinanceReport } from './types'
 
 const KIND_ORDER: ExpenseKind[] = ['marketing', 'direct', 'payroll', 'development', 'infra', 'admin']

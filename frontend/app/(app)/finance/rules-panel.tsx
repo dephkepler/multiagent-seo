@@ -5,7 +5,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input, Label } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
-import { money, todayISO } from './format'
+import { money, todayISO } from '@/lib/format'
 import { PAYMENT_LABEL, type Category, type PaymentMethod, type Rule } from './types'
 
 export interface RuleValues {

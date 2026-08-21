@@ -1,7 +1,7 @@
 'use client'
 
 import { Badge } from '@/components/ui/badge'
-import { money } from './format'
+import { money } from '@/lib/format'
 
 export interface AdvocateSettlementRow {
   advocate_id: string

@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
-import { Section } from './section'
+import { Section } from '@/components/ui/section'
 import { GapsPanel, gapsAtStake, type DataGap } from './gaps-panel'
 import { PeoplePanel } from './people-panel'
 import { SettlementPanel, type SettlementData } from './settlement-panel'
@@ -18,7 +18,7 @@ import { OtherIncomePanel, type OtherIncomeValues } from './other-income-panel'
 import { PLTable } from './pl-table'
 import { RatesPanel } from './rates-panel'
 import { RulesPanel, type RuleValues } from './rules-panel'
-import { money, monthBounds, monthLabel, percent, times } from './format'
+import { money, monthBounds, monthLabel, percent, times } from '@/lib/format'
 import {
   KIND_LABEL,
   defaultPeriod,

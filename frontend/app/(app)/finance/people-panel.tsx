@@ -1,6 +1,6 @@
 'use client'
 
-import { money, percent } from './format'
+import { money, percent } from '@/lib/format'
 import type { Category, FinanceMonth } from './types'
 
 interface Props {

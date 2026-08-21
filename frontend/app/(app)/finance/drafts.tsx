@@ -2,7 +2,7 @@
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { dateLabel, money, monthLabel } from './format'
+import { dateLabel, money, monthLabel } from '@/lib/format'
 import { ORIGIN_LABEL, type Expense } from './types'
 
 interface Props {
