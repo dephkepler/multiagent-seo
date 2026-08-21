@@ -1,0 +1,45 @@
+# Serves the client Mini App over HTTPS and proxies its API calls to the Go
+# listener on the compose network.
+#
+# HTTPS is not a nicety here: Telegram refuses to open a Mini App on a plain
+# http origin, so without a certificate the app cannot be opened from the bot at
+# all. Caddy gets one from Let's Encrypt on first start, which needs port 80
+# reachable from the internet for the challenge.
+#
+# CLIENTAPP_DOMAIN has to be a name that resolves to this host. With a real
+# domain, point an A record at it. Without one, a wildcard-DNS name works —
+# 132-243-194-137.sslip.io resolves to that address with no registration — but
+# Let's Encrypt rate-limits per registered domain, and sslip.io is shared with
+# everyone else using it, so issuance can fail for reasons nothing here
+# controls. A domain you own is the reliable answer.
+{$CLIENTAPP_DOMAIN} {
+	encode zstd gzip
+
+	# The app calls /api/... same-origin; the Go routes have no /api prefix.
+	handle /api/* {
+		uri strip_prefix /api
+		reverse_proxy app:8080
+	}
+
+	handle {
+		root * /srv
+		# Static export emits <route>/index.html, and next.config.ts sets
+		# trailingSlash so a route resolves with no redirect hop.
+		try_files {path} {path}/index.html
+		file_server
+	}
+
+	# Content-hashed filenames, so they can never go stale. Worth saying out
+	# loud because a Mini App cold-starts in a WebView on mobile data every
+	# time it opens, and this is what keeps that from re-downloading the bundle.
+	header /_next/static/* Cache-Control "public, max-age=31536000, immutable"
+	# The HTML must not be cached: it names the current chunk hashes.
+	header / Cache-Control "no-cache"
+
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy no-referrer
+		# Telegram loads the app inside its own WebView, so framing must stay
+		# allowed — no X-Frame-Options here on purpose.
+	}
+}
