@@ -201,15 +201,19 @@ export default function ClientsPage() {
             placeholder='Поиск по имени или телефону…'
             className='w-full sm:max-w-sm'
           />
-          <Button type='button' variant='secondary' size='sm' onClick={() => setFiltersOpen((v) => !v)}>
-            Фильтры{activeFilterCount > 0 ? ` (${activeFilterCount})` : ''} {filtersOpen ? '▴' : '▾'}
+          <Button type='button' variant='secondary' size='sm' onClick={() => setFiltersOpen((v) => !v)} className='gap-1.5'>
+            <span aria-hidden>⚲</span> Фильтры
+            {activeFilterCount > 0 && <Badge variant='info'>{activeFilterCount}</Badge>}
+            <span aria-hidden className={cx('text-gray-400 transition-transform', filtersOpen && 'rotate-180')}>
+              ▾
+            </span>
           </Button>
         </div>
 
         {filtersOpen && (
-          <div className='mb-4 space-y-3 rounded-md border border-gray-200 bg-gray-50/60 p-3'>
+          <div className='mb-4 space-y-4 rounded-lg border border-gray-200 bg-white p-4 shadow-sm'>
             <div>
-              <div className='mb-1.5 text-[11px] font-medium text-gray-500'>Сегмент</div>
+              <div className='mb-2 text-[11px] font-semibold tracking-wide text-gray-400 uppercase'>Сегмент</div>
               <div className='flex flex-wrap gap-2'>
                 <SegmentPill active={segmentFilter === 'all'} onClick={() => onSegmentFilterChange('all')}>
                   Все ({totalAll})
@@ -225,22 +229,22 @@ export default function ClientsPage() {
                   </SegmentPill>
                 ))}
               </div>
-              <p className='mt-1.5 text-[11px] text-gray-400'>
+              <p className='mt-2 text-[11px] text-gray-400'>
                 Считается сам — выберите вручную в списке, чтобы закрепить свой (например клиент ушёл к другому
                 адвокату)
               </p>
             </div>
 
             {defs.length > 0 && (
-              <div className='border-t border-gray-200 pt-2.5'>
-                <div className='mb-1.5 text-[11px] font-medium text-gray-500'>Теги</div>
-                <div className='flex flex-wrap items-center gap-x-4 gap-y-1.5'>
+              <div className='border-t border-gray-100 pt-3'>
+                <div className='mb-2 text-[11px] font-semibold tracking-wide text-gray-400 uppercase'>Теги</div>
+                <div className='flex flex-wrap items-center gap-x-4 gap-y-2'>
                   <TagFilterPill active={tagFilter === 'all'} onClick={() => onTagFilterChange('all')}>
                     Все теги
                   </TagFilterPill>
                   {categories.map((category) => (
                     <div key={category} className='flex flex-wrap items-center gap-1.5'>
-                      <span className='text-[11px] whitespace-nowrap text-gray-400'>{category}:</span>
+                      <span className='text-[11px] font-medium whitespace-nowrap text-gray-500'>{category}:</span>
                       {(defsByCategory.get(category) ?? []).map((d) => (
                         <TagFilterPill
                           key={d.label}
@@ -257,11 +261,11 @@ export default function ClientsPage() {
               </div>
             )}
 
-            <div className='border-t border-gray-200 pt-2.5'>
+            <div className='border-t border-gray-100 pt-3'>
               <button
                 type='button'
                 onClick={() => setManageTagsOpen((v) => !v)}
-                className='text-[11px] font-medium text-gray-500 hover:text-gray-700 hover:underline'
+                className='rounded px-1.5 py-1 text-[11px] font-medium text-gray-500 hover:bg-gray-50 hover:text-gray-700'
               >
                 ⚙ Управление тегами {manageTagsOpen ? '▴' : '▾'}
               </button>
@@ -813,6 +817,11 @@ function ManageTagsPanel({
   )
 }
 
+// The pill keeps its segment color at rest, not just when active — the old
+// version fell back to flat gray unless selected, so the whole row read as
+// one indistinct gray blob and staff couldn't visually scan "which segment
+// is which" until they'd already clicked one. Active state layers a ring +
+// bold weight on top of the same color instead of swapping it away.
 function SegmentPill({
   active,
   onClick,
@@ -829,8 +838,9 @@ function SegmentPill({
       type='button'
       onClick={onClick}
       className={cx(
-        'rounded-full px-3 py-1.5 text-xs font-medium transition',
-        active ? cx(colorClass || 'bg-gray-800 text-white', 'ring-2 ring-gray-300 ring-offset-1') : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+        'rounded-full px-3 py-1.5 text-xs font-medium transition focus-visible:ring-2 focus-visible:ring-emerald-300 focus-visible:outline-none',
+        colorClass || 'bg-gray-100 text-gray-700',
+        active ? 'font-semibold ring-2 ring-gray-400 ring-offset-1' : 'opacity-75 hover:opacity-100'
       )}
     >
       {children}
@@ -858,9 +868,9 @@ function TagFilterPill({
       type='button'
       onClick={onClick}
       className={cx(
-        'rounded-full border px-2.5 py-1 text-[11px] font-medium transition',
+        'rounded-full border px-2.5 py-1 text-[11px] font-medium transition focus-visible:ring-2 focus-visible:ring-emerald-300 focus-visible:outline-none',
         colorClass || 'border-gray-200 bg-white text-gray-600',
-        active ? 'ring-2 ring-gray-300 ring-offset-1' : 'opacity-70 hover:opacity-100'
+        active ? 'font-semibold ring-2 ring-gray-400 ring-offset-1' : 'opacity-70 hover:opacity-100'
       )}
     >
       {children}
