@@ -12,7 +12,7 @@ Abalis-бот не два продукта, а две фичи одного back
 - `domain/` — модели + порты (интерфейсы); не знает про Postgres/Groq/WordPress
 - `application/` — use-case сервисы, оркестрируют домен через порты
 - `infrastructure/` — конкретные адаптеры (db, llm, wordpress, sheets, telegram, ...)
-- сборка/DI — `backend/cmd/server/main.go`
+- сборка/DI — `backend/internal/root/` (`main.go` теперь тонкий, 31 строка)
 
 Полная карта слоёв, DI, поток данных — `doc/architecture/architecture.md`. Как читать/строить
 фичу по этим слоям — `doc/standards/feature-architecture-guide.md`.
@@ -23,7 +23,8 @@ Abalis-бот не два продукта, а две фичи одного back
 - `cd backend && make test` — юнит-тесты
 - `cd backend && make test-integration` — интеграционные (поднимают Postgres через testcontainers,
   нужен Docker)
-- `cd backend && make lint` — `gofmt -s -l` + `go vet`
+- `cd backend && make lint` — `check-migrations.sh` + `gofmt -s -l` + `go vet` + `ineffassign` +
+  `errcheck`
 - `cd frontend && npm run lint` / `npm run typecheck`
 - прод-деплой — с прод-хоста, см. `doc/abalisbotlead/vps-deploy.md` (`dc up --build -d`);
   корневой `make deploy` тоже есть, но его соответствие реальному runbook'у (в частности флаг
