@@ -30,7 +30,7 @@ func TestClient_SendMessage(t *testing.T) {
 		t.Fatalf("telegram.New: %v", err)
 	}
 
-	if err := client.SendMessage(context.Background(), "✅ telegram.Client integration test"); err != nil {
+	if _, err := client.SendMessage(context.Background(), "✅ telegram.Client integration test", nil); err != nil {
 		t.Fatalf("SendMessage: %v", err)
 	}
 }

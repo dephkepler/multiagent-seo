@@ -23,6 +23,7 @@ import (
 	domainauth "multiagent-seo/internal/domain/auth"
 	domainhealth "multiagent-seo/internal/domain/health"
 	domainleadstats "multiagent-seo/internal/domain/leadstats"
+	domainuser "multiagent-seo/internal/domain/user"
 	"multiagent-seo/internal/infrastructure/db"
 	"multiagent-seo/internal/infrastructure/ga4"
 	apihttp "multiagent-seo/internal/infrastructure/http"
@@ -30,6 +31,7 @@ import (
 	httpMiddleware "multiagent-seo/internal/infrastructure/http/middleware"
 	"multiagent-seo/internal/infrastructure/jwtauth"
 	"multiagent-seo/internal/infrastructure/persistence/postgres"
+	"multiagent-seo/internal/infrastructure/tgauth"
 	"multiagent-seo/pkg/config"
 	"multiagent-seo/pkg/jobrunner"
 	"multiagent-seo/pkg/logger"
@@ -127,7 +129,28 @@ func Run(ctx context.Context, cfg config.Config) error {
 	}
 
 	var verifier domainauth.TokenVerifier = compositeVerifier{jwt: jwtSvc, keys: apiTokenSvc}
-	router := apihttp.NewRouter(cfg.Server, server, httpMiddleware.BearerAuth(verifier, userRepo))
+
+	// Without a bot token there is nothing to check a launch signature
+	// against, so the Telegram scheme stays unavailable rather than taking the
+	// whole server down — same treatment the bot itself gets above.
+	var launches httpMiddleware.LaunchVerifier
+	var tgSubjects domainuser.TelegramRepository
+	if cfg.Telegram.BotToken == "" {
+		log.Warn().Msg("telegram bot token not set, mini app authentication disabled")
+	} else {
+		launchVerifier, err := tgauth.NewVerifier(cfg.Telegram.BotToken, cfg.Telegram.InitDataMaxAge)
+		if err != nil {
+			return fmt.Errorf("telegram launch verifier: %w", err)
+		}
+		launches = launchVerifier
+		tgSubjects = postgres.NewTelegramRepository(pool)
+	}
+
+	router := apihttp.NewRouter(
+		cfg.Server,
+		server,
+		httpMiddleware.Authenticate(verifier, userRepo, launches, tgSubjects),
+	)
 
 	srv := &http.Server{
 		Addr:         net.JoinHostPort(cfg.Server.Host, cfg.Server.Port),

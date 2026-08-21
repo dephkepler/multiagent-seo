@@ -94,7 +94,7 @@ func newRoleRouter(t *testing.T) roleRouter {
 	router := apihttp.NewRouter(
 		config.ServerConfig{BasePath: "/", CORSAllowedOrigins: []string{"http://localhost:3000"}},
 		server,
-		httpMiddleware.BearerAuth(jwtSvc, users),
+		httpMiddleware.Authenticate(jwtSvc, users, nil, nil),
 	)
 	return roleRouter{handler: router, adminToken: adminToken, advocateToken: advocateToken}
 }
@@ -218,7 +218,7 @@ func TestTokenForDeletedUserIsUnauthorized(t *testing.T) {
 	router := apihttp.NewRouter(
 		config.ServerConfig{BasePath: "/", CORSAllowedOrigins: []string{"http://localhost:3000"}},
 		server,
-		httpMiddleware.BearerAuth(jwtSvc, adminLookup{}),
+		httpMiddleware.Authenticate(jwtSvc, adminLookup{}, nil, nil),
 	)
 
 	req := httptest.NewRequest(http.MethodGet, "/vault-entries", nil)

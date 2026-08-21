@@ -36,9 +36,9 @@ func newLogLevelRouter(jwtSvc *jwtauth.Service) http.Handler {
 	return apihttp.NewRouter(
 		config.ServerConfig{BasePath: "/", CORSAllowedOrigins: []string{"http://localhost:3000"}},
 		server,
-		httpMiddleware.BearerAuth(jwtSvc, adminLookup{
+		httpMiddleware.Authenticate(jwtSvc, adminLookup{
 			"user-1": {Email: "admin@example.com", Role: domainuser.RoleAdmin},
-		}),
+		}, nil, nil),
 	)
 }
 

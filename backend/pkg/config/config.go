@@ -96,6 +96,11 @@ type TelegramConfig struct {
 	ChatID       int64   `env:"TELEGRAM_CHAT_ID"`
 	PaymentCard  string  `env:"TELEGRAM_PAYMENT_CARD"`
 	AllowedUsers []int64 `env:"TELEGRAM_ALLOWED_USERS" envSeparator:","`
+	// InitDataMaxAge bounds how long a Mini App launch stays usable. Telegram
+	// stamps auth_date once when the app opens and never refreshes it, so this
+	// is the age of the launch and not of the request — a short window would
+	// sign out someone who simply left the app on screen.
+	InitDataMaxAge time.Duration `env:"TELEGRAM_INITDATA_MAX_AGE" envDefault:"24h"`
 }
 
 // TelegramUserConfig is for the personal-account MTProto client (cmd/tgsession,
