@@ -366,8 +366,12 @@ export default function ClientDetailPage() {
 
       <Card>
         <SectionHeader title='Обзор' />
-        <div className='grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6'>
-          <Card className='col-span-2 p-3 sm:col-span-1 sm:p-4'>
+
+        {/* Identity/classification — editable controls, so they get real
+            width instead of being squeezed into a numeric-tile-sized column
+            (that's what made the tags cell show nothing but a lone "+"). */}
+        <div className='grid grid-cols-1 gap-3 sm:grid-cols-[220px_1fr]'>
+          <Card className='p-3 sm:p-4'>
             <div className='text-xs text-gray-500'>Сегмент</div>
             <div className='mt-1 flex items-center gap-1.5'>
               {segment ? (
@@ -395,7 +399,7 @@ export default function ClientDetailPage() {
               )}
             </div>
           </Card>
-          <Card className='col-span-2 p-3 sm:col-span-1 sm:p-4'>
+          <Card className='p-3 sm:p-4'>
             <div className='mb-1 flex items-center gap-1.5 text-xs text-gray-500'>
               Теги
               {(addTag.isPending || removeTag.isPending) && <span className='text-[10px] text-gray-400'>сохранение…</span>}
@@ -410,11 +414,22 @@ export default function ClientDetailPage() {
               onRemove={(tag) => removeTag.mutate(tag)}
             />
           </Card>
+        </div>
+
+        {/* Read-only numeric summary — a separate row so a wrapped qualifier
+            here can't stretch the identity row above it. Qualifiers go in
+            `hint`, not appended to `value`, so every tile stays one line. */}
+        <div className='mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4'>
           <StatTile label='Принесено денег' value={fmtMoney(d.revenue_total)} accent='good' />
           <StatTile label='Долг' value={debtTotal > 0 ? fmtMoney(debtTotal) : '—'} accent={debtTotal > 0 ? 'bad' : undefined} />
-          <StatTile label='Дел' value={`${d.cases.length}${casesActive ? ` (${casesActive} в работе)` : ''}`} />
-          <StatTile label='Консультаций' value={`${d.consultations.length}${consultsDone ? ` (${consultsDone} провёл)` : ''}`} />
+          <StatTile label='Дел' value={String(d.cases.length)} hint={casesActive ? `${casesActive} в работе` : undefined} />
+          <StatTile
+            label='Консультаций'
+            value={String(d.consultations.length)}
+            hint={consultsDone ? `${consultsDone} провёл` : undefined}
+          />
         </div>
+
         <p className='mt-4 text-xs text-gray-400'>
           Первое обращение: {fmtDate(d.client.first_seen_at)} · Последняя активность: {fmtDate(d.client.last_seen_at)}
           {idle !== null && (idle === 0 ? ' (сегодня)' : ` (${idle} дн. назад)`)}
@@ -461,17 +476,15 @@ export default function ClientDetailPage() {
 
         <div className='mt-6'>
           <SectionHeader title='Тип клиента' />
-          <div className='grid grid-cols-1 gap-4 md:grid-cols-3'>
-            <div>
-              <Label>Физ./юр. лицо</Label>
-              <Select value={form.clientType} onChange={(e) => set('clientType', e.target.value as ClientType)}>
-                {(Object.keys(CLIENT_TYPE_LABEL) as ClientType[]).map((t) => (
-                  <option key={t} value={t}>
-                    {CLIENT_TYPE_LABEL[t]}
-                  </option>
-                ))}
-              </Select>
-            </div>
+          <div className='max-w-xs'>
+            <Label>Физ./юр. лицо</Label>
+            <Select value={form.clientType} onChange={(e) => set('clientType', e.target.value as ClientType)}>
+              {(Object.keys(CLIENT_TYPE_LABEL) as ClientType[]).map((t) => (
+                <option key={t} value={t}>
+                  {CLIENT_TYPE_LABEL[t]}
+                </option>
+              ))}
+            </Select>
           </div>
           {form.clientType === 'legal_entity' && (
             <div className='mt-4 grid grid-cols-1 gap-4 md:grid-cols-3'>
