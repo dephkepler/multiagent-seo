@@ -114,7 +114,7 @@ export function TagChips({
           }}
           aria-label='Добавить тег'
           title='Добавить тег'
-          className='h-[22px] cursor-pointer appearance-none rounded-full border border-dashed border-gray-300 bg-white px-2 text-[11px] font-medium text-gray-400 outline-none hover:border-gray-400 hover:text-gray-600 disabled:cursor-wait'
+          className='h-[22px] w-[60px] shrink-0 cursor-pointer appearance-none truncate rounded-full border border-dashed border-gray-300 bg-white px-2 text-[11px] font-medium text-gray-400 outline-none hover:border-gray-400 hover:text-gray-600 disabled:cursor-wait'
         >
           <option value=''>+ тег</option>
           {categories.map((category) => {
