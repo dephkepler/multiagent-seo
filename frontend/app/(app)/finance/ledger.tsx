@@ -5,17 +5,52 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
 import { dateLabel, money } from './format'
-import { ORIGIN_LABEL, PAYMENT_LABEL, type Category, type Expense, type ExpenseList } from './types'
+import {
+  ORIGIN_LABEL,
+  PAYMENT_LABEL,
+  type Category,
+  type Expense,
+  type ExpenseList,
+  type ExpenseOrigin,
+  type ExpenseStatus,
+  type PaymentMethod,
+} from './types'
+
+export interface LedgerFilters {
+  // 'month' is the picked month, 'period' the whole report window — asking "what
+  // did we spend on ads all year" was impossible while the ledger was pinned to
+  // one month.
+  scope: 'month' | 'period'
+  category: string
+  status: ExpenseStatus | ''
+  method: PaymentMethod | ''
+  origin: ExpenseOrigin | ''
+  search: string
+  page: number
+}
+
+export const emptyFilters: LedgerFilters = {
+  scope: 'month',
+  category: '',
+  status: '',
+  method: '',
+  origin: '',
+  search: '',
+  page: 1,
+}
+
+export const LEDGER_PAGE_SIZE = 50
 
 interface Props {
   list?: ExpenseList
   loading: boolean
   fetching: boolean
   categories: Category[]
-  categoryFilter: string
-  search: string
-  onCategoryFilter: (code: string) => void
-  onSearch: (value: string) => void
+  filters: LedgerFilters
+  periodLabel: string
+  monthLabel: string
+  onChange: (next: Partial<LedgerFilters>) => void
+  onReset: () => void
   onEdit: (expense: Expense) => void
   onDelete: (expense: Expense) => void
 }
@@ -25,38 +60,74 @@ export function Ledger({
   loading,
   fetching,
   categories,
-  categoryFilter,
-  search,
-  onCategoryFilter,
-  onSearch,
+  filters,
+  periodLabel,
+  monthLabel,
+  onChange,
+  onReset,
   onEdit,
   onDelete,
 }: Props) {
   const items = list?.items ?? []
+  const active =
+    (filters.category ? 1 : 0) + (filters.status ? 1 : 0) + (filters.method ? 1 : 0) + (filters.origin ? 1 : 0) + (filters.search ? 1 : 0)
+  const pages = list ? Math.max(1, Math.ceil(list.total / LEDGER_PAGE_SIZE)) : 1
 
   return (
     <div>
-      <div className='flex flex-col gap-2 sm:flex-row sm:items-center'>
+      <div className='grid gap-2 sm:grid-cols-2 lg:grid-cols-4'>
         <Input
-          value={search}
-          onChange={(e) => onSearch(e.target.value)}
+          value={filters.search}
+          onChange={(e) => onChange({ search: e.target.value })}
           placeholder='Поиск по контрагенту или описанию'
-          className='sm:max-w-xs'
         />
-        <Select value={categoryFilter} onChange={(e) => onCategoryFilter(e.target.value)} className='sm:max-w-[220px]'>
-          <option value=''>Все категории</option>
+        <Select value={filters.scope} onChange={(e) => onChange({ scope: e.target.value as LedgerFilters['scope'] })}>
+          <option value='month'>{monthLabel}</option>
+          <option value='period'>{periodLabel}</option>
+        </Select>
+        <Select value={filters.category} onChange={(e) => onChange({ category: e.target.value })}>
+          <option value=''>Все статьи</option>
           {categories.map((c) => (
             <option key={c.code} value={c.code}>
               {c.label}
             </option>
           ))}
         </Select>
-        {list && (
-          <div className='text-sm text-gray-500 sm:ml-auto'>
-            {fetching && <span className='mr-2 text-xs text-gray-400'>обновление…</span>}
-            {list.total} записей · проведено <span className='font-medium text-gray-700'>{money(list.sum)}</span>
-          </div>
-        )}
+        <Select value={filters.status} onChange={(e) => onChange({ status: e.target.value as LedgerFilters['status'] })}>
+          <option value=''>Любой статус</option>
+          <option value='posted'>Проведённые</option>
+          <option value='draft'>Черновики</option>
+          <option value='void'>Отменённые</option>
+        </Select>
+        <Select value={filters.method} onChange={(e) => onChange({ method: e.target.value as LedgerFilters['method'] })}>
+          <option value=''>Любая оплата</option>
+          {(Object.keys(PAYMENT_LABEL) as PaymentMethod[]).map((m) => (
+            <option key={m} value={m}>
+              {PAYMENT_LABEL[m]}
+            </option>
+          ))}
+        </Select>
+        <Select value={filters.origin} onChange={(e) => onChange({ origin: e.target.value as LedgerFilters['origin'] })}>
+          <option value=''>Любое происхождение</option>
+          {(Object.keys(ORIGIN_LABEL) as ExpenseOrigin[]).map((o) => (
+            <option key={o} value={o}>
+              {ORIGIN_LABEL[o]}
+            </option>
+          ))}
+        </Select>
+        <div className='flex items-center gap-2 sm:col-span-2'>
+          {active > 0 && (
+            <Button variant='secondary' size='sm' onClick={onReset}>
+              Сбросить ({active})
+            </Button>
+          )}
+          {list && (
+            <div className='ml-auto text-sm text-gray-500'>
+              {fetching && <span className='mr-2 text-xs text-gray-400'>обновление…</span>}
+              {list.total} записей · проведено <span className='font-medium text-gray-700'>{money(list.sum)}</span>
+            </div>
+          )}
+        </div>
       </div>
 
       {loading && <div className='mt-4 text-sm text-gray-500'>Загрузка…</div>}
@@ -138,10 +209,18 @@ export function Ledger({
             </table>
           </div>
 
-          {list && list.total > items.length && (
-            <div className='mt-3 text-xs text-gray-500'>
-              Показаны первые {items.length} из {list.total}. Сузьте период или фильтр, чтобы увидеть остальные — сумма выше считается по
-              всем {list.total}.
+          {list && pages > 1 && (
+            <div className='mt-3 flex flex-wrap items-center gap-2'>
+              <Button variant='secondary' size='sm' disabled={filters.page <= 1} onClick={() => onChange({ page: filters.page - 1 })}>
+                Назад
+              </Button>
+              <span className='text-sm text-gray-500'>
+                стр. {filters.page} из {pages}
+              </span>
+              <Button variant='secondary' size='sm' disabled={filters.page >= pages} onClick={() => onChange({ page: filters.page + 1 })}>
+                Дальше
+              </Button>
+              <span className='text-xs text-gray-400'>сумма считается по всем {list.total} записям</span>
             </div>
           )}
         </div>

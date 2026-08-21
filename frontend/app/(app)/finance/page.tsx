@@ -10,13 +10,13 @@ import { SectionHeader } from '@/components/ui/section-header'
 import { Button } from '@/components/ui/button'
 import { Drafts } from './drafts'
 import { ExpenseForm, type ExpenseValues } from './expense-form'
-import { Ledger } from './ledger'
+import { Ledger, LEDGER_PAGE_SIZE, emptyFilters, type LedgerFilters } from './ledger'
 import { MetricTile } from './metric-tile'
 import { OtherIncomePanel, type OtherIncomeValues } from './other-income-panel'
 import { PLTable } from './pl-table'
 import { RatesPanel } from './rates-panel'
 import { RulesPanel, type RuleValues } from './rules-panel'
-import { currentMonthKey, money, monthBounds, monthLabel, rangeBack } from './format'
+import { currentMonthKey, money, monthBounds, monthLabel, percent, rangeBack, times } from './format'
 import type { AdvocateRate, Category, Expense, ExpenseList, FinanceMonth, FinanceReport, Generated, OtherIncome, Rule } from './types'
 
 const RANGE_OPTIONS = [
@@ -41,18 +41,28 @@ const EMPTY_MONTH: FinanceMonth = {
   gross_profit: 0,
   leads: 0,
   new_clients: 0,
+  consult_count: 0,
+  case_payment_count: 0,
   cac: 0,
   cpl: 0,
   romi: 0,
+  avg_consult_ticket: 0,
+  avg_case_ticket: 0,
+  margin_percent: 0,
+  marketing_share: 0,
+  revenue_per_client: 0,
+  ltv_to_cac: 0,
+  lead_to_consult: 0,
+  break_even_consults: 0,
+  income_growth: 0,
 }
 
 export default function FinancePage() {
   const qc = useQueryClient()
   const [monthsBack, setMonthsBack] = useState(12)
   const [activeMonth, setActiveMonth] = useState(currentMonthKey())
-  const [search, setSearch] = useState('')
+  const [filters, setFilters] = useState<LedgerFilters>(emptyFilters)
   const [debouncedSearch, setDebouncedSearch] = useState('')
-  const [categoryFilter, setCategoryFilter] = useState('')
   const [editing, setEditing] = useState<Expense | null>(null)
   // bumped after a successful create so the add form remounts empty
   const [formNonce, setFormNonce] = useState(0)
@@ -62,9 +72,15 @@ export default function FinancePage() {
   const [showIncome, setShowIncome] = useState(false)
 
   useEffect(() => {
-    const t = setTimeout(() => setDebouncedSearch(search.trim()), 300)
+    const t = setTimeout(() => setDebouncedSearch(filters.search.trim()), 300)
     return () => clearTimeout(t)
-  }, [search])
+  }, [filters.search])
+
+  // Any filter change but paging itself returns to the first page — page 4 of a
+  // freshly narrowed list is usually empty.
+  function changeFilters(next: Partial<LedgerFilters>) {
+    setFilters((prev) => ({ ...prev, ...next, page: next.page ?? 1 }))
+  }
 
   const range = useMemo(() => rangeBack(monthsBack), [monthsBack])
 
@@ -85,9 +101,18 @@ export default function FinancePage() {
     queryKey: ['finance-categories'],
     queryFn: () => api<{ items: Category[] }>('/finance/categories'),
   })
-  const ledgerParams = new URLSearchParams({ from: bounds.from, to: bounds.to, limit: '200' })
+  const ledgerWindow = filters.scope === 'period' ? range : bounds
+  const ledgerParams = new URLSearchParams({
+    from: ledgerWindow.from,
+    to: ledgerWindow.to,
+    limit: String(LEDGER_PAGE_SIZE),
+    offset: String((filters.page - 1) * LEDGER_PAGE_SIZE),
+  })
   if (debouncedSearch) ledgerParams.set('search', debouncedSearch)
-  if (categoryFilter) ledgerParams.set('category', categoryFilter)
+  if (filters.category) ledgerParams.set('category', filters.category)
+  if (filters.status) ledgerParams.set('status', filters.status)
+  if (filters.origin) ledgerParams.set('origin', filters.origin)
+  if (filters.method) ledgerParams.set('payment_method', filters.method)
   const expenses = useQuery({
     queryKey: ['finance-expenses', ledgerParams.toString()],
     queryFn: () => api<ExpenseList>(`/finance/expenses?${ledgerParams}`),
@@ -256,7 +281,7 @@ export default function FinancePage() {
         </div>
       </div>
 
-      <div className='grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6'>
+      <div className='grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5'>
         <MetricTile label='Доход' value={money(current.income_total)} accent='good' hint={monthLabel(shownMonth)} />
         <MetricTile label='Расход' value={money(current.expense_total)} />
         <MetricTile label='Баланс' value={money(current.balance)} accent={current.balance < 0 ? 'bad' : 'good'} />
@@ -264,10 +289,33 @@ export default function FinancePage() {
           label='Нар. итог'
           value={money(current.cumulative)}
           accent={current.cumulative < 0 ? 'bad' : 'good'}
-          hint='с начала периода'
+          hint='на конец месяца, за всё время'
         />
         <MetricTile label='CAC' value={current.cac ? money(current.cac) : '—'} hint={`${current.new_clients} новых`} />
-        <MetricTile label='ROMI' value={current.marketing_spend > 0 ? current.romi.toFixed(2) + '×' : '—'} hint='на 1 ₴ рекламы' />
+        <MetricTile label='ROMI' value={times(current.romi, current.marketing_spend === 0)} hint='на 1 ₴ рекламы' />
+        <MetricTile
+          label='Маржа'
+          value={percent(current.margin_percent, current.income_total === 0)}
+          accent={current.margin_percent < 0 ? 'bad' : 'good'}
+          hint='баланс / доход'
+        />
+        <MetricTile
+          label='Средний чек'
+          value={current.avg_consult_ticket ? money(current.avg_consult_ticket) : '—'}
+          hint={`${current.consult_count} консультаций`}
+        />
+        <MetricTile
+          label='LTV / CAC'
+          value={times(current.ltv_to_cac, current.cac === 0)}
+          accent={current.ltv_to_cac > 0 && current.ltv_to_cac < 1 ? 'bad' : undefined}
+          hint='<1 — клиент не окупается'
+        />
+        <MetricTile
+          label='Дебиторка'
+          value={report.data?.receivable ? money(report.data.receivable) : '—'}
+          accent={report.data?.receivable ? 'bad' : undefined}
+          hint='долг по делам, за всё время'
+        />
       </div>
 
       <Drafts
@@ -328,10 +376,11 @@ export default function FinancePage() {
             loading={expenses.isPending}
             fetching={expenses.isFetching}
             categories={categoryItems}
-            categoryFilter={categoryFilter}
-            search={search}
-            onCategoryFilter={setCategoryFilter}
-            onSearch={setSearch}
+            filters={filters}
+            monthLabel={monthLabel(shownMonth)}
+            periodLabel={`Весь период (${RANGE_OPTIONS.find((o) => o.months === monthsBack)?.label ?? ''})`}
+            onChange={changeFilters}
+            onReset={() => setFilters(emptyFilters)}
             onEdit={startEdit}
             onDelete={(expense) => {
               if (
