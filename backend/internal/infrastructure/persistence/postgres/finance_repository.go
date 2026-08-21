@@ -669,6 +669,103 @@ func (r *FinanceRepository) BalanceBefore(ctx context.Context, from time.Time) (
 	return balance, nil
 }
 
+// DataGaps measures the money that is neither counted nor explained. The
+// consultation gaps are scoped to the window (a status left unresolved in March
+// is March's problem); the roster and future-dated ones are live, because a
+// duplicate advocate or a 2027-dated consultation is wrong today regardless of
+// which months are on screen.
+func (r *FinanceRepository) DataGaps(ctx context.Context, from, to time.Time) ([]finance.DataGap, error) {
+	// A priced consultation that never became "completed" and has no case behind
+	// it is money that was agreed and then dropped — split by status, because
+	// "cancelled" and "nobody ever touched it" are different conversations.
+	const byStatus = `
+		SELECT c.status, count(*), coalesce(sum(c.price), 0)
+		FROM consultations c
+		WHERE c.price > 0 AND c.status <> 'completed'
+			AND (c.scheduled_at AT TIME ZONE '` + businessTZ + `')::date BETWEEN @from::date AND @to::date
+			AND NOT EXISTS (SELECT 1 FROM cases k WHERE k.consultation_id = c.id)
+		GROUP BY 1`
+
+	rows, err := r.db.Query(ctx, byStatus, pgx.NamedArgs{"from": from, "to": to})
+	if err != nil {
+		return nil, fmt.Errorf("data gaps: unresolved consultations: %w", err)
+	}
+	defer rows.Close()
+
+	byKind := map[string]string{
+		"scheduled": finance.GapUnresolvedConsultations,
+		"cancelled": finance.GapCancelledPriced,
+		"no_show":   finance.GapNoShowPriced,
+	}
+	var out []finance.DataGap
+	for rows.Next() {
+		var status string
+		gap := finance.DataGap{}
+		if err := rows.Scan(&status, &gap.Count, &gap.Amount); err != nil {
+			return nil, fmt.Errorf("data gaps: scan: %w", err)
+		}
+		kind, ok := byKind[status]
+		if !ok {
+			continue
+		}
+		gap.Kind = kind
+		out = append(out, gap)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("data gaps: %w", err)
+	}
+
+	// The rest are single numbers. Amount stays 0 where there is no honest one:
+	// a completed consultation with no price recorded is worth an unknown
+	// amount, and pretending otherwise is exactly what this block exists against.
+	singles := []struct {
+		kind  string
+		query string
+		args  pgx.NamedArgs
+	}{
+		{
+			kind: finance.GapZeroPricedCompleted,
+			query: `SELECT count(*), 0::numeric FROM consultations
+				WHERE status = 'completed' AND price = 0
+					AND (scheduled_at AT TIME ZONE '` + businessTZ + `')::date BETWEEN @from::date AND @to::date`,
+			args: pgx.NamedArgs{"from": from, "to": to},
+		},
+		{
+			kind:  finance.GapFutureConsultations,
+			query: `SELECT count(*), coalesce(sum(price), 0) FROM consultations WHERE scheduled_at > now()`,
+			args:  pgx.NamedArgs{},
+		},
+		{
+			kind: finance.GapUnlinkedCases,
+			query: `SELECT count(*), coalesce(sum(paid_amount), 0) FROM cases c
+				WHERE c.advocate_id IS NULL
+					AND NOT EXISTS (SELECT 1 FROM advocates a WHERE a.full_name = c.advocate_name)`,
+			args: pgx.NamedArgs{},
+		},
+		{
+			// A roster name contained in another roster name is almost always the
+			// same person entered twice ("Борзов" inside "Ярослав Борзов"), and it
+			// splits that advocate's payouts across two rows.
+			kind: finance.GapDuplicateAdvocates,
+			query: `SELECT count(*), 0::numeric FROM advocates a
+				WHERE EXISTS (SELECT 1 FROM advocates b
+					WHERE b.id <> a.id AND b.full_name LIKE '%' || a.full_name || '%')`,
+			args: pgx.NamedArgs{},
+		},
+	}
+
+	for _, s := range singles {
+		gap := finance.DataGap{Kind: s.kind}
+		if err := r.db.QueryRow(ctx, s.query, s.args).Scan(&gap.Count, &gap.Amount); err != nil {
+			return nil, fmt.Errorf("data gaps: %s: %w", s.kind, err)
+		}
+		if gap.Count > 0 {
+			out = append(out, gap)
+		}
+	}
+	return out, nil
+}
+
 // DataRange bounds what the finance page can show. The money span is what "all
 // time" uses; leads are reported separately because they keep arriving long
 // after the last recorded payment, and defaulting to them fills the report with

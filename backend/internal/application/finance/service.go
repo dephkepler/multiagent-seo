@@ -346,6 +346,16 @@ func (s *Service) Settlement(ctx context.Context, from, to time.Time) (domain.Se
 	return out, nil
 }
 
+// Gaps reports the money the P&L cannot account for because of how records were
+// left — the to-do list behind the numbers.
+func (s *Service) Gaps(ctx context.Context, from, to time.Time) ([]domain.DataGap, error) {
+	gaps, err := s.report.DataGaps(ctx, from, to)
+	if err != nil {
+		return nil, fmt.Errorf("finance: data gaps: %w", err)
+	}
+	return gaps, nil
+}
+
 // Period reports what the data actually spans, so the page can offer periods
 // that contain something instead of a window relative to today.
 func (s *Service) Period(ctx context.Context) (domain.Period, error) {

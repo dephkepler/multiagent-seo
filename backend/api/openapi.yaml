@@ -986,6 +986,36 @@ paths:
         "400":
           $ref: "#/components/responses/BadRequest"
 
+  /finance/gaps:
+    get:
+      operationId: getFinanceGaps
+      security:
+        - bearerAuth: [ ]
+      tags: [ Finance ]
+      summary: Money the P&L cannot account for because of how a record was left — the to-do list behind the numbers
+      parameters:
+        - name: from
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+      responses:
+        "200":
+          description: One row per gap that actually has something in it; amount is 0 where no honest figure exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataGapList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
   /finance/period:
     get:
       operationId: getFinancePeriod
@@ -3049,6 +3079,29 @@ components:
           type: number
           format: double
           description: Income against the previous month in the report; 0 for the first month
+
+    DataGap:
+      type: object
+      required: [ kind, count, amount ]
+      properties:
+        kind:
+          type: string
+          description: unresolved_consultations | cancelled_priced | no_show_priced | zero_priced_completed | future_consultations | unlinked_cases | duplicate_advocates
+        count:
+          type: integer
+        amount:
+          type: number
+          format: double
+          description: 0 when there is no honest figure — a completed consultation with no price is worth an unknown amount
+
+    DataGapList:
+      type: object
+      required: [ items ]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/DataGap"
 
     FinancePeriod:
       type: object

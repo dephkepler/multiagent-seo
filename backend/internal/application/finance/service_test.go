@@ -266,9 +266,15 @@ type fakeReportSource struct {
 	rangeActivity  time.Time
 	rangeErr       error
 
+	gaps                []domain.DataGap
+	gapsErr             error
 	payouts             map[string]float64
 	payoutsUnattributed float64
 	payoutsErr          error
+}
+
+func (f *fakeReportSource) DataGaps(context.Context, time.Time, time.Time) ([]domain.DataGap, error) {
+	return f.gaps, f.gapsErr
 }
 
 func (f *fakeReportSource) DataRange(context.Context) (time.Time, time.Time, time.Time, error) {

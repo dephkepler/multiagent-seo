@@ -37,6 +37,7 @@ type financeService interface {
 	ListAdvocateRates(ctx context.Context) ([]domain.AdvocateRate, error)
 	SetAdvocateRate(ctx context.Context, advocateID string, percent float64) error
 	Period(ctx context.Context) (domain.Period, error)
+	Gaps(ctx context.Context, from, to time.Time) ([]domain.DataGap, error)
 	Settlement(ctx context.Context, from, to time.Time) (domain.Settlement, error)
 	Report(ctx context.Context, from, to time.Time) (domain.Report, error)
 	RunAutoExpenses(ctx context.Context, month time.Time, createdBy string) (domain.Generated, error)
@@ -76,6 +77,30 @@ func (h *FinanceHandler) GetFinanceReport(w http.ResponseWriter, r *http.Request
 		Total:      toAPIFinanceMonth(report.Total),
 		Receivable: report.Receivable,
 	})
+}
+
+func (h *FinanceHandler) GetFinanceGaps(w http.ResponseWriter, r *http.Request, params oapigen.GetFinanceGapsParams) {
+	if isNil(h.svc) {
+		problem.Write(w, http.StatusServiceUnavailable, "finance unavailable")
+		return
+	}
+	from, to := params.From.Time, params.To.Time
+	if to.Before(from) {
+		problem.Write(w, http.StatusBadRequest, "to is before from")
+		return
+	}
+
+	gaps, err := h.svc.Gaps(r.Context(), from, to)
+	if err != nil {
+		h.writeError(r.Context(), w, "finance_gaps", err)
+		return
+	}
+
+	items := make([]oapigen.DataGap, len(gaps))
+	for i, g := range gaps {
+		items[i] = oapigen.DataGap{Kind: g.Kind, Count: g.Count, Amount: g.Amount}
+	}
+	response.WriteJSON(r.Context(), w, http.StatusOK, oapigen.DataGapList{Items: items})
 }
 
 func (h *FinanceHandler) GetFinancePeriod(w http.ResponseWriter, r *http.Request) {

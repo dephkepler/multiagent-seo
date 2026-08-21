@@ -5,6 +5,7 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tansta
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
 import { Section } from './section'
+import { GapsPanel, gapsAtStake, type DataGap } from './gaps-panel'
 import { PeoplePanel } from './people-panel'
 import { SettlementPanel, type SettlementData } from './settlement-panel'
 import { SectionHeader } from '@/components/ui/section-header'
@@ -144,6 +145,11 @@ export default function FinancePage() {
     queryKey: ['finance-rates'],
     queryFn: () => api<{ items: AdvocateRate[] }>('/finance/advocate-rates'),
   })
+  const gaps = useQuery({
+    queryKey: ['finance-gaps', range.from, range.to],
+    queryFn: () => api<{ items: DataGap[] }>(`/finance/gaps?from=${range.from}&to=${range.to}`),
+    placeholderData: keepPreviousData,
+  })
   const settlement = useQuery({
     queryKey: ['finance-settlement', range.from, range.to],
     queryFn: () => api<SettlementData>(`/finance/settlement?from=${range.from}&to=${range.to}`),
@@ -273,6 +279,8 @@ export default function FinancePage() {
   const current = tileSource ?? EMPTY_MONTH
   const draftItems = drafts.data?.items ?? []
 
+  const atStake = gapsAtStake(gaps.data?.items ?? [])
+
   // the same money the P&L splits by purpose, summed by who received it
   const peopleTotal = categoryItems.filter((c) => c.is_people_pay).reduce((sum, c) => sum + (current.expense_by_category[c.code] ?? 0), 0)
 
@@ -397,6 +405,19 @@ export default function FinancePage() {
           if (window.confirm(`Удалить черновик на ${money(expense.amount)}?`)) deleteExpense.mutate(expense.id)
         }}
       />
+
+      <Section
+        title='Что мешает считать'
+        summary={
+          <>
+            <span className='text-xs text-gray-500'>висит без ответа</span>
+            <span className={atStake > 0 ? 'font-semibold text-rose-700' : 'font-semibold text-gray-700'}>{money(atStake)}</span>
+          </>
+        }
+        defaultOpen={false}
+      >
+        <GapsPanel items={gaps.data?.items ?? []} loading={gaps.isPending} />
+      </Section>
 
       <Section
         title='P&L по месяцам'

@@ -62,6 +62,10 @@ type ReportSource interface {
 	// Receivable is what is still owed across every case — live, not scoped to
 	// any window.
 	Receivable(ctx context.Context) (float64, error)
+	// DataGaps reports money the P&L cannot account for because of how records
+	// were left. Some gaps are scoped to [from, to], some are live — see the
+	// implementation, each says which.
+	DataGaps(ctx context.Context, from, to time.Time) ([]DataGap, error)
 	// DataRange returns the span of rows that carry money, plus the latest date
 	// of any activity at all (leads included). Zero times mean nothing yet.
 	DataRange(ctx context.Context) (firstMoney, lastMoney, lastActivity time.Time, err error)

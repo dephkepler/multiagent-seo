@@ -217,3 +217,29 @@ type ExpenseList struct {
 	// Sum covers the whole filtered set, not just the current page.
 	Sum float64
 }
+
+// DataGap is money the P&L cannot account for because of how a record was left,
+// not because of arithmetic. Each one is a to-do for the person looking at the
+// page: 59 200 ₴ sitting in consultations that were priced, booked and then
+// never marked held or cancelled is not a rounding error, it is twelve
+// conversations nobody closed.
+//
+// Kind is a stable string rather than a typed enum on purpose: the UI owns the
+// wording and the advice, and adding a gap should not require touching a
+// switch in three layers.
+type DataGap struct {
+	Kind   string
+	Count  int
+	Amount float64
+}
+
+const (
+	// priced, booked, never resolved either way, and no case behind it
+	GapUnresolvedConsultations = "unresolved_consultations"
+	GapCancelledPriced         = "cancelled_priced"
+	GapNoShowPriced            = "no_show_priced"
+	GapZeroPricedCompleted     = "zero_priced_completed"
+	GapFutureConsultations     = "future_consultations"
+	GapUnlinkedCases           = "unlinked_cases"
+	GapDuplicateAdvocates      = "duplicate_advocates"
+)
