@@ -136,6 +136,9 @@ type OtherIncome struct {
 	Amount      float64
 	Source      string
 	Description string
+	// set only on rows written by the reconciliation top-up, so a repeat run
+	// cannot book the same missing month twice
+	ExternalRef string
 	CreatedBy   string
 	CreatedAt   time.Time
 }

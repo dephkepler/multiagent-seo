@@ -378,7 +378,7 @@ func (r *FinanceRepository) DeleteRule(ctx context.Context, id string) error {
 // --- other income ---
 
 func (r *FinanceRepository) ListOtherIncome(ctx context.Context, from, to time.Time) ([]finance.OtherIncome, error) {
-	const q = `SELECT id, received_at, amount, source, description, created_by, created_at
+	const q = `SELECT id, received_at, amount, source, description, coalesce(external_ref, ''), created_by, created_at
 		FROM other_income
 		WHERE (@from::date IS NULL OR received_at >= @from::date)
 			AND (@to::date IS NULL OR received_at <= @to::date)
@@ -393,7 +393,7 @@ func (r *FinanceRepository) ListOtherIncome(ctx context.Context, from, to time.T
 	var out []finance.OtherIncome
 	for rows.Next() {
 		var i finance.OtherIncome
-		if err := rows.Scan(&i.ID, &i.ReceivedAt, &i.Amount, &i.Source, &i.Description, &i.CreatedBy, &i.CreatedAt); err != nil {
+		if err := rows.Scan(&i.ID, &i.ReceivedAt, &i.Amount, &i.Source, &i.Description, &i.ExternalRef, &i.CreatedBy, &i.CreatedAt); err != nil {
 			return nil, fmt.Errorf("list other income: scan: %w", err)
 		}
 		out = append(out, i)
@@ -420,6 +420,29 @@ func (r *FinanceRepository) CreateOtherIncome(ctx context.Context, i finance.Oth
 		return finance.OtherIncome{}, fmt.Errorf("create other income: %w", err)
 	}
 	return i, nil
+}
+
+// InsertOtherIncomeGenerated backs the reconciliation top-up. Same shape as
+// InsertGenerated for expenses, and the same reason: the partial unique index
+// needs its predicate repeated for ON CONFLICT to infer it, and a repeat run
+// must be a no-op rather than a second booking of the same missing month.
+func (r *FinanceRepository) InsertOtherIncomeGenerated(ctx context.Context, i finance.OtherIncome) (bool, error) {
+	const q = `INSERT INTO other_income (received_at, amount, source, description, external_ref, created_by)
+		VALUES (@received_at, @amount, @source, @description, @external_ref, @created_by)
+		ON CONFLICT (external_ref) WHERE external_ref IS NOT NULL DO NOTHING`
+
+	tag, err := r.db.Exec(ctx, q, pgx.NamedArgs{
+		"received_at":  i.ReceivedAt,
+		"amount":       i.Amount,
+		"source":       i.Source,
+		"description":  i.Description,
+		"external_ref": nullText(i.ExternalRef),
+		"created_by":   i.CreatedBy,
+	})
+	if err != nil {
+		return false, fmt.Errorf("insert other income %q: %w", i.ExternalRef, err)
+	}
+	return tag.RowsAffected() > 0, nil
 }
 
 func (r *FinanceRepository) DeleteOtherIncome(ctx context.Context, id string) error {

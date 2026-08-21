@@ -38,6 +38,10 @@ type RuleStore interface {
 type IncomeStore interface {
 	ListOtherIncome(ctx context.Context, from, to time.Time) ([]OtherIncome, error)
 	CreateOtherIncome(ctx context.Context, i OtherIncome) (OtherIncome, error)
+	// InsertOtherIncomeGenerated is the idempotent path behind the
+	// reconciliation top-up: false, nil means the ExternalRef was already
+	// there and nothing was written.
+	InsertOtherIncomeGenerated(ctx context.Context, i OtherIncome) (bool, error)
 	DeleteOtherIncome(ctx context.Context, id string) error
 }
 

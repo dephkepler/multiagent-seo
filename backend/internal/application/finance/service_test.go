@@ -206,10 +206,24 @@ func (f *fakeRuleStore) UpdateRule(context.Context, domain.Rule) error { return 
 
 func (f *fakeRuleStore) DeleteRule(context.Context, string) error { return nil }
 
-type fakeIncomeStore struct{}
+type fakeIncomeStore struct {
+	refs map[string]bool
+}
 
 func (f *fakeIncomeStore) ListOtherIncome(context.Context, time.Time, time.Time) ([]domain.OtherIncome, error) {
 	return nil, nil
+}
+
+// mirrors the real store: an external ref already held inserts nothing
+func (f *fakeIncomeStore) InsertOtherIncomeGenerated(_ context.Context, i domain.OtherIncome) (bool, error) {
+	if f.refs == nil {
+		f.refs = map[string]bool{}
+	}
+	if f.refs[i.ExternalRef] {
+		return false, nil
+	}
+	f.refs[i.ExternalRef] = true
+	return true, nil
 }
 
 func (f *fakeIncomeStore) CreateOtherIncome(_ context.Context, i domain.OtherIncome) (domain.OtherIncome, error) {

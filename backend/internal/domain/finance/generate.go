@@ -159,3 +159,43 @@ func dayOf(t time.Time) time.Time {
 func roundMoney(v float64) float64 {
 	return math.Round(v*100) / 100
 }
+
+func IncomeTopUpRef(month string) string {
+	return "topup:" + month
+}
+
+// IncomeTopUp is the difference between what the CRM can account for in a month
+// and what the company's own records say came in. It exists because the gap is
+// not an import problem: both source tabs are fully imported and simply end —
+// January 2025's income was never written down row by row, only as a monthly
+// total. Booking that difference as one labelled row makes the month's total
+// true while saying out loud that the detail is gone.
+type IncomeTopUp struct {
+	Month       string
+	CRM         float64
+	Expected    float64
+	Amount      float64
+	ExternalRef string
+}
+
+// PlanIncomeTopUps only ever proposes adding money the CRM is missing. A month
+// where the CRM shows MORE than the records is the opposite problem — usually
+// double counting — and a negative row would hide it instead of surfacing it,
+// so those are returned untouched with a zero Amount for the caller to report.
+func PlanIncomeTopUps(facts []MonthFacts, expected map[string]float64) []IncomeTopUp {
+	out := make([]IncomeTopUp, 0, len(facts))
+	for _, f := range facts {
+		want, ok := expected[f.Month]
+		if !ok {
+			continue
+		}
+		crm := roundMoney(f.ConsultRevenue + f.CasePaid + f.OtherIncome)
+		gap := roundMoney(want - crm)
+		topUp := IncomeTopUp{Month: f.Month, CRM: crm, Expected: want, ExternalRef: IncomeTopUpRef(f.Month)}
+		if gap > 0 {
+			topUp.Amount = gap
+		}
+		out = append(out, topUp)
+	}
+	return out
+}
