@@ -148,6 +148,23 @@ func Run(ctx context.Context, cfg config.Config) error {
 		tgSubjects = postgres.NewTelegramRepository(pool)
 	}
 
+	if cfg.Telegram.DevUserID != 0 {
+		// Refusing to start is the whole guard. A signature check that can be
+		// turned off by an environment variable is not one, so the variable has
+		// to be impossible to set anywhere but a developer's own machine.
+		if !isLocalURL(cfg.Server.AdminURL) {
+			return fmt.Errorf(
+				"telegram dev user id is set but the admin url %q is not local — this bypasses launch signatures and must never run off a developer machine",
+				cfg.Server.AdminURL,
+			)
+		}
+		log.Warn().
+			Int64("telegram_dev_user_id", cfg.Telegram.DevUserID).
+			Msg("mini app launch signatures are NOT being checked")
+		launches = tgauth.NewDevVerifier(cfg.Telegram.DevUserID)
+		tgSubjects = postgres.NewTelegramRepository(pool)
+	}
+
 	router := apihttp.NewRouter(
 		cfg.Server,
 		server,

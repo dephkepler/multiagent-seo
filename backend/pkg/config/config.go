@@ -101,6 +101,12 @@ type TelegramConfig struct {
 	// is the age of the launch and not of the request — a short window would
 	// sign out someone who simply left the app on screen.
 	InitDataMaxAge time.Duration `env:"TELEGRAM_INITDATA_MAX_AGE" envDefault:"24h"`
+	// DevUserID makes every Mini App request authenticate as this Telegram
+	// user without a signature — the only way to open the client app in a
+	// plain browser, since Telegram signs launches and only for https origins.
+	// A hole in authentication: root refuses to start with it set against a
+	// non-localhost admin URL.
+	DevUserID int64 `env:"TELEGRAM_DEV_USER_ID"`
 }
 
 // TelegramUserConfig is for the personal-account MTProto client (cmd/tgsession,

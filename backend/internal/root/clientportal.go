@@ -2,6 +2,7 @@ package root
 
 import (
 	"log/slog"
+	"net/url"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -56,4 +57,14 @@ func buildClientPortal(
 		Leads:         leads,
 		Log:           log,
 	})
+}
+
+// isLocalURL reports whether u points at the developer's own machine.
+func isLocalURL(u string) bool {
+	parsed, err := url.Parse(u)
+	if err != nil {
+		return false
+	}
+	host := parsed.Hostname()
+	return host == "localhost" || host == "127.0.0.1" || host == "::1"
 }

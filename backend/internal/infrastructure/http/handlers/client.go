@@ -19,7 +19,7 @@ import (
 )
 
 type clientPortalService interface {
-	FreeSlots(ctx context.Context) ([]time.Time, error)
+	BookingOptions(ctx context.Context) (clientportal.BookingOptions, error)
 	Submit(ctx context.Context, req clientportal.Request) (clientportal.Submission, error)
 	Me(ctx context.Context, clientID string) (clientportal.Profile, error)
 }
@@ -37,20 +37,23 @@ func NewClientHandler(svc clientPortalService) *ClientHandler {
 	return &ClientHandler{svc: svc}
 }
 
-func (h *ClientHandler) ListClientSlots(w http.ResponseWriter, r *http.Request) {
+func (h *ClientHandler) GetClientBookingOptions(w http.ResponseWriter, r *http.Request) {
 	if !h.available(w) {
 		return
 	}
-	slots, err := h.svc.FreeSlots(r.Context())
+	options, err := h.svc.BookingOptions(r.Context())
 	if err != nil {
-		h.writeError(r.Context(), w, "client_slots", err)
+		h.writeError(r.Context(), w, "client_booking_options", err)
 		return
 	}
-	// Never nil: the picker renders an empty list as "no free hours", and a
-	// null would make it render an error instead.
-	out := oapigen.ClientSlotList{Slots: slots}
+	// Neither list may be null: the form renders an empty slot list as "no free
+	// hours", and a null as a failure.
+	out := oapigen.ClientBookingOptions{Slots: options.Slots, Categories: options.Categories}
 	if out.Slots == nil {
 		out.Slots = []time.Time{}
+	}
+	if out.Categories == nil {
+		out.Categories = []string{}
 	}
 	response.WriteJSON(r.Context(), w, http.StatusOK, out)
 }

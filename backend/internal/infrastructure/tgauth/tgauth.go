@@ -204,3 +204,28 @@ func parseAuthDate(s string) (time.Time, error) {
 	}
 	return time.Unix(secs, 0).UTC(), nil
 }
+
+// DevVerifier accepts anything and reports one fixed Telegram user.
+//
+// It exists because a Mini App cannot be opened in an ordinary browser: only
+// Telegram can sign a launch, and Telegram will only open an https origin. So
+// without this there is no way to run the client app against a local server at
+// all.
+//
+// It is a hole in authentication and named to say so. root refuses to start
+// with it configured against anything but a localhost admin URL, so it cannot
+// reach a deployment.
+type DevVerifier struct {
+	userID int64
+}
+
+func NewDevVerifier(userID int64) *DevVerifier {
+	return &DevVerifier{userID: userID}
+}
+
+func (v *DevVerifier) Verify(string) (InitData, error) {
+	return InitData{
+		User:     User{ID: v.userID, FirstName: "Dev"},
+		AuthDate: time.Now(),
+	}, nil
+}

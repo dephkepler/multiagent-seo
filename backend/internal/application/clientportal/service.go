@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"multiagent-seo/internal/domain/cases"
 	"multiagent-seo/internal/domain/consultations"
 	"multiagent-seo/internal/domain/webleads"
 )
@@ -81,14 +82,25 @@ func NewService(deps Deps) *Service {
 	}
 }
 
-// FreeSlots is the grid the picker draws.
-func (s *Service) FreeSlots(ctx context.Context) ([]time.Time, error) {
+// BookingOptions is everything the booking form has to render.
+type BookingOptions struct {
+	Slots []time.Time
+	// Categories is the practice-area list, served rather than duplicated in
+	// the app: a copy there would drift from the one staff pick from.
+	Categories []string
+}
+
+// BookingOptions draws the grid and names the practice areas.
+func (s *Service) BookingOptions(ctx context.Context) (BookingOptions, error) {
 	now := s.now()
 	held, err := s.consults.HeldSlots(ctx, now, now.Add(s.schedule.Horizon))
 	if err != nil {
-		return nil, fmt.Errorf("free slots: %w", err)
+		return BookingOptions{}, fmt.Errorf("booking options: %w", err)
 	}
-	return s.schedule.FreeSlots(now, held), nil
+	return BookingOptions{
+		Slots:      s.schedule.FreeSlots(now, held),
+		Categories: cases.Categories,
+	}, nil
 }
 
 // Request is one submission from the Mini App: the client's own details, what

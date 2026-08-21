@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"multiagent-seo/internal/domain/cases"
 	"multiagent-seo/internal/domain/consultations"
 	"multiagent-seo/internal/domain/webleads"
 )
@@ -317,22 +318,26 @@ func TestSubmitSurvivesAFailedLeadSubmission(t *testing.T) {
 	}
 }
 
-func TestFreeSlotsExcludeWhatIsHeld(t *testing.T) {
+func TestBookingOptionsExcludeWhatIsHeldAndNameThePracticeAreas(t *testing.T) {
 	_, location := testNow(t)
 	taken := time.Date(2026, time.August, 24, 12, 0, 0, 0, location)
 	svc := newTestService(t, newFakeClients(), &fakeConsultations{held: []time.Time{taken}}, &fakeLeads{})
 
-	slots, err := svc.FreeSlots(context.Background())
+	options, err := svc.BookingOptions(context.Background())
 	if err != nil {
-		t.Fatalf("FreeSlots: %v", err)
+		t.Fatalf("BookingOptions: %v", err)
 	}
-	if len(slots) == 0 {
+	if len(options.Slots) == 0 {
 		t.Fatal("no slots at all")
 	}
-	for _, slot := range slots {
+	for _, slot := range options.Slots {
 		if slot.Equal(taken) {
 			t.Errorf("offered the held slot %s", slot)
 		}
+	}
+	// Served from the domain so the form cannot drift from what staff pick from.
+	if len(options.Categories) != len(cases.Categories) {
+		t.Errorf("got %d categories, want the %d in cases.Categories", len(options.Categories), len(cases.Categories))
 	}
 }
 

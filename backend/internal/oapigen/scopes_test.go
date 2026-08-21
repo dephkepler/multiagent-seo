@@ -129,7 +129,7 @@ func TestClientScopesAreOnlyOnClientRoutes(t *testing.T) {
 // the picker and the intake that creates that client. Anything else would be
 // reachable by anyone on Telegram.
 func TestGuestScopeIsOnlyWhereItHasTo(t *testing.T) {
-	allowed := []string{"ListClientSlots", "SubmitClientRequest"}
+	allowed := []string{"GetClientBookingOptions", "SubmitClientRequest"}
 
 	spec, err := oapigen.GetSwagger()
 	if err != nil {
