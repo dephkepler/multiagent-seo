@@ -165,9 +165,15 @@ func main() {
 			consultationArg = consultationID
 		}
 
-		if _, err := tx.Exec(ctx, `
+		// paid_amount is a running total, and case_payments is the ledger behind
+		// it. Writing the total without a ledger row makes the same money visible
+		// to whatever reads the column (leadstats) and invisible to whatever reads
+		// the ledger (the finance P&L), so both go in together.
+		var caseID string
+		if err := tx.QueryRow(ctx, `
 			INSERT INTO cases (client_id, consultation_id, advocate_name, fee, paid_amount, status, description, created_by, created_at)
-			VALUES (@client_id, @consultation_id, @advocate_name, @fee, @paid_amount, @status, @description, @created_by, @created_at)`,
+			VALUES (@client_id, @consultation_id, @advocate_name, @fee, @paid_amount, @status, @description, @created_by, @created_at)
+			RETURNING id`,
 			pgx.NamedArgs{
 				"client_id":       clientID,
 				"consultation_id": consultationArg,
@@ -178,8 +184,21 @@ func main() {
 				"description":     description,
 				"created_by":      "import:" + strings.TrimSpace(first.admin),
 				"created_at":      atNoon(first.date),
-			}); err != nil {
+			}).Scan(&caseID); err != nil {
 			log.Fatalf("case %s: insert: %v", id, err)
+		}
+		if paid > 0 {
+			if _, err := tx.Exec(ctx, `
+				INSERT INTO case_payments (case_id, amount, paid_at, created_by)
+				VALUES (@case_id, @amount, @paid_at, @created_by)`,
+				pgx.NamedArgs{
+					"case_id":    caseID,
+					"amount":     paid,
+					"paid_at":    atNoon(first.date),
+					"created_by": "import:" + strings.TrimSpace(first.admin),
+				}); err != nil {
+				log.Fatalf("case %s: insert payment: %v", id, err)
+			}
 		}
 		inserted++
 	}
