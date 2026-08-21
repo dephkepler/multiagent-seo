@@ -10,6 +10,7 @@ import (
 
 	"github.com/rs/zerolog/log"
 
+	appadvocateview "multiagent-seo/internal/application/advocateview"
 	appapitoken "multiagent-seo/internal/application/apitoken"
 	appauth "multiagent-seo/internal/application/auth"
 	appclientdetail "multiagent-seo/internal/application/clientdetail"
@@ -57,7 +58,8 @@ func Run(ctx context.Context, cfg config.Config) error {
 	healthRepo := postgres.NewHealthRepository(pool)
 	wordpressRepo := postgres.NewWordpressSiteRepository(pool, cfg.WordPress.EncryptionKey)
 	wordpressSvc := appwordpress.NewService(wordpressRepo)
-	authSvc := appauth.NewService(postgres.NewUserRepository(pool), jwtSvc)
+	userRepo := postgres.NewUserRepository(pool)
+	authSvc := appauth.NewService(userRepo, jwtSvc)
 	apiTokenSvc := appapitoken.NewService(postgres.NewApiTokenRepository(pool))
 
 	articlesSvc, evolveSvc, articlesRunner := buildArticles(ctx, cfg, slogLog, pool, wordpressRepo)
@@ -81,6 +83,7 @@ func Run(ctx context.Context, cfg config.Config) error {
 		postgres.NewConsultationRepository(pool, cfg.Clients.EncryptionKey),
 	)
 	vaultSvc := appvault.NewService(postgres.NewVaultRepository(pool))
+	advocateViewSvc := appadvocateview.NewService(postgres.NewAdvocateViewRepository(pool))
 
 	financeRepo := postgres.NewFinanceRepository(pool)
 	financeSvc := appfinance.NewService(appfinance.Deps{
@@ -94,20 +97,21 @@ func Run(ctx context.Context, cfg config.Config) error {
 	})
 
 	healthSvc := apphealth.NewService(domainhealth.NewService(healthRepo))
-	server := handlers.NewServer(
-		handlers.NewHealthHandler(healthSvc),
-		handlers.NewWordpressSitesHandler(wordpressSvc),
-		handlers.NewLoginHandler(authSvc),
-		handlers.NewArticlesHandler(articlesSvc),
-		handlers.NewLinkbuildingHandler(linkbuildingBacklinkSvc),
-		handlers.NewApiTokensHandler(apiTokenSvc),
-		handlers.NewEmailScrapeHandler(emailScrapeSvc),
-		handlers.NewLeadStatsHandler(leadStatsSvc),
-		handlers.NewClientSegmentsHandler(clientSegmentsSvc),
-		handlers.NewClientDetailHandler(clientDetailSvc),
-		handlers.NewVaultHandler(vaultSvc),
-		handlers.NewFinanceHandler(financeSvc),
-	)
+	server := handlers.NewServer(handlers.Deps{
+		Health:         handlers.NewHealthHandler(healthSvc),
+		Wordpress:      handlers.NewWordpressSitesHandler(wordpressSvc),
+		Login:          handlers.NewLoginHandler(authSvc),
+		Articles:       handlers.NewArticlesHandler(articlesSvc),
+		Linkbuilding:   handlers.NewLinkbuildingHandler(linkbuildingBacklinkSvc),
+		ApiTokens:      handlers.NewApiTokensHandler(apiTokenSvc),
+		EmailScrape:    handlers.NewEmailScrapeHandler(emailScrapeSvc),
+		LeadStats:      handlers.NewLeadStatsHandler(leadStatsSvc),
+		ClientSegments: handlers.NewClientSegmentsHandler(clientSegmentsSvc),
+		ClientDetail:   handlers.NewClientDetailHandler(clientDetailSvc),
+		Vault:          handlers.NewVaultHandler(vaultSvc),
+		Finance:        handlers.NewFinanceHandler(financeSvc),
+		My:             handlers.NewMyHandler(advocateViewSvc),
+	})
 
 	schedule(ctx, cfg.Finance.GenerateInterval, financeSvc.GenerateDueExpenses)
 	schedule(ctx, cfg.Prompt.PromoteInterval, evolveSvc.PromotePrompts)
@@ -123,7 +127,7 @@ func Run(ctx context.Context, cfg config.Config) error {
 	}
 
 	var verifier domainauth.TokenVerifier = compositeVerifier{jwt: jwtSvc, keys: apiTokenSvc}
-	router := apihttp.NewRouter(cfg.Server, server, httpMiddleware.BearerAuth(verifier))
+	router := apihttp.NewRouter(cfg.Server, server, httpMiddleware.BearerAuth(verifier, userRepo))
 
 	srv := &http.Server{
 		Addr:         net.JoinHostPort(cfg.Server.Host, cfg.Server.Port),

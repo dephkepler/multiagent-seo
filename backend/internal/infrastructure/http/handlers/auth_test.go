@@ -33,6 +33,15 @@ func (r fakeUserRepo) FindByEmail(_ context.Context, email string) (domainuser.U
 	return u, nil
 }
 
+func (r fakeUserRepo) FindByID(_ context.Context, id string) (domainuser.User, error) {
+	for _, u := range r.users {
+		if u.ID.String() == id {
+			return u, nil
+		}
+	}
+	return domainuser.User{}, domainuser.ErrNotFound
+}
+
 func (r fakeUserRepo) List(context.Context) ([]domainuser.User, error) {
 	out := make([]domainuser.User, 0, len(r.users))
 	for _, u := range r.users {
@@ -53,7 +62,10 @@ func newAuthRouter(t *testing.T) http.Handler {
 	authSvc := appauth.NewService(repo, jwtauth.New("test-secret", time.Hour))
 
 	healthHandler := handlers.NewHealthHandler(apphealth.NewService(domainhealth.NewService(stubRepo{})))
-	server := handlers.NewServer(healthHandler, handlers.NewWordpressSitesHandler(nil), handlers.NewLoginHandler(authSvc), handlers.NewArticlesHandler(nil), handlers.NewLinkbuildingHandler(nil), handlers.NewApiTokensHandler(nil), handlers.NewEmailScrapeHandler(nil), handlers.NewLeadStatsHandler(nil), handlers.NewClientSegmentsHandler(nil), handlers.NewClientDetailHandler(nil), handlers.NewVaultHandler(nil), handlers.NewFinanceHandler(nil))
+	server := handlers.NewServer(handlers.Deps{
+		Health: healthHandler,
+		Login:  handlers.NewLoginHandler(authSvc),
+	})
 	return apihttp.NewRouter(config.ServerConfig{
 		Host:               "localhost",
 		Port:               "0",

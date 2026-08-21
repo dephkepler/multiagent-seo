@@ -6,6 +6,7 @@ import (
 	"time"
 
 	domainhealth "multiagent-seo/internal/domain/health"
+	"multiagent-seo/internal/infrastructure/http/problem"
 	"multiagent-seo/internal/infrastructure/http/response"
 	"multiagent-seo/internal/oapigen"
 )
@@ -23,6 +24,10 @@ func NewHealthHandler(health healthService) *HealthHandler {
 }
 
 func (h *HealthHandler) GetHealthz(w http.ResponseWriter, r *http.Request) {
+	if isNil(h.health) {
+		problem.Write(w, http.StatusServiceUnavailable, "health unavailable")
+		return
+	}
 	result := h.health.Check(r.Context())
 
 	status := http.StatusOK

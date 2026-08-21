@@ -100,6 +100,10 @@ func (h *ApiTokensHandler) DeleteApiToken(w http.ResponseWriter, r *http.Request
 }
 
 func (h *ApiTokensHandler) currentUser(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
+	if isNil(h.svc) {
+		problem.Write(w, http.StatusServiceUnavailable, "api tokens unavailable")
+		return uuid.Nil, false
+	}
 	raw, ok := httpMiddleware.UserIDFromContext(r.Context())
 	if !ok {
 		problem.Write(w, http.StatusUnauthorized, "unauthorized")

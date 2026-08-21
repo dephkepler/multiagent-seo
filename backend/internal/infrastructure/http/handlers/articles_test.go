@@ -59,20 +59,10 @@ func (s *fakeGenerateService) GenerateBatch(context.Context, int, apparticles.Ge
 
 func newArticlesRouter(svc *fakeGenerateService) http.Handler {
 	healthHandler := handlers.NewHealthHandler(apphealth.NewService(domainhealth.NewService(stubRepo{})))
-	server := handlers.NewServer(
-		healthHandler,
-		handlers.NewWordpressSitesHandler(nil),
-		handlers.NewLoginHandler(nil),
-		handlers.NewArticlesHandler(svc),
-		handlers.NewLinkbuildingHandler(nil),
-		handlers.NewApiTokensHandler(nil),
-		handlers.NewEmailScrapeHandler(nil),
-		handlers.NewLeadStatsHandler(nil),
-		handlers.NewClientSegmentsHandler(nil),
-		handlers.NewClientDetailHandler(nil),
-		handlers.NewVaultHandler(nil),
-		handlers.NewFinanceHandler(nil),
-	)
+	server := handlers.NewServer(handlers.Deps{
+		Health:   healthHandler,
+		Articles: handlers.NewArticlesHandler(svc),
+	})
 	return apihttp.NewRouter(config.ServerConfig{
 		Host:               "localhost",
 		Port:               "0",

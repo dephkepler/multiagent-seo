@@ -29,18 +29,10 @@ func itWPServer(t *testing.T, pool *pgxpool.Pool) *httptest.Server {
 	svc := appwordpress.NewService(repo)
 
 	healthHandler := handlers.NewHealthHandler(apphealth.NewService(domainhealth.NewService(stubRepo{})))
-	server := handlers.NewServer(
-		healthHandler,
-		handlers.NewWordpressSitesHandler(svc),
-		handlers.NewLoginHandler(nil),
-		handlers.NewArticlesHandler(nil),
-		handlers.NewLinkbuildingHandler(nil),
-		handlers.NewApiTokensHandler(nil), handlers.NewEmailScrapeHandler(nil), handlers.NewLeadStatsHandler(nil),
-		handlers.NewClientSegmentsHandler(nil),
-		handlers.NewClientDetailHandler(nil),
-		handlers.NewVaultHandler(nil),
-		handlers.NewFinanceHandler(nil),
-	)
+	server := handlers.NewServer(handlers.Deps{
+		Health:    healthHandler,
+		Wordpress: handlers.NewWordpressSitesHandler(svc),
+	})
 	router := apihttp.NewRouter(config.ServerConfig{
 		BasePath:           "/",
 		CORSAllowedOrigins: []string{"http://localhost:3000"},

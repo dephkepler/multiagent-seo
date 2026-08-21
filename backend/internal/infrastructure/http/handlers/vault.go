@@ -34,6 +34,11 @@ func NewVaultHandler(entries VaultService) *VaultHandler {
 }
 
 func (h *VaultHandler) ListVaultEntries(w http.ResponseWriter, r *http.Request) {
+	if isNil(h.entries) {
+		problem.Write(w, http.StatusServiceUnavailable, "vault unavailable")
+		return
+	}
+
 	entries, err := h.entries.List(r.Context())
 	if err != nil {
 		h.writeError(r.Context(), w, "list_vault_entries", err)
@@ -47,6 +52,11 @@ func (h *VaultHandler) ListVaultEntries(w http.ResponseWriter, r *http.Request) 
 }
 
 func (h *VaultHandler) CreateVaultEntry(w http.ResponseWriter, r *http.Request) {
+	if isNil(h.entries) {
+		problem.Write(w, http.StatusServiceUnavailable, "vault unavailable")
+		return
+	}
+
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 	var body oapigen.CreateVaultEntryRequest
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -80,6 +90,11 @@ func (h *VaultHandler) CreateVaultEntry(w http.ResponseWriter, r *http.Request) 
 }
 
 func (h *VaultHandler) UpdateVaultEntry(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
+	if isNil(h.entries) {
+		problem.Write(w, http.StatusServiceUnavailable, "vault unavailable")
+		return
+	}
+
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 	var body oapigen.UpdateVaultEntryRequest
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -108,6 +123,11 @@ func (h *VaultHandler) UpdateVaultEntry(w http.ResponseWriter, r *http.Request, 
 }
 
 func (h *VaultHandler) DeleteVaultEntry(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
+	if isNil(h.entries) {
+		problem.Write(w, http.StatusServiceUnavailable, "vault unavailable")
+		return
+	}
+
 	if err := h.entries.Delete(r.Context(), id); err != nil {
 		h.writeError(r.Context(), w, "delete_vault_entry", err)
 		return

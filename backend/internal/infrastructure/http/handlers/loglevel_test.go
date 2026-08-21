@@ -9,6 +9,7 @@ import (
 
 	apphealth "multiagent-seo/internal/application/health"
 	domainhealth "multiagent-seo/internal/domain/health"
+	domainuser "multiagent-seo/internal/domain/user"
 	apihttp "multiagent-seo/internal/infrastructure/http"
 	"multiagent-seo/internal/infrastructure/http/handlers"
 	httpMiddleware "multiagent-seo/internal/infrastructure/http/middleware"
@@ -16,13 +17,28 @@ import (
 	"multiagent-seo/pkg/config"
 )
 
+// adminLookup answers as the one admin account the token in these tests names.
+// The auth middleware resolves the role from the user row, so a router under
+// test needs a store to resolve it against.
+type adminLookup map[string]domainuser.User
+
+func (l adminLookup) FindByID(_ context.Context, id string) (domainuser.User, error) {
+	u, ok := l[id]
+	if !ok {
+		return domainuser.User{}, domainuser.ErrNotFound
+	}
+	return u, nil
+}
+
 func newLogLevelRouter(jwtSvc *jwtauth.Service) http.Handler {
 	healthHandler := handlers.NewHealthHandler(apphealth.NewService(domainhealth.NewService(stubRepo{})))
-	server := handlers.NewServer(healthHandler, handlers.NewWordpressSitesHandler(nil), handlers.NewLoginHandler(nil), handlers.NewArticlesHandler(nil), handlers.NewLinkbuildingHandler(nil), handlers.NewApiTokensHandler(nil), handlers.NewEmailScrapeHandler(nil), handlers.NewLeadStatsHandler(nil), handlers.NewClientSegmentsHandler(nil), handlers.NewClientDetailHandler(nil), handlers.NewVaultHandler(nil), handlers.NewFinanceHandler(nil))
+	server := handlers.NewServer(handlers.Deps{Health: healthHandler})
 	return apihttp.NewRouter(
 		config.ServerConfig{BasePath: "/", CORSAllowedOrigins: []string{"http://localhost:3000"}},
 		server,
-		httpMiddleware.BearerAuth(jwtSvc),
+		httpMiddleware.BearerAuth(jwtSvc, adminLookup{
+			"user-1": {Email: "admin@example.com", Role: domainuser.RoleAdmin},
+		}),
 	)
 }
 
