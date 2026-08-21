@@ -11,6 +11,10 @@ import (
 // login at all: the health probe and the login form itself.
 var publicOps = []string{"GetHealthz", "Login"}
 
+// knownRoles is the whole vocabulary the gate understands — it has to match
+// user.Role, or a typo in a scope silently becomes "nobody may call this".
+var knownRoles = []string{"admin", "advocate", "client", "guest"}
+
 // TestEveryOperationDeclaresScopes is the guard the whole role split rests on.
 // The auth middleware treats an empty scope list as admin-only, so a forgotten
 // list fails closed rather than leaking — but it fails closed *silently*, and a
@@ -44,7 +48,7 @@ func TestEveryOperationDeclaresScopes(t *testing.T) {
 					t.Errorf("%s %s (%s) has an empty role list — write [ admin ] (or the roles it is for) explicitly", method, path, op.OperationID)
 				}
 				for _, scope := range scopes {
-					if scope != "admin" && scope != "advocate" {
+					if !slices.Contains(knownRoles, scope) {
 						t.Errorf("%s %s (%s) names unknown role %q", method, path, op.OperationID, scope)
 					}
 				}
@@ -85,4 +89,71 @@ func TestAdvocateScopeIsOnlyOnMyRoutes(t *testing.T) {
 
 func isMyRoute(path string) bool {
 	return len(path) >= 4 && path[:4] == "/my/"
+}
+
+// TestClientScopesAreOnlyOnClientRoutes is the same pin as the advocate one, in
+// the other direction: a launch-authenticated caller must not be admitted
+// anywhere except the client's own section, and everything in that section must
+// admit them — an admin token has no business there and would not carry a
+// client id anyway.
+func TestClientScopesAreOnlyOnClientRoutes(t *testing.T) {
+	spec, err := oapigen.GetSwagger()
+	if err != nil {
+		t.Fatalf("load spec: %v", err)
+	}
+
+	for path, item := range spec.Paths.Map() {
+		for method, op := range item.Operations() {
+			if op.Security == nil {
+				continue
+			}
+			telegram := false
+			for _, requirement := range *op.Security {
+				scopes := requirement["bearerAuth"]
+				if slices.Contains(scopes, "client") || slices.Contains(scopes, "guest") {
+					telegram = true
+				}
+			}
+			if telegram && !isClientRoute(path) {
+				t.Errorf("%s %s (%s) lets a Telegram caller in but is not under /client", method, path, op.OperationID)
+			}
+			if !telegram && isClientRoute(path) {
+				t.Errorf("%s %s (%s) is under /client but shuts the client out", method, path, op.OperationID)
+			}
+		}
+	}
+}
+
+// TestGuestScopeIsOnlyWhereItHasTo pins the narrowest scope of all. A guest is a
+// verified launch with no client behind it, so the only things it may reach are
+// the picker and the intake that creates that client. Anything else would be
+// reachable by anyone on Telegram.
+func TestGuestScopeIsOnlyWhereItHasTo(t *testing.T) {
+	allowed := []string{"ListClientSlots", "SubmitClientRequest"}
+
+	spec, err := oapigen.GetSwagger()
+	if err != nil {
+		t.Fatalf("load spec: %v", err)
+	}
+
+	for path, item := range spec.Paths.Map() {
+		for method, op := range item.Operations() {
+			if op.Security == nil {
+				continue
+			}
+			for _, requirement := range *op.Security {
+				if !slices.Contains(requirement["bearerAuth"], "guest") {
+					continue
+				}
+				if !slices.Contains(allowed, op.OperationID) {
+					t.Errorf("%s %s (%s) admits a guest — widening that is a decision, make it here",
+						method, path, op.OperationID)
+				}
+			}
+		}
+	}
+}
+
+func isClientRoute(path string) bool {
+	return len(path) >= 8 && path[:8] == "/client/"
 }

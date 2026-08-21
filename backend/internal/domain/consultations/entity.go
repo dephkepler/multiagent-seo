@@ -12,6 +12,10 @@ import (
 // clients can't share one).
 var ErrPhoneInUse = errors.New("consultations: phone already in use by another client")
 
+// ErrSlotTaken is returned when the slot a client picked was taken between the
+// moment the picker drew it and the moment they confirmed.
+var ErrSlotTaken = errors.New("consultations: slot is already taken")
+
 // Status values a consultation can hold. One staff books starts Scheduled
 // (the DB column defaults to it) — they move it to one of the last three from
 // the inline buttons the bot sends after booking. One a client books starts

@@ -106,6 +106,14 @@ func (s Schedule) FreeSlots(now time.Time, held []time.Time) []time.Time {
 	return free
 }
 
+// Offers reports whether start is a slot this schedule would hand out right
+// now. The client sends back an instant, not an index, so without this a
+// request could name 03:00 on a Sunday, an hour already taken, or a date a year
+// out — the picker's grid would be advisory and the calendar would not.
+func (s Schedule) Offers(now, start time.Time, held []time.Time) bool {
+	return slices.ContainsFunc(s.FreeSlots(now, held), start.Equal)
+}
+
 func (s Schedule) opensOn(day time.Weekday) bool {
 	return slices.Contains(s.Weekdays, day)
 }

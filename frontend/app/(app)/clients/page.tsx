@@ -10,9 +10,9 @@ import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { SectionHeader } from '@/components/ui/section-header'
-import { TagChips, type TagDef } from '@/components/tags/tag-chips'
+import { type TagDef } from '@/components/tags/tag-chips'
 import { cx } from '@/lib/cx'
-import { categoryColorClass, SEGMENT_COLOR, SEGMENT_LABEL, SEGMENT_ORDER, type Segment } from '@/lib/client-tags'
+import { categoryColorClass, SEGMENT_COLOR, SEGMENT_LABEL, SEGMENT_ORDER, TAG_BADGE_VARIANT, TAG_LABEL, type Segment } from '@/lib/client-tags'
 
 interface ClientSegment {
   client_id: string
@@ -52,6 +52,15 @@ function fmtDate(iso: string): string {
 
 type SortKey = 'activity' | 'ltv'
 
+// "dormant" ("Без контакта 90+ дней") ends up on nearly every row once a
+// client hasn't been touched in 90 days — in the list it reads as noise
+// repeated down the whole column, not a signal. It still shows in the
+// client's own card (see clients/[id]/page.tsx), just not here. Manual
+// (curated) tags are card-only too — the list keeps only the tag *filter*.
+function visibleListTags(tags: string[]): string[] {
+  return tags.filter((t) => t !== 'dormant')
+}
+
 export default function ClientsPage() {
   const qc = useQueryClient()
   const [query, setQuery] = useState('')
@@ -89,19 +98,6 @@ export default function ClientsPage() {
   const setOverride = useMutation({
     mutationFn: ({ id, segment }: { id: string; segment: Segment | null }) =>
       api(`/clients/${id}/segment`, { method: 'PATCH', body: JSON.stringify({ segment_override: segment }) }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['client-segments'] }),
-    onError: (e: Error) => toast.error(e.message),
-  })
-
-  const addTag = useMutation({
-    mutationFn: ({ id, tag }: { id: string; tag: string }) =>
-      api(`/clients/${id}/tags`, { method: 'POST', body: JSON.stringify({ tag }) }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['client-segments'] }),
-    onError: (e: Error) => toast.error(e.message),
-  })
-  const removeTag = useMutation({
-    mutationFn: ({ id, tag }: { id: string; tag: string }) =>
-      api(`/clients/${id}/tags/${encodeURIComponent(tag)}`, { method: 'DELETE' }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['client-segments'] }),
     onError: (e: Error) => toast.error(e.message),
   })
@@ -317,18 +313,15 @@ export default function ClientsPage() {
                       {segmentPending && <span className='text-xs text-gray-400'>…</span>}
                     </div>
 
-                    <div className='mt-2'>
-                      <TagChips
-                        tags={c.tags}
-                        manualTags={c.manual_tags}
-                        categories={categories}
-                        defsByCategory={defsByCategory}
-                        pending={addTag.isPending || removeTag.isPending}
-                        onAdd={(tag) => addTag.mutate({ id: c.client_id, tag })}
-                        onRemove={(tag) => removeTag.mutate({ id: c.client_id, tag })}
-                        maxVisible={3}
-                      />
-                    </div>
+                    {visibleListTags(c.tags).length > 0 && (
+                      <div className='mt-2 flex flex-wrap gap-1.5'>
+                        {visibleListTags(c.tags).map((t) => (
+                          <Badge key={t} variant={TAG_BADGE_VARIANT[t] || 'neutral'}>
+                            {TAG_LABEL[t] || t}
+                          </Badge>
+                        ))}
+                      </div>
+                    )}
 
                     <dl className='mt-2.5 grid grid-cols-2 gap-y-1 border-t border-gray-100 pt-2 text-xs'>
                       <div className='flex items-center justify-between pr-2'>
@@ -416,18 +409,14 @@ export default function ClientsPage() {
                             {segmentPending && <span className='text-xs text-gray-400'>…</span>}
                           </div>
                         </td>
-                        <td className='py-2 pr-4'>
-                          <TagChips
-                            tags={c.tags}
-                            manualTags={c.manual_tags}
-                            categories={categories}
-                            defsByCategory={defsByCategory}
-                            pending={addTag.isPending || removeTag.isPending}
-                            onAdd={(tag) => addTag.mutate({ id: c.client_id, tag })}
-                            onRemove={(tag) => removeTag.mutate({ id: c.client_id, tag })}
-                            maxVisible={3}
-                            className='max-w-[220px]'
-                          />
+                        <td className='max-w-[220px] py-2 pr-4'>
+                          <div className='flex flex-wrap gap-1.5'>
+                            {visibleListTags(c.tags).map((t) => (
+                              <Badge key={t} variant={TAG_BADGE_VARIANT[t] || 'neutral'}>
+                                {TAG_LABEL[t] || t}
+                              </Badge>
+                            ))}
+                          </div>
                         </td>
                         <td className='py-2 pr-4 text-gray-500'>{c.case_count || '—'}</td>
                         <td className={cx('py-2 pr-4', debt > 0 ? 'font-medium text-rose-600' : 'text-gray-400')}>

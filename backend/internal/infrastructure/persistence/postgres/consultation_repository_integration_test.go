@@ -313,3 +313,79 @@ func TestConsultationRepository_HeldSlots_RequestedIsAnAcceptedStatus(t *testing
 		t.Fatalf("insert a requested consultation: %v", err)
 	}
 }
+
+func TestConsultationRepository_HoldSlot_BooksARequest(t *testing.T) {
+	ctx := context.Background()
+	pool := testsupport.NewTestDB(t, baseConnStr)
+	repo := postgres.NewConsultationRepository(pool, testEncryptionKey)
+
+	client, err := repo.CreateClient(ctx, "Клієнт що бронює", "+380507770020", "", "")
+	if err != nil {
+		t.Fatalf("CreateClient: %v", err)
+	}
+
+	at := time.Date(2026, time.September, 14, 11, 0, 0, 0, time.UTC)
+	got, err := repo.HoldSlot(ctx, client.ID, at, "client")
+	if err != nil {
+		t.Fatalf("HoldSlot: %v", err)
+	}
+	if got.Status != consultations.StatusRequested {
+		t.Errorf("Status = %q, want requested", got.Status)
+	}
+	if got.Price != 0 {
+		t.Errorf("Price = %v, want 0 — the firm sets it", got.Price)
+	}
+	if !got.ScheduledAt.Equal(at) {
+		t.Errorf("ScheduledAt = %s, want %s", got.ScheduledAt, at)
+	}
+}
+
+// The guard that stops the second client of two who picked the same hour.
+func TestConsultationRepository_HoldSlot_RefusesATakenSlot(t *testing.T) {
+	ctx := context.Background()
+	pool := testsupport.NewTestDB(t, baseConnStr)
+	repo := postgres.NewConsultationRepository(pool, testEncryptionKey)
+
+	first, err := repo.CreateClient(ctx, "Перший", "+380507770021", "", "")
+	if err != nil {
+		t.Fatalf("CreateClient(first): %v", err)
+	}
+	second, err := repo.CreateClient(ctx, "Другий", "+380507770022", "", "")
+	if err != nil {
+		t.Fatalf("CreateClient(second): %v", err)
+	}
+
+	at := time.Date(2026, time.September, 14, 12, 0, 0, 0, time.UTC)
+	if _, err := repo.HoldSlot(ctx, first.ID, at, "client"); err != nil {
+		t.Fatalf("HoldSlot(first): %v", err)
+	}
+
+	_, err = repo.HoldSlot(ctx, second.ID, at, "client")
+	if !errors.Is(err, consultations.ErrSlotTaken) {
+		t.Fatalf("err = %v, want ErrSlotTaken", err)
+	}
+}
+
+// A cancelled consultation holds nothing, so its hour goes back on offer.
+func TestConsultationRepository_HoldSlot_ReusesAnHourThatWasReleased(t *testing.T) {
+	ctx := context.Background()
+	pool := testsupport.NewTestDB(t, baseConnStr)
+	repo := postgres.NewConsultationRepository(pool, testEncryptionKey)
+
+	client, err := repo.CreateClient(ctx, "Клієнт після скасування", "+380507770023", "", "")
+	if err != nil {
+		t.Fatalf("CreateClient: %v", err)
+	}
+
+	at := time.Date(2026, time.September, 14, 13, 0, 0, 0, time.UTC)
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO consultations (client_id, scheduled_at, price, status)
+			VALUES (@client, @at, 0, @status)`,
+		pgx.NamedArgs{"client": client.ID, "at": at, "status": consultations.StatusCancelled}); err != nil {
+		t.Fatalf("seed cancelled consultation: %v", err)
+	}
+
+	if _, err := repo.HoldSlot(ctx, client.ID, at, "client"); err != nil {
+		t.Fatalf("HoldSlot after a cancellation: %v", err)
+	}
+}

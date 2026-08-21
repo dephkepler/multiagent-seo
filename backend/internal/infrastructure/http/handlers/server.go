@@ -16,6 +16,7 @@ type Server struct {
 	*VaultHandler
 	*FinanceHandler
 	*MyHandler
+	*ClientHandler
 }
 
 // Deps names the handlers instead of ordering them. Thirteen positional
@@ -36,6 +37,7 @@ type Deps struct {
 	Vault          *VaultHandler
 	Finance        *FinanceHandler
 	My             *MyHandler
+	Client         *ClientHandler
 }
 
 // NewServer replaces anything Deps left out with a handler wired to no
@@ -82,6 +84,9 @@ func NewServer(d Deps) *Server {
 	if d.My == nil {
 		d.My = NewMyHandler(nil)
 	}
+	if d.Client == nil {
+		d.Client = NewClientHandler(nil)
+	}
 
 	return &Server{
 		HealthHandler:         d.Health,
@@ -97,5 +102,6 @@ func NewServer(d Deps) *Server {
 		VaultHandler:          d.Vault,
 		FinanceHandler:        d.Finance,
 		MyHandler:             d.My,
+		ClientHandler:         d.Client,
 	}
 }
