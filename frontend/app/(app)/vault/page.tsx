@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
+import { copyText } from '@/lib/clipboard'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -80,12 +81,11 @@ export default function VaultPage() {
   }
 
   async function copy(value: string, label: string) {
-    try {
-      await navigator.clipboard.writeText(value)
+    if (await copyText(value)) {
       toast.success(`${label} copied`)
-    } catch {
-      toast.error('Clipboard unavailable')
+      return
     }
+    toast.error(`${label} not copied — reveal it and select it by hand`)
   }
 
   return (
