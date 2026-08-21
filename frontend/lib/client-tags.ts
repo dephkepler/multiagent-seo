@@ -59,3 +59,19 @@ export function categoryColorClass(category: string, categories: string[]): stri
   const idx = Math.max(0, sorted.indexOf(category))
   return CATEGORY_PALETTE[idx % CATEGORY_PALETTE.length]
 }
+
+// Manual tags come back from the API ordered alphabetically (see backend
+// ClientTags: `ORDER BY tag`), which scatters a client's category colors
+// randomly across the row instead of clustering same-colored chips
+// together. Sorting by category first (in the same order categories get
+// their color from, see categoryColorClass) makes same-category tags sit
+// next to each other, so the row reads as organized groups, not a
+// shuffled pile.
+export function sortTagsByCategory(labels: string[], categories: string[], labelToCategory: Map<string, string>): string[] {
+  const order = [...categories].sort()
+  return [...labels].sort((a, b) => {
+    const idxA = order.indexOf(labelToCategory.get(a) ?? '')
+    const idxB = order.indexOf(labelToCategory.get(b) ?? '')
+    return idxA !== idxB ? idxA - idxB : a.localeCompare(b)
+  })
+}

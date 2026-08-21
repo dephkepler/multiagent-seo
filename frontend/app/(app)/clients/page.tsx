@@ -17,6 +17,7 @@ import {
   SEGMENT_LABEL,
   SEGMENT_ORDER,
   type Segment,
+  sortTagsByCategory,
   TAG_BADGE_VARIANT,
   TAG_LABEL,
 } from '@/lib/client-tags'
@@ -514,14 +515,22 @@ function SortableHeader({
   )
 }
 
-// TagsCell renders the four auto-computed tags read-only, every manual tag
-// as a chip colored by its category, and a grouped dropdown (native
-// <select> with one <optgroup> per category — keeps the picker inside the
-// browser's own floating layer, so it can't be clipped by the table's
-// horizontal scroll container the way a hand-built popover could) to add
-// one more. The dropdown only ever offers labels from the curated
-// vocabulary, never free text — see ManageTagsPanel for managing the list
-// itself.
+// A client can carry the 4 auto tags plus any number of manual ones — left
+// unbounded, that row grows tall and the chips land in whatever order the
+// API returned them, reading as a loose, unsorted pile. VISIBLE_TAGS caps
+// what's shown before a "+N" toggle takes over, and sortTagsByCategory (see
+// lib/client-tags) clusters same-colored chips together first.
+const VISIBLE_TAGS = 3
+
+// TagsCell renders the auto-computed tags read-only, every manual tag as a
+// chip colored by its category (grouped together, not alphabetical-API
+// order), capped to VISIBLE_TAGS with a "+N" expand toggle, and a compact
+// dropdown (native <select> with one <optgroup> per category — keeps the
+// picker inside the browser's own floating layer, so it can't be clipped by
+// the table's horizontal scroll container the way a hand-built popover
+// could) to add one more. The dropdown only ever offers labels from the
+// curated vocabulary, never free text — see ManageTagsPanel for managing
+// the list itself.
 function TagsCell({
   tags,
   manualTags,
@@ -539,6 +548,7 @@ function TagsCell({
   onRemove: (tag: string) => void
   pending: boolean
 }) {
+  const [expanded, setExpanded] = useState(false)
   const labelToCategory = new Map<string, string>()
   for (const [category, defs] of defsByCategory) {
     for (const d of defs) labelToCategory.set(d.label, category)
@@ -546,34 +556,62 @@ function TagsCell({
   const hasRemaining = categories.some((category) =>
     (defsByCategory.get(category) ?? []).some((d) => !manualTags.includes(d.label))
   )
+  const sortedManual = sortTagsByCategory(manualTags, categories, labelToCategory)
+
+  type Chip = { kind: 'auto' | 'manual'; value: string }
+  const chips: Chip[] = [
+    ...tags.map((t): Chip => ({ kind: 'auto', value: t })),
+    ...sortedManual.map((t): Chip => ({ kind: 'manual', value: t })),
+  ]
+  const overflow = chips.length - VISIBLE_TAGS
+  const visibleChips = expanded ? chips : chips.slice(0, VISIBLE_TAGS)
 
   return (
-    <div className='flex flex-wrap items-center gap-1'>
-      {tags.map((t) => (
-        <Badge key={t} variant={TAG_BADGE_VARIANT[t] || 'neutral'}>
-          {TAG_LABEL[t] || t}
-        </Badge>
-      ))}
-      {manualTags.map((t) => (
-        <span
-          key={t}
-          className={cx(
-            'inline-flex items-center gap-0.5 rounded border px-1 py-px text-[10px] font-medium',
-            categoryColorClass(labelToCategory.get(t) ?? '', categories)
-          )}
-        >
-          {t}
-          <button
-            type='button'
-            disabled={pending}
-            onClick={() => onRemove(t)}
-            aria-label={`Убрать тег ${t}`}
-            className='px-0.5 leading-none opacity-60 hover:text-rose-600 hover:opacity-100 disabled:cursor-wait'
+    <div className='flex max-w-[220px] flex-wrap items-center gap-1'>
+      {visibleChips.map((chip) =>
+        chip.kind === 'auto' ? (
+          <Badge key={`auto-${chip.value}`} variant={TAG_BADGE_VARIANT[chip.value] || 'neutral'}>
+            {TAG_LABEL[chip.value] || chip.value}
+          </Badge>
+        ) : (
+          <span
+            key={`manual-${chip.value}`}
+            className={cx(
+              'inline-flex items-center gap-0.5 rounded border px-1 py-px text-[10px] font-medium',
+              categoryColorClass(labelToCategory.get(chip.value) ?? '', categories)
+            )}
           >
-            ×
-          </button>
-        </span>
-      ))}
+            {chip.value}
+            <button
+              type='button'
+              disabled={pending}
+              onClick={() => onRemove(chip.value)}
+              aria-label={`Убрать тег ${chip.value}`}
+              className='px-0.5 leading-none opacity-60 hover:text-rose-600 hover:opacity-100 disabled:cursor-wait'
+            >
+              ×
+            </button>
+          </span>
+        )
+      )}
+      {!expanded && overflow > 0 && (
+        <button
+          type='button'
+          onClick={() => setExpanded(true)}
+          className='text-[10px] font-medium text-gray-400 hover:text-gray-600 hover:underline'
+        >
+          +{overflow}
+        </button>
+      )}
+      {expanded && chips.length > VISIBLE_TAGS && (
+        <button
+          type='button'
+          onClick={() => setExpanded(false)}
+          className='text-[10px] text-gray-400 hover:text-gray-600 hover:underline'
+        >
+          свернуть
+        </button>
+      )}
       {hasRemaining && (
         <div className='relative'>
           <select
@@ -583,9 +621,10 @@ function TagsCell({
               if (e.target.value) onAdd(e.target.value)
             }}
             aria-label='Добавить тег'
-            className='min-h-[22px] cursor-pointer appearance-none rounded-full border border-gray-200 bg-gray-50 py-px pr-3.5 pl-1.5 text-[10px] font-medium text-gray-500 outline-none hover:bg-gray-100 disabled:cursor-wait'
+            title='Добавить тег'
+            className='h-[22px] w-[22px] cursor-pointer appearance-none rounded-full border border-gray-200 bg-gray-50 text-center text-[11px] leading-[20px] font-medium text-gray-400 outline-none hover:bg-gray-100 disabled:cursor-wait'
           >
-            <option value=''>+ тег</option>
+            <option value=''>+</option>
             {categories.map((category) => {
               const remaining = (defsByCategory.get(category) ?? []).filter((d) => !manualTags.includes(d.label))
               if (remaining.length === 0) return null
@@ -600,7 +639,6 @@ function TagsCell({
               )
             })}
           </select>
-          <span className='pointer-events-none absolute top-1/2 right-0.5 -translate-y-1/2 text-[8px] text-gray-400'>▾</span>
         </div>
       )}
     </div>
