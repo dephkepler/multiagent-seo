@@ -3,9 +3,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/api'
+import { LineChart } from '@/components/charts/line-chart'
 import { Badge, type Variant as BadgeVariant } from '@/components/ui/badge'
 import { Card } from '@/components/ui/card'
 import { SectionHeader } from '@/components/ui/section-header'
+import { CHART_PRIMARY, CHART_SECONDARY, STATUS_CRITICAL, STATUS_GOOD, STATUS_SERIOUS } from '@/lib/chart-colors'
 import { cx } from '@/lib/cx'
 
 
@@ -58,10 +60,10 @@ interface LeadStats {
 }
 
 const STATUS_META: Record<string, { label: string; bar: string; badge: BadgeVariant }> = {
-  scheduled: { label: 'Запланирована', bar: 'bg-gray-400', badge: 'neutral' },
-  completed: { label: 'Провёл', bar: 'bg-emerald-500', badge: 'success' },
-  cancelled: { label: 'Отменил', bar: 'bg-red-500', badge: 'danger' },
-  no_show: { label: 'Не пришёл', bar: 'bg-amber-500', badge: 'warning' },
+  scheduled: { label: 'Запланирована', bar: '#a8a6a0', badge: 'neutral' },
+  completed: { label: 'Провёл', bar: STATUS_GOOD, badge: 'success' },
+  cancelled: { label: 'Отменил', bar: STATUS_CRITICAL, badge: 'danger' },
+  no_show: { label: 'Не пришёл', bar: STATUS_SERIOUS, badge: 'warning' },
 }
 
 function toISODate(d: Date): string {
@@ -463,6 +465,12 @@ function GroupHeading({ title, subtitle }: { title: string; subtitle?: string })
 // distinction matters. Консультация → дело is normally the worst step by
 // far (a handful of percent), so it's flagged red past a threshold the
 // same way the cancellation-rate card already does elsewhere on this page.
+// Stage width (row layout) / height (mobile column layout) grows with the
+// stage's own share of the first stage — the funnel's whole point is showing
+// the drop-off as a shape, not just as three same-size boxes with a number
+// in each. A floor keeps the smallest stage from shrinking to unreadable.
+const FUNNEL_SHARE_FLOOR = 18
+
 function FunnelRow({
   leads,
   consultations,
@@ -478,13 +486,19 @@ function FunnelRow({
 }) {
   const leadToConsult = leads > 0 ? (consultations / leads) * 100 : 0
   const consultToCase = consultations > 0 ? (cases / consultations) * 100 : 0
+  const caseStageIsBad = consultToCase < 10
   return (
-    <div className='flex flex-col items-stretch overflow-hidden rounded-lg border border-gray-200 sm:flex-row'>
-      <FunnelStage label='Клиентов' value={leads} />
+    <div className='flex flex-col items-stretch overflow-hidden rounded-lg sm:flex-row sm:gap-1'>
+      <FunnelStage label='Клиентов' value={leads} share={Math.max(FUNNEL_SHARE_FLOOR, 100)} />
       <FunnelArrow pct={leadToConsult} days={daysToConsult} />
-      <FunnelStage label='Дошли до консультации' value={consultations} />
-      <FunnelArrow pct={consultToCase} days={daysToCase} bad={consultToCase < 10} />
-      <FunnelStage label='Дошли до дела' value={cases} last accent={consultToCase < 10 ? 'bad' : undefined} />
+      <FunnelStage label='Дошли до консультации' value={consultations} share={Math.max(FUNNEL_SHARE_FLOOR, leadToConsult)} />
+      <FunnelArrow pct={consultToCase} days={daysToCase} bad={caseStageIsBad} />
+      <FunnelStage
+        label='Дошли до дела'
+        value={cases}
+        share={Math.max(FUNNEL_SHARE_FLOOR, leads > 0 ? (cases / leads) * 100 : 0)}
+        accent={caseStageIsBad ? 'bad' : undefined}
+      />
     </div>
   )
 }
@@ -492,20 +506,21 @@ function FunnelRow({
 function FunnelStage({
   label,
   value,
-  last,
+  share,
   accent,
 }: {
   label: string
   value: number
-  last?: boolean
+  share: number
   accent?: 'bad'
 }) {
   return (
-    <div className={cx('flex-1 p-4', !last && 'border-b border-gray-100 sm:border-r sm:border-b-0', accent === 'bad' && 'bg-red-50')}>
-      <div className={cx('text-xs text-gray-500', accent === 'bad' && 'text-red-700')}>{label}</div>
-      <div className={cx('mt-1 text-2xl font-semibold tabular-nums', accent === 'bad' && 'text-red-700')}>
-        {value.toLocaleString('ru-RU')}
-      </div>
+    <div
+      className='flex basis-0 flex-col justify-center rounded-md p-4 text-white sm:min-w-[6rem]'
+      style={{ flexGrow: share, backgroundColor: accent === 'bad' ? STATUS_CRITICAL : CHART_PRIMARY }}
+    >
+      <div className='text-xs text-white/80'>{label}</div>
+      <div className='mt-1 text-2xl font-semibold tabular-nums'>{value.toLocaleString('ru-RU')}</div>
     </div>
   )
 }
@@ -515,8 +530,9 @@ function FunnelArrow({ pct, days, bad }: { pct: number; days: number; bad?: bool
     <div
       className={cx(
         'flex shrink-0 flex-col items-center justify-center px-3 py-2 text-center whitespace-nowrap sm:py-0',
-        bad ? 'text-red-600' : 'text-gray-400'
+        bad ? '' : 'text-gray-400'
       )}
+      style={bad ? { color: STATUS_CRITICAL } : undefined}
     >
       <span className='text-sm font-medium'>
         {pct.toFixed(1)}% <span className='inline-block rotate-90 sm:rotate-0'>→</span>
@@ -557,10 +573,6 @@ function fmtClients(n: number): string {
 
 function fmtLeads(n: number): string {
   return `${n} ${pluralizeRu(n, 'заявка', 'заявки', 'заявок')}`
-}
-
-function fmtConsultations(n: number): string {
-  return `${n} ${pluralizeRu(n, 'консультация', 'консультации', 'консультаций')}`
 }
 
 // CollapsibleChart is a chart/list section that starts closed — the header
@@ -631,7 +643,10 @@ function HBarList({
               )}
             </div>
             <div className='h-4 rounded bg-gray-100 sm:flex-1'>
-              <div className={cx('h-4 rounded', r.barColor ?? 'bg-emerald-500')} style={{ width: `${Math.max(2, (r.count / max) * 100)}%` }} />
+              <div
+                className='h-4 rounded'
+                style={{ width: `${Math.max(2, (r.count / max) * 100)}%`, backgroundColor: r.barColor ?? CHART_PRIMARY }}
+              />
             </div>
             <div className='tabular-nums text-gray-700 sm:w-24 sm:shrink-0'>
               {r.count} · {pct}%
@@ -702,18 +717,6 @@ function ChartTooltip({
   )
 }
 
-// SeriesRow keys a tooltip line with a short stroke of the series color
-// (not a filled box — at tooltip density a box is data-weight ink doing a
-// label's job) with the value leading, bold, ahead of the muted color key.
-function SeriesRow({ color, value }: { color: string; value: string }) {
-  return (
-    <div className='flex items-center gap-1.5'>
-      <span className={cx('h-0.5 w-2.5 shrink-0', color)} />
-      <span className='font-semibold tabular-nums'>{value}</span>
-    </div>
-  )
-}
-
 function WeekdayChart({ rows }: { rows: { key: string; count: number }[] }) {
   const byDay = new Map(rows.map((r) => [r.key, r.count]))
   const values = WEEKDAY_ORDER.map((d) => byDay.get(d) ?? 0)
@@ -743,8 +746,8 @@ function WeekdayChart({ rows }: { rows: { key: string; count: number }[] }) {
             <div className='text-xs text-gray-500 tabular-nums'>{value}</div>
             <div className='flex h-20 w-full items-end'>
               <div
-                className='w-full rounded-t bg-emerald-500'
-                style={{ height: `${Math.max(value > 0 ? 4 : 0, (value / max) * 100)}%` }}
+                className='w-full rounded-t'
+                style={{ height: `${Math.max(value > 0 ? 4 : 0, (value / max) * 100)}%`, backgroundColor: CHART_PRIMARY }}
               />
             </div>
             <div className='text-xs text-gray-400'>{WEEKDAY_LABEL[d]}</div>
@@ -756,52 +759,14 @@ function WeekdayChart({ rows }: { rows: { key: string; count: number }[] }) {
 }
 
 function TrendChart({ trend, groupBy }: { trend: { bucket: string; leads: number; consultations: number }[]; groupBy: string }) {
-  const [active, setActive] = useState<string | null>(null)
-  if (!trend.length) return <div className='text-sm text-gray-400'>Нет данных за период.</div>
-  const max = Math.max(1, ...trend.map((t) => Math.max(t.leads, t.consultations)))
-  const step = Math.max(1, Math.ceil(trend.length / 14))
-
   return (
-    <div>
-      <div className='mb-2 flex items-center gap-4 text-xs text-gray-500'>
-        <span className='flex items-center gap-1'>
-          <span className='h-2 w-2 rounded-full bg-emerald-500' /> заявки
-        </span>
-        <span className='flex items-center gap-1'>
-          <span className='h-2 w-2 rounded-full bg-sky-500' /> консультации
-        </span>
-      </div>
-      {/* h-40 gives this row a definite 160px height so the flex-1 bar-wells below can
-          resolve their own height:100% against something real — items-end here would
-          size each column to its content instead of stretching it, collapsing the bars. */}
-      <div className='flex h-40 gap-1 border-b border-gray-200'>
-        {trend.map((t) => (
-          <ChartTooltip
-            key={t.bucket}
-            className='flex min-w-0 flex-1 items-end justify-center gap-0.5'
-            open={active === t.bucket}
-            onToggle={() => setActive((a) => (a === t.bucket ? null : t.bucket))}
-            content={
-              <div className='space-y-1'>
-                <div className='text-gray-300'>{bucketLabel(t.bucket, groupBy)}</div>
-                <SeriesRow color='bg-emerald-500' value={fmtLeads(t.leads)} />
-                <SeriesRow color='bg-sky-500' value={fmtConsultations(t.consultations)} />
-              </div>
-            }
-          >
-            <div className='w-1/2 max-w-[10px] rounded-t bg-emerald-500' style={{ height: `${Math.max(2, (t.leads / max) * 100)}%` }} />
-            <div className='w-1/2 max-w-[10px] rounded-t bg-sky-500' style={{ height: `${Math.max(2, (t.consultations / max) * 100)}%` }} />
-          </ChartTooltip>
-        ))}
-      </div>
-      <div className='mt-1 flex gap-1'>
-        {trend.map((t, i) => (
-          <div key={t.bucket} className='min-w-0 flex-1 truncate text-center text-[10px] text-gray-400'>
-            {i % step === 0 ? bucketLabel(t.bucket, groupBy) : ''}
-          </div>
-        ))}
-      </div>
-    </div>
+    <LineChart
+      xLabels={trend.map((t) => bucketLabel(t.bucket, groupBy))}
+      series={[
+        { key: 'leads', label: 'заявки', color: CHART_PRIMARY, values: trend.map((t) => t.leads) },
+        { key: 'consultations', label: 'консультации', color: CHART_SECONDARY, values: trend.map((t) => t.consultations) },
+      ]}
+    />
   )
 }
 
@@ -816,39 +781,13 @@ function RevenueTrendChart({
   trend: { bucket: string; revenue_earned: number }[]
   groupBy: string
 }) {
-  const [active, setActive] = useState<string | null>(null)
-  if (!trend.length) return <div className='text-sm text-gray-400'>Нет данных за период.</div>
-  const max = Math.max(1, ...trend.map((t) => t.revenue_earned))
-  const step = Math.max(1, Math.ceil(trend.length / 14))
-
   return (
-    <div>
-      <div className='flex h-32 gap-1 border-b border-gray-200'>
-        {trend.map((t) => (
-          <ChartTooltip
-            key={t.bucket}
-            className='flex min-w-0 flex-1 items-end justify-center'
-            open={active === t.bucket}
-            onToggle={() => setActive((a) => (a === t.bucket ? null : t.bucket))}
-            content={
-              <div className='space-y-1'>
-                <div className='text-gray-300'>{bucketLabel(t.bucket, groupBy)}</div>
-                <div className='font-semibold tabular-nums'>{fmtMoney(t.revenue_earned)}</div>
-              </div>
-            }
-          >
-            <div className='w-3/5 max-w-[18px] rounded-t bg-emerald-500' style={{ height: `${Math.max(2, (t.revenue_earned / max) * 100)}%` }} />
-          </ChartTooltip>
-        ))}
-      </div>
-      <div className='mt-1 flex gap-1'>
-        {trend.map((t, i) => (
-          <div key={t.bucket} className='min-w-0 flex-1 truncate text-center text-[10px] text-gray-400'>
-            {i % step === 0 ? bucketLabel(t.bucket, groupBy) : ''}
-          </div>
-        ))}
-      </div>
-    </div>
+    <LineChart
+      xLabels={trend.map((t) => bucketLabel(t.bucket, groupBy))}
+      series={[{ key: 'revenue', label: 'выручка', color: CHART_PRIMARY, values: trend.map((t) => t.revenue_earned) }]}
+      formatValue={fmtMoney}
+      area
+    />
   )
 }
 
@@ -863,49 +802,14 @@ function TrafficTrendChart({
   trend: { bucket: string; site_sessions: number; organic_sessions: number }[]
   groupBy: string
 }) {
-  const [active, setActive] = useState<string | null>(null)
-  if (!trend.length) return <div className='text-sm text-gray-400'>Нет данных за период.</div>
-  const max = Math.max(1, ...trend.map((t) => t.site_sessions))
-  const step = Math.max(1, Math.ceil(trend.length / 14))
-
   return (
-    <div>
-      <div className='mb-2 flex items-center gap-4 text-xs text-gray-500'>
-        <span className='flex items-center gap-1'>
-          <span className='h-2 w-2 rounded-full bg-sky-500' /> все визиты
-        </span>
-        <span className='flex items-center gap-1'>
-          <span className='h-2 w-2 rounded-full bg-emerald-500' /> из поиска
-        </span>
-      </div>
-      <div className='flex h-40 gap-1 border-b border-gray-200'>
-        {trend.map((t) => (
-          <ChartTooltip
-            key={t.bucket}
-            className='flex min-w-0 flex-1 items-end justify-center gap-0.5'
-            open={active === t.bucket}
-            onToggle={() => setActive((a) => (a === t.bucket ? null : t.bucket))}
-            content={
-              <div className='space-y-1'>
-                <div className='text-gray-300'>{bucketLabel(t.bucket, groupBy)}</div>
-                <SeriesRow color='bg-sky-500' value={`${t.site_sessions} визитов`} />
-                <SeriesRow color='bg-emerald-500' value={`${t.organic_sessions} из поиска`} />
-              </div>
-            }
-          >
-            <div className='w-1/2 max-w-[10px] rounded-t bg-sky-500' style={{ height: `${Math.max(2, (t.site_sessions / max) * 100)}%` }} />
-            <div className='w-1/2 max-w-[10px] rounded-t bg-emerald-500' style={{ height: `${Math.max(2, (t.organic_sessions / max) * 100)}%` }} />
-          </ChartTooltip>
-        ))}
-      </div>
-      <div className='mt-1 flex gap-1'>
-        {trend.map((t, i) => (
-          <div key={t.bucket} className='min-w-0 flex-1 truncate text-center text-[10px] text-gray-400'>
-            {i % step === 0 ? bucketLabel(t.bucket, groupBy) : ''}
-          </div>
-        ))}
-      </div>
-    </div>
+    <LineChart
+      xLabels={trend.map((t) => bucketLabel(t.bucket, groupBy))}
+      series={[
+        { key: 'sessions', label: 'все визиты', color: CHART_PRIMARY, values: trend.map((t) => t.site_sessions) },
+        { key: 'organic', label: 'из поиска', color: CHART_SECONDARY, values: trend.map((t) => t.organic_sessions) },
+      ]}
+    />
   )
 }
 
@@ -932,8 +836,8 @@ function SourceList({
             </div>
             <div className='h-4 rounded bg-gray-100 sm:flex-1'>
               <div
-                className='h-4 rounded bg-emerald-500'
-                style={{ width: `${Math.max(value > 0 ? 2 : 0, (value / max) * 100)}%` }}
+                className='h-4 rounded'
+                style={{ width: `${Math.max(value > 0 ? 2 : 0, (value / max) * 100)}%`, backgroundColor: CHART_PRIMARY }}
               />
             </div>
             <div className='tabular-nums text-gray-700 sm:w-56 sm:shrink-0'>
@@ -966,10 +870,10 @@ function CategoryList({
               {label}
             </div>
             <div className='relative h-4 rounded bg-gray-100 sm:flex-1'>
-              <div className='h-4 rounded bg-emerald-200' style={{ width: `${Math.max(2, (r.contracted / max) * 100)}%` }} />
+              <div className='h-4 rounded' style={{ width: `${Math.max(2, (r.contracted / max) * 100)}%`, backgroundColor: CHART_PRIMARY, opacity: 0.35 }} />
               <div
-                className='absolute top-0 left-0 h-4 rounded bg-emerald-500'
-                style={{ width: `${Math.max(r.paid > 0 ? 2 : 0, (r.paid / max) * 100)}%` }}
+                className='absolute top-0 left-0 h-4 rounded'
+                style={{ width: `${Math.max(r.paid > 0 ? 2 : 0, (r.paid / max) * 100)}%`, backgroundColor: CHART_PRIMARY }}
               />
             </div>
             <div className='tabular-nums text-gray-700 sm:w-44 sm:shrink-0'>
@@ -996,8 +900,8 @@ function CreatorList({ rows }: { rows: { key: string; bookings: number; revenue_
             </div>
             <div className='h-4 rounded bg-gray-100 sm:flex-1'>
               <div
-                className='h-4 rounded bg-emerald-500'
-                style={{ width: `${Math.max(2, (r.revenue_earned / max) * 100)}%` }}
+                className='h-4 rounded'
+                style={{ width: `${Math.max(2, (r.revenue_earned / max) * 100)}%`, backgroundColor: CHART_PRIMARY }}
               />
             </div>
             <div className='tabular-nums text-gray-700 sm:w-36 sm:shrink-0'>
