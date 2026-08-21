@@ -138,14 +138,23 @@ export function PLTable({ report, categories, activeMonth, onPickMonth }: Props)
           <Row label='Лиды' values={months.map((m) => m.leads)} total={report.total.leads} activeIndex={activeIndex} plain />
           <Row
             label='Новых клиентов'
+            hint='первая заявка в этом месяце'
             values={months.map((m) => m.new_clients)}
             total={report.total.new_clients}
             activeIndex={activeIndex}
             plain
           />
           <Row
+            label='Из них заплатили'
+            hint='когда-либо — знаменатель CAC'
+            values={months.map((m) => m.cohort_payers)}
+            total={report.total.cohort_payers}
+            activeIndex={activeIndex}
+            plain
+          />
+          <Row
             label='CAC'
-            hint='маркетинг / новый клиент'
+            hint='маркетинг / клиент, который заплатил'
             values={months.map((m) => m.cac)}
             total={report.total.cac}
             activeIndex={activeIndex}
@@ -182,14 +191,21 @@ export function PLTable({ report, categories, activeMonth, onPickMonth }: Props)
           />
           <Row
             label='Доход на клиента'
-            hint='за период / новых клиентов'
+            hint='за период / платящих клиентов'
             values={months.map((m) => m.revenue_per_client)}
             total={report.total.revenue_per_client}
             activeIndex={activeIndex}
           />
           <Row
+            label='LTV'
+            hint='сколько принёс клиент этого месяца за всю жизнь'
+            values={months.map((m) => m.ltv)}
+            total={report.total.ltv}
+            activeIndex={activeIndex}
+          />
+          <Row
             label='LTV / CAC'
-            hint='<1 — клиент дешевле не окупается'
+            hint='<1 — привлечение не окупается'
             values={months.map((m) => m.ltv_to_cac)}
             total={report.total.ltv_to_cac}
             activeIndex={activeIndex}
@@ -320,9 +336,12 @@ function Row({
     return moneyShort(v)
   }
   return (
-    <tr className='group'>
+    <tr className='group cursor-default'>
       <td
-        className={cx('sticky left-0 z-10 border-b border-gray-100 bg-white px-3 py-1.5 group-hover:bg-gray-50', strong && 'font-semibold')}
+        className={cx(
+          'sticky left-0 z-10 border-b border-gray-100 bg-white px-3 py-1.5 group-hover:bg-emerald-100 group-hover:font-medium',
+          strong && 'font-semibold'
+        )}
       >
         {label}
         {hint && <span className='block text-[11px] text-gray-400 lg:ml-1 lg:inline'>{hint}</span>}
@@ -331,7 +350,7 @@ function Row({
         <td
           key={i}
           className={cx(
-            'border-b border-gray-100 px-3 py-1.5 text-right tabular-nums group-hover:bg-gray-50',
+            'border-b border-gray-100 px-3 py-1.5 text-right tabular-nums group-hover:bg-emerald-50',
             i === activeIndex && 'bg-emerald-50',
             strong && 'font-semibold',
             signed && v < 0 && 'text-rose-600',
@@ -343,7 +362,7 @@ function Row({
       ))}
       <td
         className={cx(
-          'border-b border-gray-100 bg-gray-50 px-3 py-1.5 text-right font-medium tabular-nums',
+          'border-b border-gray-100 bg-gray-50 px-3 py-1.5 text-right font-medium tabular-nums group-hover:bg-emerald-100',
           signed && total < 0 && 'text-rose-600',
           signed && total > 0 && 'text-emerald-700'
         )}

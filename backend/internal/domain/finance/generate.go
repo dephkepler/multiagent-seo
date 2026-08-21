@@ -77,6 +77,21 @@ func PlanRecurring(rules []Rule, month time.Time, now time.Time) []Planned {
 	return out
 }
 
+// NewAdvocateSettlement turns a period's collections and what was already paid
+// into the four numbers staff asks for: collected, accrued, paid, still owed.
+func NewAdvocateSettlement(c AdvocateCollection, paid float64) AdvocateSettlement {
+	accrued := roundMoney(c.Collected * c.CommissionPercent / 100)
+	return AdvocateSettlement{
+		AdvocateID:        c.AdvocateID,
+		FullName:          c.AdvocateName,
+		CommissionPercent: c.CommissionPercent,
+		Collected:         roundMoney(c.Collected),
+		Accrued:           accrued,
+		Paid:              roundMoney(paid),
+		Outstanding:       roundMoney(accrued - paid),
+	}
+}
+
 // AdvocateCollection is what one advocate actually collected in a month, per
 // case_payments — the base their payout is a percentage of.
 type AdvocateCollection struct {

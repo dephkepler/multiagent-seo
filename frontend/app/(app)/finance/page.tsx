@@ -4,10 +4,9 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
-import { Card } from '@/components/ui/card'
+import { Section } from './section'
+import { SettlementPanel, type SettlementData } from './settlement-panel'
 import { Select } from '@/components/ui/select'
-import { SectionHeader } from '@/components/ui/section-header'
-import { Button } from '@/components/ui/button'
 import { Drafts } from './drafts'
 import { ExpenseForm, type ExpenseValues } from './expense-form'
 import { Ledger, LEDGER_PAGE_SIZE, emptyFilters, type LedgerFilters } from './ledger'
@@ -16,14 +15,19 @@ import { OtherIncomePanel, type OtherIncomeValues } from './other-income-panel'
 import { PLTable } from './pl-table'
 import { RatesPanel } from './rates-panel'
 import { RulesPanel, type RuleValues } from './rules-panel'
-import { currentMonthKey, money, monthBounds, monthLabel, percent, rangeBack, times } from './format'
+import { money, monthBounds, monthLabel, percent, times } from './format'
+import {
+  KIND_LABEL,
+  defaultPeriod,
+  focusMonthFor,
+  optionsFor,
+  periodLabel,
+  windowFor,
+  type DataRange,
+  type Period,
+  type PeriodKind,
+} from './period'
 import type { AdvocateRate, Category, Expense, ExpenseList, FinanceMonth, FinanceReport, Generated, OtherIncome, Rule } from './types'
-
-const RANGE_OPTIONS = [
-  { months: 6, label: '6 месяцев' },
-  { months: 12, label: '12 месяцев' },
-  { months: 24, label: '24 месяца' },
-]
 
 const EMPTY_MONTH: FinanceMonth = {
   month: '',
@@ -41,6 +45,8 @@ const EMPTY_MONTH: FinanceMonth = {
   gross_profit: 0,
   leads: 0,
   new_clients: 0,
+  cohort_payers: 0,
+  paying_clients: 0,
   consult_count: 0,
   case_payment_count: 0,
   cac: 0,
@@ -51,6 +57,7 @@ const EMPTY_MONTH: FinanceMonth = {
   margin_percent: 0,
   marketing_share: 0,
   revenue_per_client: 0,
+  ltv: 0,
   ltv_to_cac: 0,
   lead_to_consult: 0,
   break_even_consults: 0,
@@ -59,17 +66,16 @@ const EMPTY_MONTH: FinanceMonth = {
 
 export default function FinancePage() {
   const qc = useQueryClient()
-  const [monthsBack, setMonthsBack] = useState(12)
-  const [activeMonth, setActiveMonth] = useState(currentMonthKey())
+  const [period, setPeriod] = useState<Period>(defaultPeriod())
+  // A month the user drilled into by clicking a column; null means the tiles
+  // show the whole period, which is what a P&L should open with.
+  const [drillMonth, setDrillMonth] = useState<string | null>(null)
   const [filters, setFilters] = useState<LedgerFilters>(emptyFilters)
   const [debouncedSearch, setDebouncedSearch] = useState('')
   const [editing, setEditing] = useState<Expense | null>(null)
   // bumped after a successful create so the add form remounts empty
   const [formNonce, setFormNonce] = useState(0)
   const formRef = useRef<HTMLDivElement>(null)
-  const [showRules, setShowRules] = useState(false)
-  const [showRates, setShowRates] = useState(false)
-  const [showIncome, setShowIncome] = useState(false)
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(filters.search.trim()), 300)
@@ -82,19 +88,23 @@ export default function FinancePage() {
     setFilters((prev) => ({ ...prev, ...next, page: next.page ?? 1 }))
   }
 
-  const range = useMemo(() => rangeBack(monthsBack), [monthsBack])
+  // The offered periods come from the data itself; a window relative to today
+  // showed twelve empty columns with the running total repeated in each.
+  const dataRange = useQuery({
+    queryKey: ['finance-period'],
+    queryFn: () => api<DataRange>('/finance/period'),
+  })
+  const available: DataRange = useMemo(() => dataRange.data ?? { has_data: false }, [dataRange.data])
+  const range = useMemo(() => windowFor(period, available), [period, available])
 
   const report = useQuery({
     queryKey: ['finance-report', range.from, range.to],
     queryFn: () => api<FinanceReport>(`/finance/report?from=${range.from}&to=${range.to}`),
     placeholderData: keepPreviousData,
   })
-  // The picked month is clamped to the loaded range: switching 24 months -> 6
-  // otherwise leaves activeMonth outside `months`, and every tile reads 0 while
-  // the ledger below still lists that month's real expenses.
   const months = report.data?.months ?? []
-  const shownMonth =
-    months.length === 0 || months.some((m) => m.month === activeMonth) ? activeMonth : (months[months.length - 1]?.month ?? activeMonth)
+  // A drill-down survives only while the period still contains that month.
+  const shownMonth = drillMonth && months.some((m) => m.month === drillMonth) ? drillMonth : focusMonthFor(period, available)
   const bounds = monthBounds(shownMonth)
 
   const categories = useQuery({
@@ -131,6 +141,11 @@ export default function FinancePage() {
   const rates = useQuery({
     queryKey: ['finance-rates'],
     queryFn: () => api<{ items: AdvocateRate[] }>('/finance/advocate-rates'),
+  })
+  const settlement = useQuery({
+    queryKey: ['finance-settlement', range.from, range.to],
+    queryFn: () => api<SettlementData>(`/finance/settlement?from=${range.from}&to=${range.to}`),
+    placeholderData: keepPreviousData,
   })
   const otherIncome = useQuery({
     queryKey: ['finance-income', bounds.from, bounds.to],
@@ -250,7 +265,10 @@ export default function FinancePage() {
 
   const categoryItems = categories.data?.items ?? []
   const activeCategories = categoryItems.filter((c) => c.is_active)
-  const current = months.find((m) => m.month === shownMonth) ?? EMPTY_MONTH
+  // Tiles follow the drill-down when there is one, otherwise they show the whole
+  // period — the number a person opens this page for.
+  const tileSource = drillMonth ? months.find((m) => m.month === drillMonth) : report.data?.total
+  const current = tileSource ?? EMPTY_MONTH
   const draftItems = drafts.data?.items ?? []
 
   function startEdit(expense: Expense) {
@@ -263,21 +281,41 @@ export default function FinancePage() {
       <div className='flex flex-wrap items-center justify-between gap-2'>
         <h1 className='text-xl font-semibold'>Финансы</h1>
         <div className='flex flex-wrap items-center gap-2'>
-          <Select value={shownMonth} onChange={(e) => setActiveMonth(e.target.value)} className='w-[150px]'>
-            {months.length === 0 && <option value={shownMonth}>{monthLabel(shownMonth)}</option>}
-            {[...months].reverse().map((m) => (
-              <option key={m.month} value={m.month}>
-                {monthLabel(m.month)}
+          <Select
+            value={period.kind}
+            onChange={(e) => {
+              const kind = e.target.value as PeriodKind
+              // Jump to the newest option of the new kind, which for this data is
+              // the most recent month/quarter/year that actually has rows.
+              const first = optionsFor(kind, available)[0]?.value ?? ''
+              setPeriod({ kind, value: first })
+              setDrillMonth(null)
+            }}
+            className='w-[130px]'
+          >
+            {(Object.keys(KIND_LABEL) as PeriodKind[]).map((k) => (
+              <option key={k} value={k}>
+                {KIND_LABEL[k]}
               </option>
             ))}
           </Select>
-          <Select value={String(monthsBack)} onChange={(e) => setMonthsBack(Number(e.target.value))} className='w-[140px]'>
-            {RANGE_OPTIONS.map((o) => (
-              <option key={o.months} value={o.months}>
-                {o.label}
-              </option>
-            ))}
-          </Select>
+          {period.kind !== 'all' && (
+            <Select
+              value={period.value}
+              onChange={(e) => {
+                setPeriod({ kind: period.kind, value: e.target.value })
+                setDrillMonth(null)
+              }}
+              className='w-[170px]'
+            >
+              {optionsFor(period.kind, available).map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </Select>
+          )}
+          <span className='text-sm text-gray-500'>{periodLabel(period, available)}</span>
         </div>
       </div>
 
@@ -291,7 +329,11 @@ export default function FinancePage() {
           accent={current.cumulative < 0 ? 'bad' : 'good'}
           hint='на конец месяца, за всё время'
         />
-        <MetricTile label='CAC' value={current.cac ? money(current.cac) : '—'} hint={`${current.new_clients} новых`} />
+        <MetricTile
+          label='CAC'
+          value={current.cac ? money(current.cac) : '—'}
+          hint={`${current.cohort_payers} из ${current.new_clients} заплатили`}
+        />
         <MetricTile label='ROMI' value={times(current.romi, current.marketing_spend === 0)} hint='на 1 ₴ рекламы' />
         <MetricTile
           label='Маржа'
@@ -308,7 +350,7 @@ export default function FinancePage() {
           label='LTV / CAC'
           value={times(current.ltv_to_cac, current.cac === 0)}
           accent={current.ltv_to_cac > 0 && current.ltv_to_cac < 1 ? 'bad' : undefined}
-          hint='<1 — клиент не окупается'
+          hint={current.ltv ? `LTV ${money(current.ltv)}` : '<1 — клиент не окупается'}
         />
         <MetricTile
           label='Дебиторка'
@@ -332,24 +374,64 @@ export default function FinancePage() {
         }}
       />
 
-      <Card>
-        <SectionHeader
-          title='P&L по месяцам'
-          action={report.isFetching ? <span className='text-xs text-gray-400'>обновление…</span> : undefined}
-        />
+      <Section
+        title='P&L по месяцам'
+        summary={
+          <>
+            {report.isFetching && <span className='text-xs text-gray-400'>обновление…</span>}
+            <span className='text-xs text-gray-500'>баланс за период</span>
+            <span
+              className={report.data && report.data.total.balance < 0 ? 'font-semibold text-rose-700' : 'font-semibold text-emerald-700'}
+            >
+              {money(report.data?.total.balance ?? 0)}
+            </span>
+          </>
+        }
+      >
         {(report.isLoading || categories.isLoading) && <div className='text-sm text-gray-500'>Загрузка…</div>}
         {report.isError && <div className='text-sm text-rose-600'>Не удалось загрузить отчёт.</div>}
         {categories.isError && (
           <div className='text-sm text-rose-600'>Не удалось загрузить категории — разбивка по статьям неполная, итоги ниже верные.</div>
         )}
         {report.data && !categories.isLoading && (
-          <PLTable report={report.data} categories={categoryItems} activeMonth={shownMonth} onPickMonth={setActiveMonth} />
+          <PLTable
+            report={report.data}
+            categories={categoryItems}
+            activeMonth={drillMonth ?? ''}
+            onPickMonth={(month) => setDrillMonth((prev) => (prev === month ? null : month))}
+          />
         )}
-      </Card>
+      </Section>
 
-      <Card>
+      <Section
+        title='Расчёты с адвокатами'
+        summary={
+          <>
+            <span className='text-xs text-gray-500'>осталось отдать</span>
+            <span
+              className={
+                settlement.data && settlement.data.total_outstanding > 0 ? 'font-semibold text-rose-700' : 'font-semibold text-gray-700'
+              }
+            >
+              {money(settlement.data?.total_outstanding ?? 0)}
+            </span>
+          </>
+        }
+        defaultOpen={false}
+      >
+        <SettlementPanel data={settlement.data} loading={settlement.isPending} />
+      </Section>
+
+      <Section
+        title={editing ? 'Изменить расход' : 'Расходы'}
+        summary={
+          <>
+            <span className='text-xs text-gray-500'>проведено за период</span>
+            <span className='font-semibold text-gray-800'>{money(report.data?.total.expense_total ?? 0)}</span>
+          </>
+        }
+      >
         <div ref={formRef} className='scroll-mt-4' />
-        <SectionHeader title={editing ? 'Изменить расход' : `Расходы: ${monthLabel(shownMonth)}`} />
         {editing ? (
           <ExpenseForm
             key={editing.id}
@@ -378,7 +460,7 @@ export default function FinancePage() {
             categories={categoryItems}
             filters={filters}
             monthLabel={monthLabel(shownMonth)}
-            periodLabel={`Весь период (${RANGE_OPTIONS.find((o) => o.months === monthsBack)?.label ?? ''})`}
+            periodLabel={periodLabel(period, available)}
             onChange={changeFilters}
             onReset={() => setFilters(emptyFilters)}
             onEdit={startEdit}
@@ -394,18 +476,24 @@ export default function FinancePage() {
             }}
           />
         </div>
-      </Card>
+      </Section>
 
-      <Card>
-        <SectionHeader
-          title='Автоматические расходы'
-          action={
-            <Button variant='ghost' size='sm' onClick={() => setShowRules((v) => !v)}>
-              {showRules ? 'Свернуть' : `Показать (${rules.data?.items.length ?? 0})`}
-            </Button>
-          }
-        />
-        {showRules && (
+      <Section
+        title='Автоматические расходы'
+        defaultOpen={false}
+        summary={
+          <>
+            <span className='text-xs text-gray-500'>шаблонов</span>
+            <span className='font-semibold text-gray-800'>{rules.data?.items.length ?? 0}</span>
+            {(rules.data?.items.length ?? 0) > 0 && (
+              <span className='text-xs text-gray-500'>
+                на {money((rules.data?.items ?? []).filter((r) => r.is_active).reduce((sum, r) => sum + r.amount, 0))} в месяц
+              </span>
+            )}
+          </>
+        }
+      >
+        {
           <RulesPanel
             rules={rules.data?.items ?? []}
             categories={activeCategories}
@@ -416,37 +504,41 @@ export default function FinancePage() {
               if (window.confirm(`Удалить шаблон «${rule.name}»?`)) deleteRule.mutate(rule.id)
             }}
           />
-        )}
-      </Card>
+        }
+      </Section>
 
-      <Card>
-        <SectionHeader
-          title='Ставки адвокатов'
-          action={
-            <Button variant='ghost' size='sm' onClick={() => setShowRates((v) => !v)}>
-              {showRates ? 'Свернуть' : `Показать (${rates.data?.items.length ?? 0})`}
-            </Button>
-          }
-        />
-        {showRates && (
+      <Section
+        title='Ставки адвокатов'
+        defaultOpen={false}
+        summary={
+          <>
+            <span className='text-xs text-gray-500'>со ставкой</span>
+            <span className='font-semibold text-gray-800'>
+              {(rates.data?.items ?? []).filter((r) => r.commission_percent > 0).length} из {rates.data?.items.length ?? 0}
+            </span>
+          </>
+        }
+      >
+        {
           <RatesPanel
             rates={rates.data?.items ?? []}
             pendingId={saveRate.isPending ? (saveRate.variables?.id ?? null) : null}
             onSave={(id, percent) => saveRate.mutate({ id, percent })}
           />
-        )}
-      </Card>
+        }
+      </Section>
 
-      <Card>
-        <SectionHeader
-          title='Прочие доходы'
-          action={
-            <Button variant='ghost' size='sm' onClick={() => setShowIncome((v) => !v)}>
-              {showIncome ? 'Свернуть' : `Показать (${otherIncome.data?.items.length ?? 0})`}
-            </Button>
-          }
-        />
-        {showIncome && (
+      <Section
+        title='Прочие доходы'
+        defaultOpen={false}
+        summary={
+          <>
+            <span className='text-xs text-gray-500'>за период</span>
+            <span className='font-semibold text-gray-800'>{money(report.data?.total.income_other ?? 0)}</span>
+          </>
+        }
+      >
+        {
           <OtherIncomePanel
             items={otherIncome.data?.items ?? []}
             pending={createIncome.isPending}
@@ -455,8 +547,8 @@ export default function FinancePage() {
               if (window.confirm(`Удалить доход на ${money(income.amount)}?`)) deleteIncome.mutate(income.id)
             }}
           />
-        )}
-      </Card>
+        }
+      </Section>
     </div>
   )
 }

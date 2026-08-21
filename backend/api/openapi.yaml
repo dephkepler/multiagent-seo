@@ -986,6 +986,51 @@ paths:
         "400":
           $ref: "#/components/responses/BadRequest"
 
+  /finance/period:
+    get:
+      operationId: getFinancePeriod
+      security:
+        - bearerAuth: [ ]
+      tags: [ Finance ]
+      summary: The months the data actually spans — what the period picker offers, so it never proposes an empty window
+      responses:
+        "200":
+          description: First and last month carrying any money or lead row; has_data false when the database holds none
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinancePeriod"
+
+  /finance/settlement:
+    get:
+      operationId: getAdvocateSettlement
+      security:
+        - bearerAuth: [ ]
+      tags: [ Finance ]
+      summary: What is still owed to each advocate — collected, accrued at their percentage, paid out, remainder — plus the income split it is accrued on
+      parameters:
+        - name: from
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+      responses:
+        "200":
+          description: One row per advocate with money in the period, plus payouts that name nobody
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdvocateSettlementList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
   /finance/expenses:
     get:
       operationId: listExpenses
@@ -2887,7 +2932,7 @@ components:
 
     FinanceMonth:
       type: object
-      required: [ month, income_consult, income_cases, income_other, income_total, expense_by_category, expense_by_kind, expense_total, balance, cumulative, marketing_spend, direct_cost, gross_profit, leads, new_clients, consult_count, case_payment_count, cac, cpl, romi, avg_consult_ticket, avg_case_ticket, margin_percent, marketing_share, revenue_per_client, ltv_to_cac, lead_to_consult, break_even_consults, income_growth ]
+      required: [ month, income_consult, income_cases, income_other, income_total, expense_by_category, expense_by_kind, expense_total, balance, cumulative, marketing_spend, direct_cost, gross_profit, leads, new_clients, cohort_payers, paying_clients, consult_count, case_payment_count, cac, cpl, romi, avg_consult_ticket, avg_case_ticket, margin_percent, marketing_share, revenue_per_client, ltv, ltv_to_cac, lead_to_consult, break_even_consults, income_growth ]
       properties:
         month:
           type: string
@@ -2970,10 +3015,21 @@ components:
         revenue_per_client:
           type: number
           format: double
-          description: Period revenue over clients acquired in it — an LTV proxy, read next to ltv_to_cac
+          description: Period revenue over the clients who actually paid in it — an average ticket per client, not a lifetime value
+        cohort_payers:
+          type: integer
+          description: Of the clients acquired this month, how many ever paid — the CAC denominator
+        paying_clients:
+          type: integer
+          description: Distinct clients who paid anything in this month
+        ltv:
+          type: number
+          format: double
+          description: What a client acquired this month has paid to date, across their whole life, over the cohort members who paid at all
         ltv_to_cac:
           type: number
           format: double
+          description: LTV against what acquiring that cohort cost. Deliberately not period-revenue-based, which would make it ROMI+1
         lead_to_consult:
           type: number
           format: double
@@ -2986,6 +3042,77 @@ components:
           type: number
           format: double
           description: Income against the previous month in the report; 0 for the first month
+
+    FinancePeriod:
+      type: object
+      required: [ has_data ]
+      properties:
+        has_data:
+          type: boolean
+        first_month:
+          type: string
+          description: '"2024-06"; absent when has_data is false. Bounds months that carry money'
+        last_month:
+          type: string
+        last_activity_month:
+          type: string
+          description: Latest month with any activity including leads — selectable, but not what "all time" defaults to
+
+    AdvocateSettlement:
+      type: object
+      required: [ advocate_id, full_name, commission_percent, collected, accrued, paid, outstanding ]
+      properties:
+        advocate_id:
+          type: string
+        full_name:
+          type: string
+        commission_percent:
+          type: number
+          format: double
+        collected:
+          type: number
+          format: double
+          description: Case payments received in the period on this advocate's cases
+        accrued:
+          type: number
+          format: double
+          description: collected × commission_percent
+        paid:
+          type: number
+          format: double
+          description: Payouts in the advocates category whose external ref names this advocate
+        outstanding:
+          type: number
+          format: double
+          description: accrued − paid; negative means more was paid out than the percentage accrued
+
+    AdvocateSettlementList:
+      type: object
+      required: [ items, unattributed_paid, consult_income, case_income, total_accrued, total_paid, total_outstanding ]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdvocateSettlement"
+        unattributed_paid:
+          type: number
+          format: double
+          description: Advocate payouts that name nobody — the lump sums imported from the spreadsheet; never divided across advocates by guesswork
+        consult_income:
+          type: number
+          format: double
+        case_income:
+          type: number
+          format: double
+        total_accrued:
+          type: number
+          format: double
+        total_paid:
+          type: number
+          format: double
+        total_outstanding:
+          type: number
+          format: double
 
     FinanceReport:
       type: object

@@ -181,7 +181,7 @@ export function Ledger({
               </thead>
               <tbody>
                 {items.map((e) => (
-                  <tr key={e.id} className='border-b border-gray-100 hover:bg-gray-50'>
+                  <tr key={e.id} className='border-b border-gray-100 hover:bg-emerald-50/70'>
                     <td className='py-2 pr-3 whitespace-nowrap text-gray-500'>{dateLabel(e.spent_at)}</td>
                     <td className='py-2 pr-3'>{e.vendor || '—'}</td>
                     <td className='max-w-[280px] truncate py-2 pr-3 text-gray-600'>{e.description || '—'}</td>

@@ -530,7 +530,7 @@ func TestFinanceRepository_AdvocateCollections_PerAdvocateForTheMonth(t *testing
 	legacyCase := seedCase(t, pool, clientID, "", "Старый Адвокат")
 	seedCasePayment(t, pool, legacyCase, 4000, financeDate(2026, time.February, 12))
 
-	got, err := repo.AdvocateCollections(ctx, financeDate(2026, time.February, 1))
+	got, err := repo.AdvocateCollections(ctx, financeDate(2026, time.February, 1), financeDate(2026, time.February, 28))
 	if err != nil {
 		t.Fatalf("AdvocateCollections: %v", err)
 	}
@@ -565,7 +565,7 @@ func TestFinanceRepository_AdvocateCollections_PerAdvocateForTheMonth(t *testing
 	}
 
 	// A month with no payments at all is an empty result, not an error.
-	empty, err := repo.AdvocateCollections(ctx, financeDate(2026, time.April, 1))
+	empty, err := repo.AdvocateCollections(ctx, financeDate(2026, time.April, 1), financeDate(2026, time.April, 30))
 	if err != nil {
 		t.Fatalf("AdvocateCollections(empty month): %v", err)
 	}

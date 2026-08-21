@@ -247,6 +247,18 @@ type fakeReportSource struct {
 	collectionsErr error
 	receivable     float64
 	receivableErr  error
+	rangeFirst     time.Time
+	rangeLast      time.Time
+	rangeActivity  time.Time
+	rangeErr       error
+
+	payouts             map[string]float64
+	payoutsUnattributed float64
+	payoutsErr          error
+}
+
+func (f *fakeReportSource) DataRange(context.Context) (time.Time, time.Time, time.Time, error) {
+	return f.rangeFirst, f.rangeLast, f.rangeActivity, f.rangeErr
 }
 
 func (f *fakeReportSource) Receivable(context.Context) (float64, error) {
@@ -262,7 +274,11 @@ func (f *fakeReportSource) BalanceBefore(_ context.Context, from time.Time) (flo
 	return f.opening, f.openingErr
 }
 
-func (f *fakeReportSource) AdvocateCollections(context.Context, time.Time) ([]domain.AdvocateCollection, error) {
+func (f *fakeReportSource) AdvocatePayouts(_ context.Context, _, _ time.Time) (map[string]float64, float64, error) {
+	return f.payouts, f.payoutsUnattributed, f.payoutsErr
+}
+
+func (f *fakeReportSource) AdvocateCollections(context.Context, time.Time, time.Time) ([]domain.AdvocateCollection, error) {
 	return f.collections, f.collectionsErr
 }
 
@@ -876,5 +892,33 @@ func TestDeleteExpenseUnknownID(t *testing.T) {
 	svc := newService(newStores())
 	if err := svc.DeleteExpense(context.Background(), "nope"); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("err = %v, want ErrNotFound", err)
+	}
+}
+
+// The page asks for the span the data covers because a window relative to today
+// showed twelve empty columns; an empty database must say so rather than
+// pretending the current month is meaningful.
+func TestPeriodReportsWhatTheDataSpans(t *testing.T) {
+	deps := newStores()
+	deps.report.rangeFirst = time.Date(2024, time.June, 5, 0, 0, 0, 0, time.UTC)
+	deps.report.rangeLast = time.Date(2025, time.April, 12, 0, 0, 0, 0, time.UTC)
+	// leads keep arriving long after the last payment
+	deps.report.rangeActivity = time.Date(2026, time.August, 7, 0, 0, 0, 0, time.UTC)
+	svc := newService(deps)
+
+	got, err := svc.Period(context.Background())
+	if err != nil {
+		t.Fatalf("Period: %v", err)
+	}
+	if !got.HasData || got.FirstMonth != "2024-06" || got.LastMonth != "2025-04" {
+		t.Fatalf("got %+v, want 2024-06..2025-04 with data", got)
+	}
+	if got.LastActivityMonth != "2026-08" {
+		t.Errorf("last activity = %q, want 2026-08 — lead months stay selectable", got.LastActivityMonth)
+	}
+
+	empty := newStores()
+	if got, err := newService(empty).Period(context.Background()); err != nil || got.HasData {
+		t.Fatalf("empty database: got %+v, %v; want no data and no error", got, err)
 	}
 }

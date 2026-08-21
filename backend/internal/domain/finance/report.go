@@ -14,8 +14,18 @@ type MonthFacts struct {
 	OtherIncome       float64
 	ExpenseByCategory map[string]float64
 	Leads             int
-	// clients whose first-ever lead landed in this month — the CAC denominator
+	// clients whose first-ever lead landed in this month
 	NewClients int
+	// of that cohort, how many ever paid anything — the honest CAC denominator.
+	// Counting form-fillers instead understated CAC roughly eightfold on the
+	// real data: 658 clients acquired, 76 who ever paid.
+	CohortPayers int
+	// everything that cohort has ever paid, with no upper date bound: a client
+	// acquired in March who pays in June belongs to March's acquisition cost.
+	// This is what keeps LTV independent of the period's own revenue.
+	CohortRevenue float64
+	// distinct clients who paid anything IN this month
+	PayingClients int
 }
 
 type MonthReport struct {
@@ -39,6 +49,9 @@ type MonthReport struct {
 
 	Leads            int
 	NewClients       int
+	CohortPayers     int
+	PayingClients    int
+	CohortRevenue    float64
 	ConsultCount     int
 	CasePaymentCount int
 	// 0 when the denominator is 0 — an undefined ratio is not a real zero, but
@@ -57,10 +70,17 @@ type MonthReport struct {
 	// MarketingShare is marketing spend as a share of all spend, which is what
 	// makes a heavy month legible: 599 967 ₴ means little, "39% of it is ads" a lot.
 	MarketingShare float64
-	// RevenuePerClient is period revenue over clients acquired in it — a proxy
-	// for LTV, honest only because LtvToCac is read next to it.
+	// RevenuePerClient is this period's revenue over the clients who actually
+	// paid in it — a plain average ticket per client, not a lifetime value.
 	RevenuePerClient float64
-	LtvToCac         float64
+	// LTV is what a client acquired in this period has paid to date, across
+	// their whole life, over the cohort members who paid at all.
+	LTV float64
+	// LtvToCac compares that lifetime figure against what acquiring the cohort
+	// cost. It must NOT reduce to ROMI: an earlier version divided period
+	// revenue by new clients and marketing by the same new clients, so
+	// LTV/CAC was algebraically ROMI+1 — the same number under two names.
+	LtvToCac float64
 	// LeadToConsult is the share of this month's leads that turned into a paid
 	// consultation. Not a cohort conversion (a lead converts weeks later — see
 	// leadstats.Funnel for that), just this month's ratio.
@@ -72,6 +92,22 @@ type MonthReport struct {
 	// share: +0.35 is a 35% rise. 0 for the first month, which has nothing to
 	// compare against.
 	IncomeGrowth float64
+}
+
+// Period is the span the data actually covers. The page cannot guess it: a
+// default window of "the last 12 months" showed twelve empty columns and a
+// running total repeated in every one of them, because the firm's history sits
+// well in the past. Offering only periods that contain something is the fix.
+type Period struct {
+	// First/LastMonth bound the months that carry MONEY, which is what "all
+	// time" should show: dense columns instead of a wall of empty ones.
+	FirstMonth string // MonthKey, "" when there is nothing at all
+	LastMonth  string
+	// LastActivityMonth also counts leads, which keep arriving long after the
+	// last recorded payment — those months are worth being able to select
+	// (they say "leads came, nothing was booked"), just not worth defaulting to.
+	LastActivityMonth string
+	HasData           bool
 }
 
 type Report struct {
@@ -113,6 +149,9 @@ func BuildReport(facts []MonthFacts, categories []Category, startingBalance floa
 			ExpenseByKind:     map[Kind]float64{},
 			Leads:             f.Leads,
 			NewClients:        f.NewClients,
+			CohortPayers:      f.CohortPayers,
+			PayingClients:     f.PayingClients,
+			CohortRevenue:     f.CohortRevenue,
 			ConsultCount:      f.ConsultCount,
 			CasePaymentCount:  f.CasePaymentCount,
 		}
@@ -136,7 +175,8 @@ func BuildReport(facts []MonthFacts, categories []Category, startingBalance floa
 		cumulative = roundMoney(cumulative + m.Balance)
 		m.Cumulative = cumulative
 
-		m.CAC = ratio(m.MarketingSpend, float64(m.NewClients))
+		// per client who actually paid, not per person who filled in a form
+		m.CAC = ratio(m.MarketingSpend, float64(f.CohortPayers))
 		m.CPL = ratio(m.MarketingSpend, float64(m.Leads))
 		m.ROMI = ratio(m.IncomeTotal-m.MarketingSpend, m.MarketingSpend)
 		deriveExtras(&m, f)
@@ -152,6 +192,9 @@ func BuildReport(facts []MonthFacts, categories []Category, startingBalance floa
 		total.NewClients += f.NewClients
 		total.ConsultCount += f.ConsultCount
 		total.CasePaymentCount += f.CasePaymentCount
+		total.CohortPayers += f.CohortPayers
+		total.PayingClients += f.PayingClients
+		total.CohortRevenue += f.CohortRevenue
 
 		months = append(months, m)
 	}
@@ -174,7 +217,7 @@ func BuildReport(facts []MonthFacts, categories []Category, startingBalance floa
 	total.GrossProfit = roundMoney(total.IncomeTotal - total.DirectCost)
 	total.Balance = roundMoney(total.IncomeTotal - total.ExpenseTotal)
 	total.Cumulative = cumulative
-	total.CAC = ratio(total.MarketingSpend, float64(total.NewClients))
+	total.CAC = ratio(total.MarketingSpend, float64(total.CohortPayers))
 	total.CPL = ratio(total.MarketingSpend, float64(total.Leads))
 	total.ROMI = ratio(total.IncomeTotal-total.MarketingSpend, total.MarketingSpend)
 	deriveExtras(&total, MonthFacts{
@@ -184,6 +227,9 @@ func BuildReport(facts []MonthFacts, categories []Category, startingBalance floa
 		CasePaymentCount: total.CasePaymentCount,
 		Leads:            total.Leads,
 		NewClients:       total.NewClients,
+		CohortPayers:     total.CohortPayers,
+		CohortRevenue:    total.CohortRevenue,
+		PayingClients:    total.PayingClients,
 	})
 	// growth over a whole period has no previous period to compare against
 	total.IncomeGrowth = 0
@@ -199,8 +245,9 @@ func deriveExtras(m *MonthReport, f MonthFacts) {
 	m.AvgCaseTicket = ratio(f.CasePaid, float64(f.CasePaymentCount))
 	m.MarginPercent = ratio(m.Balance, m.IncomeTotal)
 	m.MarketingShare = ratio(m.MarketingSpend, m.ExpenseTotal)
-	m.RevenuePerClient = ratio(m.IncomeTotal, float64(f.NewClients))
-	m.LtvToCac = ratio(m.RevenuePerClient, m.CAC)
+	m.RevenuePerClient = ratio(m.IncomeTotal, float64(f.PayingClients))
+	m.LTV = ratio(f.CohortRevenue, float64(f.CohortPayers))
+	m.LtvToCac = ratio(m.LTV, m.CAC)
 	m.LeadToConsult = ratio(float64(f.ConsultCount), float64(f.Leads))
 	m.BreakEvenConsults = ratio(m.ExpenseTotal, m.AvgConsultTicket)
 }

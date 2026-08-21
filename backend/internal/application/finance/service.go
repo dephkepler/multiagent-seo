@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"time"
 
@@ -303,6 +304,70 @@ func (s *Service) SetAdvocateRate(ctx context.Context, advocateID string, percen
 	return nil
 }
 
+// Settlement answers what is still owed to each advocate, and what income the
+// percentage was accrued on. Paid is attributable only for generated payouts;
+// imported lump sums are reported apart rather than divided by guesswork.
+func (s *Service) Settlement(ctx context.Context, from, to time.Time) (domain.Settlement, error) {
+	collections, err := s.report.AdvocateCollections(ctx, from, to)
+	if err != nil {
+		return domain.Settlement{}, fmt.Errorf("finance: settlement collections: %w", err)
+	}
+	paid, unattributed, err := s.report.AdvocatePayouts(ctx, from, to)
+	if err != nil {
+		return domain.Settlement{}, fmt.Errorf("finance: settlement payouts: %w", err)
+	}
+	facts, err := s.report.MonthlyFacts(ctx, from, to)
+	if err != nil {
+		return domain.Settlement{}, fmt.Errorf("finance: settlement facts: %w", err)
+	}
+
+	out := domain.Settlement{UnattributedPaid: unattributed}
+	for _, f := range facts {
+		out.ConsultIncome += f.ConsultRevenue
+		out.CaseIncome += f.CasePaid
+	}
+	for _, c := range collections {
+		row := domain.NewAdvocateSettlement(c, paid[c.AdvocateID])
+		out.Advocates = append(out.Advocates, row)
+		out.TotalAccrued += row.Accrued
+		out.TotalPaid += row.Paid
+		out.TotalOutstanding += row.Outstanding
+	}
+	// An advocate paid in this period whose cases collected nothing in it still
+	// has to appear, or the paid total on screen would not match the ledger.
+	for id, amount := range paid {
+		if slices.ContainsFunc(out.Advocates, func(a domain.AdvocateSettlement) bool { return a.AdvocateID == id }) {
+			continue
+		}
+		out.Advocates = append(out.Advocates, domain.AdvocateSettlement{AdvocateID: id, Paid: amount, Outstanding: -amount})
+		out.TotalPaid += amount
+		out.TotalOutstanding -= amount
+	}
+	return out, nil
+}
+
+// Period reports what the data actually spans, so the page can offer periods
+// that contain something instead of a window relative to today.
+func (s *Service) Period(ctx context.Context) (domain.Period, error) {
+	firstMoney, lastMoney, lastActivity, err := s.report.DataRange(ctx)
+	if err != nil {
+		return domain.Period{}, fmt.Errorf("finance: data range: %w", err)
+	}
+	if firstMoney.IsZero() || lastMoney.IsZero() {
+		return domain.Period{}, nil
+	}
+	period := domain.Period{
+		FirstMonth:        domain.MonthKey(firstMoney),
+		LastMonth:         domain.MonthKey(lastMoney),
+		LastActivityMonth: domain.MonthKey(lastMoney),
+		HasData:           true,
+	}
+	if !lastActivity.IsZero() && lastActivity.After(lastMoney) {
+		period.LastActivityMonth = domain.MonthKey(lastActivity)
+	}
+	return period, nil
+}
+
 func (s *Service) Report(ctx context.Context, from, to time.Time) (domain.Report, error) {
 	// MonthlyFacts reports whole months, so the opening balance has to be cut at
 	// the same boundary — a mid-month `from` would otherwise count that month's
@@ -373,7 +438,7 @@ func (s *Service) RunAutoExpenses(ctx context.Context, month time.Time, createdB
 		}
 	}
 
-	collections, err := s.report.AdvocateCollections(ctx, month)
+	collections, err := s.report.AdvocateCollections(ctx, month, endOfMonth(month))
 	if err != nil {
 		return out, fmt.Errorf("finance: run auto expenses: advocate collections: %w", err)
 	}
@@ -447,4 +512,8 @@ func dayOf(t time.Time) time.Time {
 
 func startOfMonth(t time.Time) time.Time {
 	return time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, t.Location())
+}
+
+func endOfMonth(t time.Time) time.Time {
+	return startOfMonth(t).AddDate(0, 1, -1)
 }

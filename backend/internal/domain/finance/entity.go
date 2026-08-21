@@ -150,6 +150,38 @@ type AdvocateRate struct {
 	CommissionPercent float64
 }
 
+// AdvocateSettlement answers "how much do we still owe this advocate": what
+// they collected, what their percentage accrues on it, what was actually paid
+// out, and the remainder. Paid is only attributable for generated payouts,
+// which carry the advocate in their external ref — the historical lump sums
+// imported from the spreadsheet name no advocate at all, so they are reported
+// separately rather than spread across people by guesswork.
+type AdvocateSettlement struct {
+	AdvocateID        string
+	FullName          string
+	IsActive          bool
+	CommissionPercent float64
+	Collected         float64
+	Accrued           float64
+	Paid              float64
+	Outstanding       float64
+}
+
+// Settlement is the advocate side of the expenses, plus the income split it is
+// computed against — "what consultations brought and what cases brought" is the
+// same question one step up.
+type Settlement struct {
+	Advocates []AdvocateSettlement
+	// payouts in the advocates category that name no advocate (imported history)
+	UnattributedPaid float64
+	ConsultIncome    float64
+	CaseIncome       float64
+	// sums across Advocates, so the UI has one number to show collapsed
+	TotalAccrued     float64
+	TotalPaid        float64
+	TotalOutstanding float64
+}
+
 // Generated is what one generator pass did; Skipped counts occurrences that
 // were already in the ledger, which is the normal case on a repeat run.
 type Generated struct {

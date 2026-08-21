@@ -484,7 +484,7 @@ func (r *FinanceRepository) MonthlyFacts(ctx context.Context, from, to time.Time
 			GROUP BY 1
 		),
 		lead_count AS (
-			SELECT date_trunc('month', l.received_at)::date AS month, count(*) AS leads
+			SELECT date_trunc('month', l.received_at AT TIME ZONE '` + businessTZ + `')::date AS month, count(*) AS leads
 			FROM leads l, bounds b
 			WHERE l.received_at >= b.lo AND l.received_at < b.hi
 			GROUP BY 1
@@ -496,9 +496,43 @@ func (r *FinanceRepository) MonthlyFacts(ctx context.Context, from, to time.Time
 			GROUP BY client_id
 		),
 		new_clients AS (
-			SELECT date_trunc('month', f.first_lead_at)::date AS month, count(*) AS clients
+			SELECT date_trunc('month', f.first_lead_at AT TIME ZONE '` + businessTZ + `')::date AS month, count(*) AS clients
 			FROM first_lead f, bounds b
 			WHERE f.first_lead_at >= b.lo AND f.first_lead_at < b.hi
+			GROUP BY 1
+		),
+		-- Everything a client has EVER paid, with no date bound: acquisition cost
+		-- belongs to the month they arrived, but the revenue proving it out can
+		-- land any time later. This is what keeps LTV from collapsing into ROMI.
+		client_lifetime AS (
+			SELECT cl.id AS client_id,
+				coalesce((SELECT sum(c.price) FROM consultations c
+					WHERE c.client_id = cl.id AND c.price > 0 AND c.status = 'completed'), 0)
+				+ coalesce((SELECT sum(p.amount) FROM case_payments p
+					JOIN cases k ON k.id = p.case_id WHERE k.client_id = cl.id), 0) AS paid
+			FROM clients cl
+		),
+		cohort AS (
+			SELECT date_trunc('month', f.first_lead_at AT TIME ZONE '` + businessTZ + `')::date AS month,
+				count(*) FILTER (WHERE lt.paid > 0) AS payers,
+				coalesce(sum(lt.paid), 0) AS revenue
+			FROM first_lead f
+			JOIN client_lifetime lt ON lt.client_id = f.client_id, bounds b
+			WHERE f.first_lead_at >= b.lo AND f.first_lead_at < b.hi
+			GROUP BY 1
+		),
+		-- distinct clients who paid anything IN the month, for revenue per client
+		paying AS (
+			SELECT month, count(DISTINCT client_id) AS clients FROM (
+				SELECT date_trunc('month', c.scheduled_at AT TIME ZONE '` + businessTZ + `')::date AS month, c.client_id
+				FROM consultations c, bounds b
+				WHERE c.price > 0 AND c.status = 'completed'
+					AND c.scheduled_at >= b.lo AND c.scheduled_at < b.hi
+				UNION ALL
+				SELECT date_trunc('month', p.paid_at)::date AS month, k.client_id
+				FROM case_payments p JOIN cases k ON k.id = p.case_id, bounds b
+				WHERE p.paid_at >= b.lo AND p.paid_at < b.hi
+			) paid_rows
 			GROUP BY 1
 		)
 		SELECT m.month,
@@ -508,13 +542,18 @@ func (r *FinanceRepository) MonthlyFacts(ctx context.Context, from, to time.Time
 			coalesce(cp.payments, 0),
 			coalesce(oi.amount, 0),
 			coalesce(lc.leads, 0),
-			coalesce(nc.clients, 0)
+			coalesce(nc.clients, 0),
+			coalesce(co.payers, 0),
+			coalesce(co.revenue, 0),
+			coalesce(pa.clients, 0)
 		FROM months m
 		LEFT JOIN consult cr ON cr.month = m.month
 		LEFT JOIN case_paid cp ON cp.month = m.month
 		LEFT JOIN other_inc oi ON oi.month = m.month
 		LEFT JOIN lead_count lc ON lc.month = m.month
 		LEFT JOIN new_clients nc ON nc.month = m.month
+		LEFT JOIN cohort co ON co.month = m.month
+		LEFT JOIN paying pa ON pa.month = m.month
 		ORDER BY m.month`
 
 	args := pgx.NamedArgs{"from": from, "to": to}
@@ -538,6 +577,9 @@ func (r *FinanceRepository) MonthlyFacts(ctx context.Context, from, to time.Time
 			&f.OtherIncome,
 			&f.Leads,
 			&f.NewClients,
+			&f.CohortPayers,
+			&f.CohortRevenue,
+			&f.PayingClients,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("monthly facts: scan: %w", err)
@@ -602,12 +644,50 @@ func (r *FinanceRepository) BalanceBefore(ctx context.Context, from time.Time) (
 	return balance, nil
 }
 
+// DataRange bounds what the finance page can show. The money span is what "all
+// time" uses; leads are reported separately because they keep arriving long
+// after the last recorded payment, and defaulting to them fills the report with
+// empty columns. least/greatest skip NULLs, so an empty table drops out of the
+// comparison instead of nulling the answer.
+func (r *FinanceRepository) DataRange(ctx context.Context) (time.Time, time.Time, time.Time, error) {
+	const q = `
+		SELECT
+			least(
+				(SELECT min(spent_at) FROM expenses WHERE status = 'posted'),
+				(SELECT min((scheduled_at AT TIME ZONE '` + businessTZ + `')::date) FROM consultations WHERE price > 0 AND status = 'completed'),
+				(SELECT min(paid_at) FROM case_payments),
+				(SELECT min(received_at) FROM other_income)
+			),
+			greatest(
+				(SELECT max(spent_at) FROM expenses WHERE status = 'posted'),
+				(SELECT max((scheduled_at AT TIME ZONE '` + businessTZ + `')::date) FROM consultations WHERE price > 0 AND status = 'completed'),
+				(SELECT max(paid_at) FROM case_payments),
+				(SELECT max(received_at) FROM other_income)
+			),
+			(SELECT max((received_at AT TIME ZONE '` + businessTZ + `')::date) FROM leads)`
+
+	var firstMoney, lastMoney, lastActivity *time.Time
+	if err := r.db.QueryRow(ctx, q).Scan(&firstMoney, &lastMoney, &lastActivity); err != nil {
+		return time.Time{}, time.Time{}, time.Time{}, fmt.Errorf("data range: %w", err)
+	}
+	if firstMoney == nil || lastMoney == nil {
+		return time.Time{}, time.Time{}, time.Time{}, nil
+	}
+	activity := *lastMoney
+	if lastActivity != nil && lastActivity.After(activity) {
+		activity = *lastActivity
+	}
+	return *firstMoney, *lastMoney, activity, nil
+}
+
 // Receivable is what clients still owe across every case, ignoring the report
 // window on purpose: money owed on a case opened last year is owed today, and a
 // short window must not make it disappear from the number. Same definition as
 // leadstats' CaseOwed, so the two pages can't disagree about the debt.
 func (r *FinanceRepository) Receivable(ctx context.Context) (float64, error) {
-	const q = `SELECT coalesce(sum(greatest(fee - paid_amount, 0)), 0) FROM cases`
+	// A cancelled case's unpaid fee is not owed to anyone, and counting it made
+	// the debt figure permanently overstated.
+	const q = `SELECT coalesce(sum(greatest(fee - paid_amount, 0)), 0) FROM cases WHERE status <> 'cancelled'`
 
 	var owed float64
 	if err := r.db.QueryRow(ctx, q).Scan(&owed); err != nil {
@@ -616,23 +696,29 @@ func (r *FinanceRepository) Receivable(ctx context.Context) (float64, error) {
 	return owed, nil
 }
 
-// Cases created before the advocates roster only carry free-text
-// advocate_name and no advocate_id, so they cannot be attributed to a roster
-// row and are left out — the gap is the missing link, not a bug.
-func (r *FinanceRepository) AdvocateCollections(ctx context.Context, month time.Time) ([]finance.AdvocateCollection, error) {
+// Attribution prefers cases.advocate_id and falls back to an exact
+// advocate_name match, which is how the pre-roster history (surname only) still
+// reaches the person it belongs to. A name that matches nobody stays out.
+func (r *FinanceRepository) AdvocateCollections(ctx context.Context, from, to time.Time) ([]finance.AdvocateCollection, error) {
 	const q = `
 		SELECT a.id::text, a.full_name, sum(p.amount), a.commission_percent
-		FROM advocates a
-		JOIN cases c ON c.advocate_id = a.id
+		FROM cases c
+		-- Cases opened before the advocate roster carry only a free-text surname.
+		-- coalesce prefers the real link and falls back to an EXACT name match —
+		-- deterministic, and never fuzzy: attributing someone's payout by
+		-- approximate name is not a mistake worth risking.
+		JOIN advocates a ON a.id = coalesce(
+			c.advocate_id,
+			(SELECT x.id FROM advocates x WHERE x.full_name = c.advocate_name LIMIT 1)
+		)
 		JOIN case_payments p ON p.case_id = c.id
-		WHERE p.paid_at >= date_trunc('month', @month::date)
-			AND p.paid_at < date_trunc('month', @month::date) + interval '1 month'
+		WHERE p.paid_at >= @from::date AND p.paid_at <= @to::date
 		GROUP BY a.id, a.full_name, a.commission_percent
 		ORDER BY 3 DESC`
 
-	rows, err := r.db.Query(ctx, q, pgx.NamedArgs{"month": month})
+	rows, err := r.db.Query(ctx, q, pgx.NamedArgs{"from": from, "to": to})
 	if err != nil {
-		return nil, fmt.Errorf("advocate collections %s: %w", finance.MonthKey(month), err)
+		return nil, fmt.Errorf("advocate collections: %w", err)
 	}
 	defer rows.Close()
 
@@ -640,14 +726,56 @@ func (r *FinanceRepository) AdvocateCollections(ctx context.Context, month time.
 	for rows.Next() {
 		var c finance.AdvocateCollection
 		if err := rows.Scan(&c.AdvocateID, &c.AdvocateName, &c.Collected, &c.CommissionPercent); err != nil {
-			return nil, fmt.Errorf("advocate collections %s: scan: %w", finance.MonthKey(month), err)
+			return nil, fmt.Errorf("advocate collections: scan: %w", err)
 		}
 		out = append(out, c)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("advocate collections %s: %w", finance.MonthKey(month), err)
+		return nil, fmt.Errorf("advocate collections: %w", err)
 	}
 	return out, nil
+}
+
+// AdvocatePayouts splits what left the advocates category into "we know who this
+// went to" and "we do not". Generated payouts carry the advocate in their
+// external ref ("advocate:<id>:<month>"); the lump sums imported from the
+// spreadsheet name nobody, and spreading them across advocates by guesswork
+// would invent a number.
+func (r *FinanceRepository) AdvocatePayouts(ctx context.Context, from, to time.Time) (map[string]float64, float64, error) {
+	const q = `
+		SELECT
+			CASE WHEN external_ref LIKE 'advocate:%' THEN split_part(external_ref, ':', 2) ELSE '' END AS advocate_id,
+			sum(amount)
+		FROM expenses
+		WHERE status = 'posted'
+			AND category_code = 'advocates'
+			AND spent_at >= @from::date AND spent_at <= @to::date
+		GROUP BY 1`
+
+	rows, err := r.db.Query(ctx, q, pgx.NamedArgs{"from": from, "to": to})
+	if err != nil {
+		return nil, 0, fmt.Errorf("advocate payouts: %w", err)
+	}
+	defer rows.Close()
+
+	attributed := map[string]float64{}
+	var unattributed float64
+	for rows.Next() {
+		var id string
+		var amount float64
+		if err := rows.Scan(&id, &amount); err != nil {
+			return nil, 0, fmt.Errorf("advocate payouts: scan: %w", err)
+		}
+		if id == "" {
+			unattributed += amount
+			continue
+		}
+		attributed[id] = amount
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("advocate payouts: %w", err)
+	}
+	return attributed, unattributed, nil
 }
 
 // --- helpers ---

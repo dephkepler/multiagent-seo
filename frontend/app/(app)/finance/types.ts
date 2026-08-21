@@ -73,6 +73,8 @@ export interface FinanceMonth {
   gross_profit: number
   leads: number
   new_clients: number
+  cohort_payers: number
+  paying_clients: number
   consult_count: number
   case_payment_count: number
   cac: number
@@ -83,6 +85,7 @@ export interface FinanceMonth {
   margin_percent: number
   marketing_share: number
   revenue_per_client: number
+  ltv: number
   ltv_to_cac: number
   lead_to_consult: number
   break_even_consults: number

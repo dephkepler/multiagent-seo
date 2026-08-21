@@ -36,6 +36,8 @@ type financeService interface {
 	DeleteOtherIncome(ctx context.Context, id string) error
 	ListAdvocateRates(ctx context.Context) ([]domain.AdvocateRate, error)
 	SetAdvocateRate(ctx context.Context, advocateID string, percent float64) error
+	Period(ctx context.Context) (domain.Period, error)
+	Settlement(ctx context.Context, from, to time.Time) (domain.Settlement, error)
 	Report(ctx context.Context, from, to time.Time) (domain.Report, error)
 	RunAutoExpenses(ctx context.Context, month time.Time, createdBy string) (domain.Generated, error)
 }
@@ -73,6 +75,67 @@ func (h *FinanceHandler) GetFinanceReport(w http.ResponseWriter, r *http.Request
 		Months:     months,
 		Total:      toAPIFinanceMonth(report.Total),
 		Receivable: report.Receivable,
+	})
+}
+
+func (h *FinanceHandler) GetFinancePeriod(w http.ResponseWriter, r *http.Request) {
+	if isNil(h.svc) {
+		problem.Write(w, http.StatusServiceUnavailable, "finance unavailable")
+		return
+	}
+
+	period, err := h.svc.Period(r.Context())
+	if err != nil {
+		h.writeError(r.Context(), w, "finance_period", err)
+		return
+	}
+
+	out := oapigen.FinancePeriod{HasData: period.HasData}
+	if period.HasData {
+		out.FirstMonth = &period.FirstMonth
+		out.LastMonth = &period.LastMonth
+		out.LastActivityMonth = &period.LastActivityMonth
+	}
+	response.WriteJSON(r.Context(), w, http.StatusOK, out)
+}
+
+func (h *FinanceHandler) GetAdvocateSettlement(w http.ResponseWriter, r *http.Request, params oapigen.GetAdvocateSettlementParams) {
+	if isNil(h.svc) {
+		problem.Write(w, http.StatusServiceUnavailable, "finance unavailable")
+		return
+	}
+	from, to := params.From.Time, params.To.Time
+	if to.Before(from) {
+		problem.Write(w, http.StatusBadRequest, "to is before from")
+		return
+	}
+
+	settlement, err := h.svc.Settlement(r.Context(), from, to)
+	if err != nil {
+		h.writeError(r.Context(), w, "advocate_settlement", err)
+		return
+	}
+
+	items := make([]oapigen.AdvocateSettlement, len(settlement.Advocates))
+	for i, a := range settlement.Advocates {
+		items[i] = oapigen.AdvocateSettlement{
+			AdvocateId:        a.AdvocateID,
+			FullName:          a.FullName,
+			CommissionPercent: a.CommissionPercent,
+			Collected:         a.Collected,
+			Accrued:           a.Accrued,
+			Paid:              a.Paid,
+			Outstanding:       a.Outstanding,
+		}
+	}
+	response.WriteJSON(r.Context(), w, http.StatusOK, oapigen.AdvocateSettlementList{
+		Items:            items,
+		UnattributedPaid: settlement.UnattributedPaid,
+		ConsultIncome:    settlement.ConsultIncome,
+		CaseIncome:       settlement.CaseIncome,
+		TotalAccrued:     settlement.TotalAccrued,
+		TotalPaid:        settlement.TotalPaid,
+		TotalOutstanding: settlement.TotalOutstanding,
 	})
 }
 
@@ -648,6 +711,8 @@ func toAPIFinanceMonth(m domain.MonthReport) oapigen.FinanceMonth {
 		GrossProfit:       m.GrossProfit,
 		Leads:             m.Leads,
 		NewClients:        m.NewClients,
+		CohortPayers:      m.CohortPayers,
+		PayingClients:     m.PayingClients,
 		ConsultCount:      m.ConsultCount,
 		CasePaymentCount:  m.CasePaymentCount,
 		Cac:               m.CAC,
@@ -658,6 +723,7 @@ func toAPIFinanceMonth(m domain.MonthReport) oapigen.FinanceMonth {
 		MarginPercent:     m.MarginPercent,
 		MarketingShare:    m.MarketingShare,
 		RevenuePerClient:  m.RevenuePerClient,
+		Ltv:               m.LTV,
 		LtvToCac:          m.LtvToCac,
 		LeadToConsult:     m.LeadToConsult,
 		BreakEvenConsults: m.BreakEvenConsults,

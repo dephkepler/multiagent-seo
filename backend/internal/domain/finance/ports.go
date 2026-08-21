@@ -58,9 +58,16 @@ type ReportSource interface {
 	// Receivable is what is still owed across every case — live, not scoped to
 	// any window.
 	Receivable(ctx context.Context) (float64, error)
-	// AdvocateCollections is per-advocate case_payments received in month,
+	// DataRange returns the span of rows that carry money, plus the latest date
+	// of any activity at all (leads included). Zero times mean nothing yet.
+	DataRange(ctx context.Context) (firstMoney, lastMoney, lastActivity time.Time, err error)
+	// AdvocateCollections is per-advocate case_payments received in [from, to],
 	// paired with that advocate's commission percent.
-	AdvocateCollections(ctx context.Context, month time.Time) ([]AdvocateCollection, error)
+	AdvocateCollections(ctx context.Context, from, to time.Time) ([]AdvocateCollection, error)
+	// AdvocatePayouts is what was actually paid out of the advocates category in
+	// [from, to]: attributed per advocate id where the row's external ref names
+	// one, plus everything that names nobody.
+	AdvocatePayouts(ctx context.Context, from, to time.Time) (attributed map[string]float64, unattributed float64, err error)
 }
 
 // AdSpend is one month of advertising cost as the ad platform itself reports

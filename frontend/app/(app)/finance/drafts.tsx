@@ -42,7 +42,7 @@ export function Drafts({ drafts, month, generating, pendingId, busy, onGenerate,
       ) : (
         <ul className='mt-3 grid gap-2 lg:grid-cols-2'>
           {drafts.map((d) => (
-            <li key={d.id} className='rounded-md border border-gray-200 bg-white p-3'>
+            <li key={d.id} className='rounded-md border border-gray-200 bg-white p-3 hover:border-emerald-300 hover:bg-emerald-50/40'>
               <div className='flex items-start justify-between gap-2'>
                 <div className='min-w-0'>
                   <div className='truncate font-medium'>{d.vendor || d.description || d.category_label}</div>
