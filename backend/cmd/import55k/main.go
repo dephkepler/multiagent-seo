@@ -67,11 +67,12 @@ func main() {
 		log.Fatal("CF_LEADS_SHEETS_SPREADSHEET_ID is empty — same spreadsheet the bot uses, needed to find the 55k tab")
 	}
 
-	rows, err := fetchRows(ctx, cfg)
+	rows, dropped, sheetRows, err := fetchRows(ctx, cfg)
 	if err != nil {
 		log.Fatalf("fetch sheet: %v", err)
 	}
-	fmt.Printf("fetched %d rows with a parseable date (out of the full 55k tab)\n", len(rows))
+	fmt.Printf("55k tab: %d rows returned, %d readable, %d dropped\n", sheetRows, len(rows), len(dropped))
+	reportDropped(dropped)
 
 	database := db.NewDatabase(cfg.Database)
 	if err := database.Initialize(ctx); err != nil {
@@ -230,7 +231,11 @@ func upsertHistoricalClient(ctx context.Context, tx pgx.Tx, phone, name string, 
 	err := tx.QueryRow(ctx, `
 		INSERT INTO clients (phone, name, first_seen_at, last_seen_at)
 		VALUES (@phone, @name, @at, @at)
-		ON CONFLICT (phone) DO UPDATE SET
+		-- The predicate has to be repeated verbatim: uq_clients_phone is partial
+		-- (migration 000040), and Postgres cannot infer a partial index without
+		-- it. Without this every row fails with SQLSTATE 42P10 — which is exactly
+		-- what killed this importer, silently, for months.
+		ON CONFLICT (phone) WHERE phone IS NOT NULL AND phone <> '' DO UPDATE SET
 			name = CASE WHEN clients.name = '' THEN EXCLUDED.name ELSE clients.name END,
 			first_seen_at = LEAST(clients.first_seen_at, EXCLUDED.first_seen_at),
 			last_seen_at = GREATEST(clients.last_seen_at, EXCLUDED.last_seen_at)
@@ -293,22 +298,24 @@ func buildCaseNote(r row) string {
 	return strings.Join(parts, ". ")
 }
 
-func fetchRows(ctx context.Context, cfg config.Config) ([]row, error) {
+func fetchRows(ctx context.Context, cfg config.Config) ([]row, []droppedRow, int, error) {
 	credsJSON, err := os.ReadFile(cfg.Sheets.CredentialsFile)
 	if err != nil {
-		return nil, fmt.Errorf("read credentials: %w", err)
+		return nil, nil, 0, fmt.Errorf("read credentials: %w", err)
 	}
 	creds, err := google.CredentialsFromJSON(ctx, credsJSON, sheets.SpreadsheetsReadonlyScope)
 	if err != nil {
-		return nil, fmt.Errorf("parse credentials: %w", err)
+		return nil, nil, 0, fmt.Errorf("parse credentials: %w", err)
 	}
 	svc, err := sheets.NewService(ctx, option.WithTokenSource(creds.TokenSource))
 	if err != nil {
-		return nil, fmt.Errorf("create sheets service: %w", err)
+		return nil, nil, 0, fmt.Errorf("create sheets service: %w", err)
 	}
-	resp, err := svc.Spreadsheets.Values.Get(cfg.LeadsSheets.SpreadsheetID, "55k!A1:X1096").Do()
+	// Whole tab, not "A1:X1096": a hardcoded last row silently hides every
+	// entry made after it, which is how December 2024 came to be truncated.
+	resp, err := svc.Spreadsheets.Values.Get(cfg.LeadsSheets.SpreadsheetID, "55k!A:X").Do()
 	if err != nil {
-		return nil, fmt.Errorf("read 55k tab: %w", err)
+		return nil, nil, 0, fmt.Errorf("read 55k tab: %w", err)
 	}
 
 	col := func(r []interface{}, i int) string {
@@ -320,7 +327,12 @@ func fetchRows(ctx context.Context, cfg config.Config) ([]row, error) {
 		return ""
 	}
 
+	if len(resp.Values) == 0 {
+		return nil, nil, 0, fmt.Errorf("55k tab came back empty")
+	}
+
 	var out []row
+	var dropped []droppedRow
 	for i, r := range resp.Values[1:] {
 		if len(r) == 0 {
 			continue
@@ -338,7 +350,8 @@ func fetchRows(ctx context.Context, cfg config.Config) ([]row, error) {
 			kcTime:   col(r, 18),
 			kcDate:   col(r, 19),
 		}
-		if dateStr := col(r, 3); dateStr != "" {
+		dateStr := col(r, 3)
+		if dateStr != "" {
 			if t, err := time.Parse("02.01.06", dateStr); err == nil {
 				rr.date, rr.hasDate = t, true
 			} else if t, err := time.Parse("02.01.2006", dateStr); err == nil {
@@ -346,6 +359,11 @@ func fetchRows(ctx context.Context, cfg config.Config) ([]row, error) {
 			}
 		}
 		if !rr.hasDate {
+			reason := "no date"
+			if dateStr != "" {
+				reason = fmt.Sprintf("date %q is neither dd.mm.yy nor dd.mm.yyyy", dateStr)
+			}
+			dropped = append(dropped, droppedRow{num: rr.num, reason: reason, name: rr.name, amount: col(r, 13)})
 			continue
 		}
 		sumStr := strings.ReplaceAll(strings.ReplaceAll(col(r, 13), " ", ""), ",", ".")
@@ -356,5 +374,42 @@ func fetchRows(ctx context.Context, cfg config.Config) ([]row, error) {
 		}
 		out = append(out, rr)
 	}
-	return out, nil
+	return out, dropped, len(resp.Values), nil
+}
+
+// droppedRow is a sheet row the importer refused to read. Money is the point of
+// this import, so a dropped row carries what it would have been worth — a
+// silently skipped 15 000 ₴ row is the failure this exists to surface.
+type droppedRow struct {
+	num    int
+	reason string
+	name   string
+	amount string
+}
+
+// reportDropped names every row the importer would not read. Nothing is
+// invented for them: a row whose date cannot be parsed may be a section header
+// or may be 15 000 ₴ of real income, and only a human looking at the sheet can
+// tell which.
+func reportDropped(dropped []droppedRow) {
+	if len(dropped) == 0 {
+		return
+	}
+	var withMoney int
+	for _, d := range dropped {
+		if strings.TrimSpace(d.amount) != "" {
+			withMoney++
+		}
+	}
+	fmt.Printf("\ndropped rows (%d, of which %d carry an amount — check these in the sheet):\n", len(dropped), withMoney)
+	for _, d := range dropped {
+		fmt.Printf("  row %d: %s", d.num, d.reason)
+		if d.name != "" {
+			fmt.Printf(" — %s", d.name)
+		}
+		if strings.TrimSpace(d.amount) != "" {
+			fmt.Printf(" — сумма %s", d.amount)
+		}
+		fmt.Println()
+	}
 }

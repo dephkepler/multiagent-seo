@@ -73,7 +73,7 @@ func main() {
 		log.Fatal("CF_LEADS_SHEETS_SPREADSHEET_ID is empty")
 	}
 
-	byID, err := fetchGroups(ctx, cfg)
+	byID, dropped, sheetRows, err := fetchGroups(ctx, cfg)
 	if err != nil {
 		log.Fatalf("fetch sheet: %v", err)
 	}
@@ -81,7 +81,9 @@ func main() {
 	for _, rs := range byID {
 		rowCount += len(rs)
 	}
-	fmt.Printf("fetched %d 'проект' rows across %d cases with a parseable date and id (Консульт rows skipped)\n", rowCount, len(byID))
+	fmt.Printf("проекти tab: %d rows returned, %d 'проект' rows across %d cases, %d dropped (Консульт rows skipped)\n",
+		sheetRows, rowCount, len(byID), len(dropped))
+	reportDropped(dropped)
 
 	var order []string
 	for id := range byID {
@@ -240,7 +242,11 @@ func upsertHistoricalClient(ctx context.Context, tx pgx.Tx, phone, name string, 
 	err := tx.QueryRow(ctx, `
 		INSERT INTO clients (phone, name, first_seen_at, last_seen_at)
 		VALUES (@phone, @name, @at, @at)
-		ON CONFLICT (phone) DO UPDATE SET
+		-- Repeated verbatim on purpose: uq_clients_phone is partial (migration
+		-- 000040) and Postgres cannot infer a partial index without its
+		-- predicate. Without this every row fails with SQLSTATE 42P10, which is
+		-- what silently killed this importer.
+		ON CONFLICT (phone) WHERE phone IS NOT NULL AND phone <> '' DO UPDATE SET
 			name = CASE WHEN clients.name = '' THEN EXCLUDED.name ELSE clients.name END,
 			first_seen_at = LEAST(clients.first_seen_at, EXCLUDED.first_seen_at),
 			last_seen_at = GREATEST(clients.last_seen_at, EXCLUDED.last_seen_at)
@@ -254,22 +260,23 @@ func atNoon(t time.Time) time.Time {
 	return time.Date(t.Year(), t.Month(), t.Day(), 12, 0, 0, 0, time.UTC)
 }
 
-func fetchGroups(ctx context.Context, cfg config.Config) (map[string][]sheetRow, error) {
+func fetchGroups(ctx context.Context, cfg config.Config) (map[string][]sheetRow, []droppedRow, int, error) {
 	credsJSON, err := os.ReadFile(cfg.Sheets.CredentialsFile)
 	if err != nil {
-		return nil, fmt.Errorf("read credentials: %w", err)
+		return nil, nil, 0, fmt.Errorf("read credentials: %w", err)
 	}
 	creds, err := google.CredentialsFromJSON(ctx, credsJSON, sheets.SpreadsheetsReadonlyScope)
 	if err != nil {
-		return nil, fmt.Errorf("parse credentials: %w", err)
+		return nil, nil, 0, fmt.Errorf("parse credentials: %w", err)
 	}
 	svc, err := sheets.NewService(ctx, option.WithTokenSource(creds.TokenSource))
 	if err != nil {
-		return nil, fmt.Errorf("create sheets service: %w", err)
+		return nil, nil, 0, fmt.Errorf("create sheets service: %w", err)
 	}
-	resp, err := svc.Spreadsheets.Values.Get(cfg.LeadsSheets.SpreadsheetID, "проекти!A1:V500").Do()
+	// Whole tab: a hardcoded last row hides later entries with no warning.
+	resp, err := svc.Spreadsheets.Values.Get(cfg.LeadsSheets.SpreadsheetID, "проекти!A:V").Do()
 	if err != nil {
-		return nil, fmt.Errorf("read проекти tab: %w", err)
+		return nil, nil, 0, fmt.Errorf("read проекти tab: %w", err)
 	}
 
 	col := func(r []interface{}, i int) string {
@@ -281,21 +288,41 @@ func fetchGroups(ctx context.Context, cfg config.Config) (map[string][]sheetRow,
 		return ""
 	}
 
+	var dropped []droppedRow
 	collector := map[string][]sheetRow{}
-	for _, r := range resp.Values {
+	for i, r := range resp.Values {
+		num := i + 1
 		if len(r) == 0 {
 			continue
 		}
-		if col(r, 2) != "проект" {
-			continue // skip "Консульт" rows — see package doc
+		kind := strings.ToLower(col(r, 2))
+		// "Консульт" rows are consultations, already covered by import55k —
+		// importing them here would double-count. Anything that is neither is
+		// reported rather than dropped in silence: a retagged row is money.
+		if kind != "проект" && kind != "проєкт" {
+			if kind != "" && !strings.HasPrefix(kind, "консульт") {
+				dropped = append(dropped, droppedRow{num: num, reason: fmt.Sprintf("tag %q is neither проект nor консульт", col(r, 2)), name: col(r, 7), amount: col(r, 13)})
+			}
+			continue
 		}
 		id := col(r, 0)
 		if id == "" {
+			dropped = append(dropped, droppedRow{num: num, reason: "no case id", name: col(r, 7), amount: col(r, 13)})
 			continue
 		}
 		dateStr := col(r, 3)
 		t, perr := time.Parse("02.01.06", dateStr)
 		if perr != nil {
+			// import55k accepts a four-digit year too; this tool did not, so
+			// every "10.12.2024" was dropped without a word.
+			t, perr = time.Parse("02.01.2006", dateStr)
+		}
+		if perr != nil {
+			reason := "no date"
+			if dateStr != "" {
+				reason = fmt.Sprintf("date %q is neither dd.mm.yy nor dd.mm.yyyy", dateStr)
+			}
+			dropped = append(dropped, droppedRow{num: num, reason: reason, name: col(r, 7), amount: col(r, 13)})
 			continue
 		}
 		fee := 0.0
@@ -320,5 +347,38 @@ func fetchGroups(ctx context.Context, cfg config.Config) (map[string][]sheetRow,
 		}
 		collector[id] = append(collector[id], row)
 	}
-	return collector, nil
+	return collector, dropped, len(resp.Values), nil
+}
+
+// droppedRow is a sheet row this importer refused to read, with what it would
+// have been worth — a case fee dropped in silence is exactly how the income
+// ledger came to be a third short.
+type droppedRow struct {
+	num    int
+	reason string
+	name   string
+	amount string
+}
+
+func reportDropped(dropped []droppedRow) {
+	if len(dropped) == 0 {
+		return
+	}
+	var withMoney int
+	for _, d := range dropped {
+		if strings.TrimSpace(d.amount) != "" {
+			withMoney++
+		}
+	}
+	fmt.Printf("\ndropped rows (%d, of which %d carry an amount — check these in the sheet):\n", len(dropped), withMoney)
+	for _, d := range dropped {
+		fmt.Printf("  row %d: %s", d.num, d.reason)
+		if d.name != "" {
+			fmt.Printf(" — %s", d.name)
+		}
+		if strings.TrimSpace(d.amount) != "" {
+			fmt.Printf(" — сумма %s", d.amount)
+		}
+		fmt.Println()
+	}
 }
