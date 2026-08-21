@@ -107,6 +107,10 @@ type TelegramConfig struct {
 	// A hole in authentication: root refuses to start with it set against a
 	// non-localhost admin URL.
 	DevUserID int64 `env:"TELEGRAM_DEV_USER_ID"`
+	// MiniAppURL is the client app's public https address. Empty means the bot
+	// offers no app button and clients go through the chat flow, which is why
+	// nothing breaks when it is unset.
+	MiniAppURL string `env:"TELEGRAM_MINIAPP_URL"`
 }
 
 // TelegramUserConfig is for the personal-account MTProto client (cmd/tgsession,

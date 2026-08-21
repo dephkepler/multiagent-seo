@@ -2,6 +2,7 @@ package telegram
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"html"
@@ -41,9 +42,14 @@ type ClientTagger interface {
 }
 
 type AdminBot struct {
-	bot            *tgbotapi.BotAPI
-	card           string
-	adminURL       string
+	bot      *tgbotapi.BotAPI
+	card     string
+	adminURL string
+	// miniAppURL is the client Mini App. Empty disables every app button, and
+	// so does a non-https address: Telegram rejects the whole sendMessage for
+	// an http web_app url, which would leave the client staring at no reply at
+	// all rather than at a missing button.
+	miniAppURL     string
 	allowedUsers   map[int64]bool
 	store          consultations.Store
 	sheet          consultations.SheetWriter
@@ -165,6 +171,7 @@ func NewAdminBot(
 	token string,
 	cardNumber string,
 	adminURL string,
+	miniAppURL string,
 	allowedUserIDs []int64,
 	store consultations.Store,
 	sheet consultations.SheetWriter,
@@ -224,6 +231,7 @@ func NewAdminBot(
 		bot:            bot,
 		card:           cardNumber,
 		adminURL:       strings.TrimSuffix(adminURL, "/"),
+		miniAppURL:     usableAppURL(miniAppURL),
 		allowedUsers:   allowed,
 		store:          store,
 		sheet:          sheet,
@@ -296,7 +304,7 @@ func (b *AdminBot) handle(ctx context.Context, update tgbotapi.Update) {
 	userID, chatID := msg.From.ID, msg.Chat.ID
 
 	// must run before the admin gate too — self-booking is open to any client, not just staff
-	if text == "/request" || text == requestButtonLabel {
+	if text == "/request" || text == requestButtonLabel || text == legacyRequestButtonLabel {
 		b.startRequestFlow(ctx, chatID, userID, msg.From)
 		return
 	}
@@ -654,7 +662,17 @@ func (b *AdminBot) handleStart(ctx context.Context, chatID int64, payload string
 	b.sendHTML(ctx, chatID, buildConsultationCard("Вас записано на консультацію", c, client, advocate, true))
 }
 
-const requestButtonLabel = "📅 Забронювати консультацію"
+const requestButtonLabel = "✍️ Залишити заявку в чаті"
+
+// legacyRequestButtonLabel is what the button said before the app existed. A
+// reply keyboard lives on the client's device until something replaces it, so
+// anyone who opened the bot earlier still has the old wording in front of them
+// and would tap into silence.
+const legacyRequestButtonLabel = "📅 Забронювати консультацію"
+
+// appButtonLabel opens the Mini App. Never mapped in staffMenuCommands: a
+// web_app button sends no text back, so it cannot collide with a command label.
+const appButtonLabel = "🗓 Записатися онлайн"
 
 // label text must never collide with requestButtonLabel, checked before the staff gate in handle()
 const (
@@ -788,6 +806,11 @@ func (b *AdminBot) pickLanguage(ctx context.Context, cb *tgbotapi.CallbackQuery,
 }
 
 func (b *AdminBot) sendRequestPrompt(ctx context.Context, chatID int64) {
+	const text = "Вітаємо! Виберіть зручний час у застосунку або залишіть заявку тут, у чаті."
+	if b.sendWithAppKeyboard(ctx, chatID, text) {
+		return
+	}
+
 	msg := tgbotapi.NewMessage(chatID, "Вітаємо! Натисніть кнопку нижче, щоб залишити заявку на консультацію.")
 	msg.ReplyMarkup = tgbotapi.NewReplyKeyboard(
 		tgbotapi.NewKeyboardButtonRow(
@@ -797,6 +820,64 @@ func (b *AdminBot) sendRequestPrompt(ctx context.Context, chatID int64) {
 	if _, err := b.bot.Send(msg); err != nil {
 		b.log.ErrorContext(ctx, "telegram: send request prompt failed", "err", err)
 	}
+}
+
+// usableAppURL keeps only an address Telegram will actually accept in a
+// web_app button.
+func usableAppURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if !strings.HasPrefix(raw, "https://") {
+		return ""
+	}
+	return raw
+}
+
+// appKeyboard is the client's keyboard: the app first, the chat flow second, so
+// nobody is forced through a Mini App to reach a lawyer.
+//
+// Built as raw JSON because tgbotapi v5.5.1 has no type for web_app at all —
+// its last release predates Mini Apps, so there is no version to upgrade to.
+func appKeyboard(appURL string) (string, error) {
+	markup := map[string]any{
+		"keyboard": []any{
+			[]any{map[string]any{
+				"text":    appButtonLabel,
+				"web_app": map[string]string{"url": appURL},
+			}},
+			[]any{map[string]any{"text": requestButtonLabel}},
+		},
+		"resize_keyboard": true,
+	}
+	encoded, err := json.Marshal(markup)
+	if err != nil {
+		return "", fmt.Errorf("telegram: encode app keyboard: %w", err)
+	}
+	return string(encoded), nil
+}
+
+// sendWithAppKeyboard reports whether it sent the message. False means the app
+// is not configured or the send failed, and the caller falls back to the
+// chat-only prompt — a client must never be left with no answer because of a
+// button.
+func (b *AdminBot) sendWithAppKeyboard(ctx context.Context, chatID int64, text string) bool {
+	if b.miniAppURL == "" {
+		return false
+	}
+	markup, err := appKeyboard(b.miniAppURL)
+	if err != nil {
+		b.log.ErrorContext(ctx, "telegram: build app keyboard failed", "err", err)
+		return false
+	}
+	params := tgbotapi.Params{
+		"chat_id":      strconv.FormatInt(chatID, 10),
+		"text":         text,
+		"reply_markup": markup,
+	}
+	if _, err := b.bot.MakeRequest("sendMessage", params); err != nil {
+		b.log.ErrorContext(ctx, "telegram: send message with app keyboard failed", "err", err)
+		return false
+	}
+	return true
 }
 
 func (b *AdminBot) startRequestFlow(ctx context.Context, chatID, userID int64, user *tgbotapi.User) {
@@ -958,7 +1039,14 @@ func (b *AdminBot) submitRequest(ctx context.Context, chatID int64, d requestDra
 		}
 	}
 
-	msg := tgbotapi.NewMessage(chatID, "Дякуємо! Заявку прийнято, найближчим часом з Вами зв'яжеться наш адвокат.")
+	const confirmation = "Дякуємо! Заявку прийнято, найближчим часом з Вами зв'яжеться наш адвокат."
+	// Leaving the app button up is the point: this is where a client goes to see
+	// whether the firm confirmed their hour.
+	if b.sendWithAppKeyboard(ctx, chatID, confirmation) {
+		return
+	}
+
+	msg := tgbotapi.NewMessage(chatID, confirmation)
 	msg.ReplyMarkup = tgbotapi.NewRemoveKeyboard(false)
 	if _, err := b.bot.Send(msg); err != nil {
 		b.log.ErrorContext(ctx, "telegram: send request confirmation failed", "err", err)
