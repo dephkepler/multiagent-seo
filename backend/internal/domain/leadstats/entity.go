@@ -123,6 +123,22 @@ type Funnel struct {
 	// the repository query), so this only covers the "consulted, then
 	// became a case" path.
 	AvgDaysConsultToCase float64
+
+	// FirstConsultOutcome answers "of the ones who booked, where did they
+	// actually fall off" — unlike ConsultedEver above (has ANY consultation,
+	// any time, any status), this looks at only each cohort client's FIRST
+	// consultation and buckets it by outcome. Mutually exclusive counts that
+	// sum to ConsultedEver.
+	FirstConsultOutcome FunnelStage
+}
+
+// FunnelStage is a one-touchpoint outcome breakdown — see
+// Funnel.FirstConsultOutcome. Field names mirror consultations.Status*.
+type FunnelStage struct {
+	Completed int64 // showed up
+	Cancelled int64
+	NoShow    int64
+	Scheduled int64 // still in the future, not yet resolved
 }
 
 type Stats struct {

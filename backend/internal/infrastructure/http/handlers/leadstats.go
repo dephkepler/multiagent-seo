@@ -121,6 +121,12 @@ func toOapiLeadStats(s domainlead.Stats) oapigen.LeadStats {
 		CasedEver:            s.Funnel.CasedEver,
 		AvgDaysToConsult:     float32(s.Funnel.AvgDaysToConsult),
 		AvgDaysConsultToCase: float32(s.Funnel.AvgDaysConsultToCase),
+		FirstConsultOutcome: oapigen.LeadStatsFunnelStage{
+			Completed: s.Funnel.FirstConsultOutcome.Completed,
+			Cancelled: s.Funnel.FirstConsultOutcome.Cancelled,
+			NoShow:    s.Funnel.FirstConsultOutcome.NoShow,
+			Scheduled: s.Funnel.FirstConsultOutcome.Scheduled,
+		},
 	}
 	out.ByWeekday = toOapiCounts(s.ByWeekday)
 	out.ByLeadPracticeArea = toOapiCounts(s.ByLeadPracticeArea)

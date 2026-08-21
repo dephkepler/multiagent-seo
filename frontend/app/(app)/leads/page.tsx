@@ -56,6 +56,7 @@ interface LeadStats {
     cased_ever: number
     avg_days_to_consult: number
     avg_days_consult_to_case: number
+    first_consult_outcome: { completed: number; cancelled: number; no_show: number; scheduled: number }
   }
   by_weekday: { key: string; count: number }[]
   by_lead_practice_area: { key: string; count: number }[]
@@ -283,6 +284,7 @@ export default function LeadsPage() {
             daysToConsult={data.funnel.avg_days_to_consult}
             daysToCase={data.funnel.avg_days_consult_to_case}
           />
+          <FirstConsultOutcomeBar outcome={data.funnel.first_consult_outcome} />
 
           <GroupHeading title='Деньги' />
           <div className='space-y-4'>
@@ -593,6 +595,45 @@ function FunnelArrow({ pct, days, bad }: { pct: number; days: number; bad?: bool
         {pct.toFixed(1)}% <span className='inline-block rotate-90 sm:rotate-0'>→</span>
       </span>
       {days > 0 && <span className='text-[11px] text-gray-400'>в среднем {fmtDays(days)}</span>}
+    </div>
+  )
+}
+
+// FirstConsultOutcomeBar is the funnel's drop-off detail — of the cohort's
+// "дошли до консультации" stage above, what happened to each client's FIRST
+// consultation specifically (not "ever", which FunnelRow's own numbers
+// already cover). Reuses STATUS_META's colors/labels so a segment here
+// means the same thing it does everywhere else consultation status shows up.
+const FIRST_CONSULT_OUTCOME_ORDER = ['completed', 'cancelled', 'no_show', 'scheduled'] as const
+
+function FirstConsultOutcomeBar({
+  outcome,
+}: {
+  outcome: { completed: number; cancelled: number; no_show: number; scheduled: number }
+}) {
+  const total = outcome.completed + outcome.cancelled + outcome.no_show + outcome.scheduled
+  if (total === 0) return null
+
+  return (
+    <div className='space-y-2'>
+      <div className='text-xs text-gray-400'>Дошли до консультации — что случилось на первой:</div>
+      <div className='flex h-4 overflow-hidden rounded bg-gray-100'>
+        {FIRST_CONSULT_OUTCOME_ORDER.filter((key) => outcome[key] > 0).map((key) => (
+          <div
+            key={key}
+            style={{ width: `${(outcome[key] / total) * 100}%`, backgroundColor: STATUS_META[key].bar }}
+            title={`${STATUS_META[key].label}: ${outcome[key]}`}
+          />
+        ))}
+      </div>
+      <div className='flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500'>
+        {FIRST_CONSULT_OUTCOME_ORDER.map((key) => (
+          <span key={key} className='inline-flex items-center gap-1.5'>
+            <span className='inline-block h-2 w-2 rounded-full' style={{ backgroundColor: STATUS_META[key].bar }} />
+            {STATUS_META[key].label}: {outcome[key]} ({Math.round((outcome[key] / total) * 100)}%)
+          </span>
+        ))}
+      </div>
     </div>
   )
 }

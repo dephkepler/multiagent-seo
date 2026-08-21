@@ -341,10 +341,12 @@ func (r *LeadStatsRepository) Funnel(ctx context.Context, from, to time.Time) (l
 			GROUP BY client_id
 			HAVING min(received_at) BETWEEN @from AND @to
 		),
+		-- DISTINCT ON, not GROUP BY + min(), because FirstConsultOutcome
+		-- below needs that exact first row's status, not just its date.
 		first_consult AS (
-			SELECT client_id, min(created_at) AS first_consult_at
+			SELECT DISTINCT ON (client_id) client_id, created_at AS first_consult_at, status AS first_consult_status
 			FROM consultations
-			GROUP BY client_id
+			ORDER BY client_id, created_at
 		),
 		first_case AS (
 			SELECT client_id, min(created_at) AS first_case_at
@@ -358,7 +360,11 @@ func (r *LeadStatsRepository) Funnel(ctx context.Context, from, to time.Time) (l
 			coalesce(avg(extract(epoch FROM (fc.first_consult_at - cohort.first_lead_at)) / 86400)
 				FILTER (WHERE fc.client_id IS NOT NULL AND fc.first_consult_at >= cohort.first_lead_at), 0),
 			coalesce(avg(extract(epoch FROM (fk.first_case_at - fc.first_consult_at)) / 86400)
-				FILTER (WHERE fk.client_id IS NOT NULL AND fc.client_id IS NOT NULL AND fk.first_case_at >= fc.first_consult_at), 0)
+				FILTER (WHERE fk.client_id IS NOT NULL AND fc.client_id IS NOT NULL AND fk.first_case_at >= fc.first_consult_at), 0),
+			count(*) FILTER (WHERE fc.first_consult_status = 'completed'),
+			count(*) FILTER (WHERE fc.first_consult_status = 'cancelled'),
+			count(*) FILTER (WHERE fc.first_consult_status = 'no_show'),
+			count(*) FILTER (WHERE fc.first_consult_status = 'scheduled')
 		FROM cohort
 		LEFT JOIN first_consult fc ON fc.client_id = cohort.client_id
 		LEFT JOIN first_case fk ON fk.client_id = cohort.client_id`
@@ -367,6 +373,8 @@ func (r *LeadStatsRepository) Funnel(ctx context.Context, from, to time.Time) (l
 	if err := r.db.QueryRow(ctx, q, pgx.NamedArgs{"from": from, "to": to}).Scan(
 		&f.CohortLeads, &f.ConsultedEver, &f.CasedEver,
 		&f.AvgDaysToConsult, &f.AvgDaysConsultToCase,
+		&f.FirstConsultOutcome.Completed, &f.FirstConsultOutcome.Cancelled,
+		&f.FirstConsultOutcome.NoShow, &f.FirstConsultOutcome.Scheduled,
 	); err != nil {
 		return f, fmt.Errorf("funnel: %w", err)
 	}
