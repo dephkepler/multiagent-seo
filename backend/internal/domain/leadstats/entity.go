@@ -144,4 +144,20 @@ type Stats struct {
 	// hour breakdown would mostly be showing that artifact back. The date
 	// itself is real even for imported rows, so weekday is fine.
 	ByWeekday []Count
+	// Audience is who visits the site — GA4 demographics/geography, not
+	// anything tied to a specific lead (the CRM has no age/gender/city on
+	// a lead itself, see webleads.Lead). Zero value (all nil) when GA4
+	// isn't configured, same as Totals' traffic fields.
+	Audience Audience
+}
+
+// Audience is GA4's estimate of who visits the site — age bracket and
+// gender are modeled/inferred by Google, not self-reported, and city is
+// coarse IP geolocation. This describes site traffic in aggregate, not any
+// individual lead or client — there is no way to join a GA4 session back
+// to a specific CRM record.
+type Audience struct {
+	ByAge    []Count
+	ByGender []Count
+	ByCity   []Count
 }

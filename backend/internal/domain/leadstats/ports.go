@@ -32,4 +32,7 @@ type Repository interface {
 // no-op pattern as the Sheets sink elsewhere in the codebase).
 type TrafficSource interface {
 	SessionsByPeriod(ctx context.Context, from, to time.Time, groupBy string) ([]TrafficBucket, error)
+	// Audience reports GA4's visitor demographics/geography for the
+	// period — see the Audience doc comment.
+	Audience(ctx context.Context, from, to time.Time) (Audience, error)
 }

@@ -2050,7 +2050,7 @@ components:
 
     LeadStats:
       type: object
-      required: [ range, totals, trend, by_source, by_creator, by_status, by_category, by_advocate, funnel, by_weekday ]
+      required: [ range, totals, trend, by_source, by_creator, by_status, by_category, by_advocate, funnel, by_weekday, audience ]
       properties:
         range:
           type: object
@@ -2132,6 +2132,33 @@ components:
         by_weekday:
           type: array
           description: Leads by ISO day-of-week — key "1" (Monday) .. "7" (Sunday)
+          items:
+            $ref: "#/components/schemas/LeadStatsCount"
+        audience:
+          $ref: "#/components/schemas/LeadStatsAudience"
+
+    LeadStatsAudience:
+      type: object
+      description: >-
+        Site-visitor demographics/geography from GA4 — userAgeBracket and
+        userGender are Google's modeled estimates, not self-reported; city
+        is coarse IP geolocation (top 10 by sessions, long tail dropped).
+        Describes site traffic in aggregate, not any specific lead or
+        client — there's no field on a lead itself for age/gender/city, see
+        webleads.Lead. All arrays empty when CF_GA4_PROPERTY_ID isn't
+        configured.
+      required: [ by_age, by_gender, by_city ]
+      properties:
+        by_age:
+          type: array
+          items:
+            $ref: "#/components/schemas/LeadStatsCount"
+        by_gender:
+          type: array
+          items:
+            $ref: "#/components/schemas/LeadStatsCount"
+        by_city:
+          type: array
           items:
             $ref: "#/components/schemas/LeadStatsCount"
 

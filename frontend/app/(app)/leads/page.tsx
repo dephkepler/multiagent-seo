@@ -58,6 +58,11 @@ interface LeadStats {
     avg_days_consult_to_case: number
   }
   by_weekday: { key: string; count: number }[]
+  audience: {
+    by_age: { key: string; count: number }[]
+    by_gender: { key: string; count: number }[]
+    by_city: { key: string; count: number }[]
+  }
 }
 
 const STATUS_META: Record<string, { label: string; bar: string; badge: BadgeVariant }> = {
@@ -65,6 +70,15 @@ const STATUS_META: Record<string, { label: string; bar: string; badge: BadgeVari
   completed: { label: 'Провёл', bar: STATUS_GOOD, badge: 'success' },
   cancelled: { label: 'Отменил', bar: STATUS_CRITICAL, badge: 'danger' },
   no_show: { label: 'Не пришёл', bar: STATUS_SERIOUS, badge: 'warning' },
+}
+
+// GA4 marks a dimension it couldn't determine as "(not set)" (age/city) or
+// "unknown" (gender) — both read as the same thing to a human, so both map
+// to one Russian label instead of leaking GA4's raw wording onto the page.
+const AUDIENCE_UNKNOWN: Record<string, string> = { '(not set)': 'Не определено', unknown: 'Не определено' }
+const GENDER_LABEL: Record<string, string> = { male: 'Мужчины', female: 'Женщины', ...AUDIENCE_UNKNOWN }
+function audienceLabel(key: string): string {
+  return AUDIENCE_UNKNOWN[key] ?? key
 }
 
 function toISODate(d: Date): string {
@@ -412,6 +426,39 @@ export default function LeadsPage() {
                   график свой.
                 </p>
                 <TrafficTrendChart trend={data.trend} groupBy={data.range.group_by} />
+              </CollapsibleChart>
+            )}
+
+            {(data.audience.by_age.length > 0 || data.audience.by_gender.length > 0 || data.audience.by_city.length > 0) && (
+              <CollapsibleChart icon='👥' title='Аудитория сайта — кто заходит'>
+                <p className='mb-4 text-xs text-gray-400'>
+                  Оценка Google Analytics по всем визитам за период — не привязана к конкретным заявкам (в самой
+                  заявке возраст/пол/город пока не фиксируются, это срез по сайту в целом). Возраст и пол — модель
+                  Google по поведению визита, не то, что вводит посетитель.
+                </p>
+                <div className='grid grid-cols-1 gap-6 md:grid-cols-3'>
+                  <div>
+                    <div className='mb-2 text-xs font-medium text-gray-500'>Возраст</div>
+                    <HBarList
+                      rows={data.audience.by_age.map((r) => ({ key: audienceLabel(r.key), count: r.count }))}
+                      emptyLabel='Не определено'
+                    />
+                  </div>
+                  <div>
+                    <div className='mb-2 text-xs font-medium text-gray-500'>Пол</div>
+                    <HBarList
+                      rows={data.audience.by_gender.map((r) => ({ key: GENDER_LABEL[r.key] ?? r.key, count: r.count }))}
+                      emptyLabel='Не определено'
+                    />
+                  </div>
+                  <div>
+                    <div className='mb-2 text-xs font-medium text-gray-500'>Город (топ)</div>
+                    <HBarList
+                      rows={data.audience.by_city.map((r) => ({ key: audienceLabel(r.key), count: r.count }))}
+                      emptyLabel='Не определено'
+                    />
+                  </div>
+                </div>
               </CollapsibleChart>
             )}
 

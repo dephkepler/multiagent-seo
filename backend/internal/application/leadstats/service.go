@@ -73,6 +73,7 @@ func (s *Service) GetStats(ctx context.Context, from, to time.Time, groupBy stri
 	}
 
 	s.mergeTraffic(ctx, from, toInclusive, groupBy, &totals, trend)
+	audience := s.fetchAudience(ctx, from, toInclusive)
 
 	return domain.Stats{
 		From:       from,
@@ -87,7 +88,23 @@ func (s *Service) GetStats(ctx context.Context, from, to time.Time, groupBy stri
 		ByAdvocate: byAdvocate,
 		Funnel:     funnel,
 		ByWeekday:  byWeekday,
+		Audience:   audience,
 	}, nil
+}
+
+// fetchAudience mirrors mergeTraffic's degrade-on-failure behavior — a GA4
+// outage or missing config means an empty Audience (every array nil), never
+// a failed dashboard.
+func (s *Service) fetchAudience(ctx context.Context, from, to time.Time) domain.Audience {
+	if s.traffic == nil {
+		return domain.Audience{}
+	}
+	audience, err := s.traffic.Audience(ctx, from, to)
+	if err != nil {
+		s.log.WarnContext(ctx, "leadstats: ga4 audience failed, showing dashboard without it", "err", err)
+		return domain.Audience{}
+	}
+	return audience
 }
 
 // mergeTraffic folds GA4 sessions into the already-built trend buckets (by

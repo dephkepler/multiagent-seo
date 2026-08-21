@@ -143,6 +143,79 @@ func formatBucketKey(raw, groupBy string) (string, error) {
 	return t.Format("2006-01-02"), nil
 }
 
+// Audience reports visitor demographics/geography for the period —
+// userAgeBracket and userGender are GA4's modeled estimates (not
+// self-reported), city is coarse IP geolocation. All three dimensions come
+// back in one report as combinatorial rows (age × gender × city); rather
+// than make the caller unpack that, each is summed independently here, so
+// the result reads as three separate breakdowns.
+func (c *Client) Audience(ctx context.Context, from, to time.Time) (leadstats.Audience, error) {
+	if from.Before(ga4MinStartDate) {
+		from = ga4MinStartDate
+	}
+
+	resp, err := c.svc.Properties.RunReport("properties/"+c.propertyID, &analyticsdata.RunReportRequest{
+		DateRanges: []*analyticsdata.DateRange{
+			{StartDate: from.Format("2006-01-02"), EndDate: to.Format("2006-01-02")},
+		},
+		Dimensions: []*analyticsdata.Dimension{
+			{Name: "userAgeBracket"},
+			{Name: "userGender"},
+			{Name: "city"},
+		},
+		Metrics: []*analyticsdata.Metric{
+			{Name: "sessions"},
+		},
+	}).Context(ctx).Do()
+	if err != nil {
+		return leadstats.Audience{}, fmt.Errorf("ga4: audience report: %w", err)
+	}
+
+	byAge := map[string]int64{}
+	byGender := map[string]int64{}
+	byCity := map[string]int64{}
+	for _, row := range resp.Rows {
+		if len(row.DimensionValues) < 3 || len(row.MetricValues) < 1 {
+			continue
+		}
+		sessions, err := strconv.ParseInt(row.MetricValues[0].Value, 10, 64)
+		if err != nil {
+			return leadstats.Audience{}, fmt.Errorf("ga4: parse audience sessions %q: %w", row.MetricValues[0].Value, err)
+		}
+		byAge[row.DimensionValues[0].Value] += sessions
+		byGender[row.DimensionValues[1].Value] += sessions
+		byCity[row.DimensionValues[2].Value] += sessions
+	}
+
+	return leadstats.Audience{
+		ByAge:    countsDesc(byAge, 0),
+		ByGender: countsDesc(byGender, 0),
+		// The site draws visitors from far more cities than are useful to
+		// show at once — cap to the top 10 by sessions, long tail dropped.
+		ByCity: countsDesc(byCity, 10),
+	}, nil
+}
+
+// countsDesc turns a key->sessions map into Counts sorted by count
+// descending (ties broken by key, for a stable order across calls), capped
+// to the first limit rows — 0 means no cap.
+func countsDesc(counts map[string]int64, limit int) []leadstats.Count {
+	out := make([]leadstats.Count, 0, len(counts))
+	for k, v := range counts {
+		out = append(out, leadstats.Count{Key: k, Count: v})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Count != out[j].Count {
+			return out[i].Count > out[j].Count
+		}
+		return out[i].Key < out[j].Key
+	})
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out
+}
+
 // AdSpend reports what GA4 calls Google Ads cost per month, read on the same
 // service account that reads sessions — no Ads API credentials involved.
 //
