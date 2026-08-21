@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -161,5 +162,154 @@ func TestConsultationRepository_UpdateClient_DuplicatePhoneFails(t *testing.T) {
 	})
 	if !errors.Is(err, consultations.ErrPhoneInUse) {
 		t.Fatalf("UpdateClient with a phone already in use: err = %v, want errors.Is(err, consultations.ErrPhoneInUse)", err)
+	}
+}
+
+// One Telegram account is one human, and 000057 lets its chat id point at only
+// one client row. The same human gets a second row whenever they file another
+// intake under a different phone, so the binding has to move instead of
+// failing — otherwise their newest request is the one that cannot be recognised.
+func TestConsultationRepository_SetClientTelegram_MovesTheBinding(t *testing.T) {
+	ctx := context.Background()
+	pool := testsupport.NewTestDB(t, baseConnStr)
+	repo := postgres.NewConsultationRepository(pool, testEncryptionKey)
+
+	const chatID int64 = 770001
+	first, err := repo.CreateClient(ctx, "Перша заявка", "+380507770001", "", "")
+	if err != nil {
+		t.Fatalf("CreateClient(first): %v", err)
+	}
+	second, err := repo.CreateClient(ctx, "Друга заявка", "+380507770002", "", "")
+	if err != nil {
+		t.Fatalf("CreateClient(second): %v", err)
+	}
+
+	if err := repo.SetClientTelegram(ctx, first.ID, chatID, "@petro"); err != nil {
+		t.Fatalf("SetClientTelegram(first): %v", err)
+	}
+	if err := repo.SetClientTelegram(ctx, second.ID, chatID, "@petro"); err != nil {
+		t.Fatalf("SetClientTelegram(second): %v", err)
+	}
+
+	subjects := postgres.NewTelegramRepository(pool)
+	got, err := subjects.FindByTelegramID(ctx, chatID)
+	if err != nil {
+		t.Fatalf("FindByTelegramID: %v", err)
+	}
+	if got.ClientID != second.ID {
+		t.Errorf("chat resolves to %q, want the newest row %q", got.ClientID, second.ID)
+	}
+
+	var released *int64
+	if err := pool.QueryRow(ctx,
+		`SELECT telegram_chat_id FROM clients WHERE id = @id`,
+		pgx.NamedArgs{"id": first.ID}).Scan(&released); err != nil {
+		t.Fatalf("read the released row: %v", err)
+	}
+	if released != nil {
+		t.Errorf("first client still holds chat id %d", *released)
+	}
+}
+
+// The common case: the same client fills the form again with the same phone, so
+// CreateClient returns the row they already have and the binding is re-applied
+// to itself. The release step must not strip the id it is about to set.
+func TestConsultationRepository_SetClientTelegram_IsIdempotent(t *testing.T) {
+	ctx := context.Background()
+	pool := testsupport.NewTestDB(t, baseConnStr)
+	repo := postgres.NewConsultationRepository(pool, testEncryptionKey)
+
+	const chatID int64 = 770002
+	client, err := repo.CreateClient(ctx, "Повторна заявка", "+380507770003", "", "")
+	if err != nil {
+		t.Fatalf("CreateClient: %v", err)
+	}
+
+	for i := range 2 {
+		if err := repo.SetClientTelegram(ctx, client.ID, chatID, "@petro"); err != nil {
+			t.Fatalf("SetClientTelegram (call %d): %v", i+1, err)
+		}
+	}
+
+	subjects := postgres.NewTelegramRepository(pool)
+	got, err := subjects.FindByTelegramID(ctx, chatID)
+	if err != nil {
+		t.Fatalf("FindByTelegramID: %v", err)
+	}
+	if got.ClientID != client.ID {
+		t.Errorf("chat resolves to %q, want %q", got.ClientID, client.ID)
+	}
+}
+
+// A request holds a slot as firmly as a confirmed booking: otherwise two clients
+// pick the same hour while the firm is still looking at the first one. Anything
+// already resolved — completed, cancelled, no-show — holds nothing.
+func TestConsultationRepository_HeldSlots_CountsRequestsAndBookings(t *testing.T) {
+	ctx := context.Background()
+	pool := testsupport.NewTestDB(t, baseConnStr)
+	repo := postgres.NewConsultationRepository(pool, testEncryptionKey)
+
+	client, err := repo.CreateClient(ctx, "Клієнт зі слотами", "+380507770010", "", "")
+	if err != nil {
+		t.Fatalf("CreateClient: %v", err)
+	}
+
+	day := time.Date(2026, time.September, 7, 0, 0, 0, 0, time.UTC)
+	seed := func(hour int, status string) time.Time {
+		t.Helper()
+		at := day.Add(time.Duration(hour) * time.Hour)
+		if _, err := pool.Exec(ctx,
+			`INSERT INTO consultations (client_id, scheduled_at, price, status)
+				VALUES (@client, @at, 0, @status)`,
+			pgx.NamedArgs{"client": client.ID, "at": at, "status": status}); err != nil {
+			t.Fatalf("seed %s consultation: %v", status, err)
+		}
+		return at
+	}
+
+	requested := seed(10, consultations.StatusRequested)
+	scheduled := seed(11, consultations.StatusScheduled)
+	seed(12, consultations.StatusCompleted)
+	seed(13, consultations.StatusCancelled)
+	seed(14, consultations.StatusNoShow)
+	// Outside the window asked for, so it must not come back either.
+	seed(38, consultations.StatusScheduled)
+
+	held, err := repo.HeldSlots(ctx, day, day.AddDate(0, 0, 1))
+	if err != nil {
+		t.Fatalf("HeldSlots: %v", err)
+	}
+
+	want := map[int64]string{
+		requested.Unix(): "requested",
+		scheduled.Unix(): "scheduled",
+	}
+	if len(held) != len(want) {
+		t.Fatalf("got %d held slots, want %d (%v)", len(held), len(want), held)
+	}
+	for _, slot := range held {
+		if _, ok := want[slot.UTC().Unix()]; !ok {
+			t.Errorf("unexpected held slot %s", slot.UTC())
+		}
+	}
+}
+
+// The status is under a CHECK constraint, so a typo in the domain constant would
+// not be a wrong string in a column — it would be a failed insert.
+func TestConsultationRepository_HeldSlots_RequestedIsAnAcceptedStatus(t *testing.T) {
+	ctx := context.Background()
+	pool := testsupport.NewTestDB(t, baseConnStr)
+	repo := postgres.NewConsultationRepository(pool, testEncryptionKey)
+
+	client, err := repo.CreateClient(ctx, "Клієнт заявки", "+380507770011", "", "")
+	if err != nil {
+		t.Fatalf("CreateClient: %v", err)
+	}
+
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO consultations (client_id, scheduled_at, price, status)
+			VALUES (@client, now() + interval '3 days', 0, @status)`,
+		pgx.NamedArgs{"client": client.ID, "status": consultations.StatusRequested}); err != nil {
+		t.Fatalf("insert a requested consultation: %v", err)
 	}
 }

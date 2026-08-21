@@ -12,15 +12,22 @@ import (
 // clients can't share one).
 var ErrPhoneInUse = errors.New("consultations: phone already in use by another client")
 
-// Status values a consultation can hold. Every consultation starts
-// Scheduled (the DB column defaults to it) — staff move it to one of the
-// other three from the inline buttons the bot sends after booking.
+// Status values a consultation can hold. One staff books starts Scheduled
+// (the DB column defaults to it) — they move it to one of the last three from
+// the inline buttons the bot sends after booking. One a client books starts
+// Requested: the slot is theirs, the price and the confirmation are not.
 const (
+	StatusRequested = "requested"
 	StatusScheduled = "scheduled"
 	StatusCompleted = "completed"
 	StatusCancelled = "cancelled"
 	StatusNoShow    = "no_show"
 )
+
+// StatusesHoldingSlot are the statuses that take a slot off the picker. A
+// request holds one as firmly as a confirmed booking does, or two clients
+// choose the same hour while the firm looks at one of them.
+var StatusesHoldingSlot = []string{StatusRequested, StatusScheduled}
 
 type Consultation struct {
 	ID          string

@@ -149,6 +149,9 @@ type requestDraft struct {
 	date             string
 	time             string
 	telegramUsername string
+	// telegramName is the display form written to clients.telegram_name, kept
+	// on the draft because submitRequest no longer has the tgbotapi user.
+	telegramName string
 	// true only for the booking entry point — gates date/time prompts in continueRequestFlow
 	wantsBooking bool
 }
@@ -801,7 +804,11 @@ func (b *AdminBot) startRequestFlow(ctx context.Context, chatID, userID int64, u
 	if user != nil {
 		username = user.UserName
 	}
-	b.flows[userID] = &flow{step: "req_name", request: requestDraft{telegramUsername: username, wantsBooking: true}}
+	b.flows[userID] = &flow{step: "req_name", request: requestDraft{
+		telegramUsername: username,
+		telegramName:     telegramName(user),
+		wantsBooking:     true,
+	}}
 
 	msg := tgbotapi.NewMessage(chatID, "Введіть Ваше ПІБ:")
 	msg.ReplyMarkup = tgbotapi.NewRemoveKeyboard(false)
@@ -818,7 +825,10 @@ func (b *AdminBot) startIntakeFlow(ctx context.Context, chatID int64, user *tgbo
 		username = user.UserName
 		userID = user.ID
 	}
-	b.flows[userID] = &flow{step: "req_name", request: requestDraft{telegramUsername: username}}
+	b.flows[userID] = &flow{step: "req_name", request: requestDraft{
+		telegramUsername: username,
+		telegramName:     telegramName(user),
+	}}
 
 	msg := tgbotapi.NewMessage(chatID, "Вітаємо! Кілька коротких запитань — це допоможе адвокату швидше розібратися у Вашій справі.\n\nВведіть Ваше ПІБ:")
 	msg.ReplyMarkup = tgbotapi.NewRemoveKeyboard(false)
@@ -930,6 +940,16 @@ func (b *AdminBot) submitRequest(ctx context.Context, chatID int64, d requestDra
 		b.log.ErrorContext(ctx, "telegram: submit self-service request failed", "err", err)
 		b.send(ctx, chatID, "Не вдалося надіслати заявку, спробуйте ще раз пізніше.")
 		return
+	}
+
+	// Until this ran, the only way a client ever got bound to their chat was
+	// staff sending them a personal /start link — one client row in 659 had a
+	// chat id. The Mini App authenticates by that id alone, so a client who
+	// filled this very form in the bot could not be recognised afterwards.
+	if clientID != "" {
+		if err := b.store.SetClientTelegram(ctx, clientID, chatID, d.telegramName); err != nil {
+			b.log.WarnContext(ctx, "telegram: bind client to chat from intake failed", "client_id", clientID, "err", err)
+		}
 	}
 
 	if d.email != "" && clientID != "" {

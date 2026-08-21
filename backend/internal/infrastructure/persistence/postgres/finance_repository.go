@@ -746,9 +746,15 @@ func (r *FinanceRepository) DataGaps(ctx context.Context, from, to time.Time) ([
 			args: pgx.NamedArgs{"from": from, "to": to},
 		},
 		{
-			kind:  finance.GapFutureConsultations,
-			query: `SELECT count(*), coalesce(sum(price), 0) FROM consultations WHERE scheduled_at > now()`,
-			args:  pgx.NamedArgs{},
+			// 'requested' is excluded: a client picking a slot in the Mini App
+			// writes a future-dated consultation on purpose, and counting every
+			// one of those as a data gap turns this panel into a growing list of
+			// things that are working correctly. A future date the firm itself
+			// entered is still what this looks for.
+			kind: finance.GapFutureConsultations,
+			query: `SELECT count(*), coalesce(sum(price), 0) FROM consultations
+				WHERE scheduled_at > now() AND status <> 'requested'`,
+			args: pgx.NamedArgs{},
 		},
 		{
 			kind: finance.GapUnlinkedCases,

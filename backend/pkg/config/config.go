@@ -185,6 +185,21 @@ type FinanceConfig struct {
 	GenerateInterval time.Duration `env:"FINANCE_GENERATE_INTERVAL" envDefault:"6h"`
 }
 
+// ScheduleConfig is when the firm sees clients — the grid the Mini App's slot
+// picker generates from. Open and Close are offsets from midnight, so the
+// default is a 10:00–18:00 day of eight one-hour slots.
+type ScheduleConfig struct {
+	Timezone string        `env:"SCHEDULE_TIMEZONE" envDefault:"Europe/Kyiv"`
+	Open     time.Duration `env:"SCHEDULE_OPEN" envDefault:"10h"`
+	Close    time.Duration `env:"SCHEDULE_CLOSE" envDefault:"18h"`
+	Slot     time.Duration `env:"SCHEDULE_SLOT" envDefault:"1h"`
+	// LeadTime is the notice a client has to give before a slot they pick.
+	LeadTime time.Duration `env:"SCHEDULE_LEAD_TIME" envDefault:"2h"`
+	// Horizon is how far ahead slots are offered — 336h is 14 days, which Go
+	// durations cannot spell any shorter.
+	Horizon time.Duration `env:"SCHEDULE_HORIZON" envDefault:"336h"`
+}
+
 type MODXConfig struct {
 	DBHost     string `env:"MODX_DB_HOST"`
 	DBPort     string `env:"MODX_DB_PORT" envDefault:"3306"`
@@ -217,6 +232,7 @@ type Config struct {
 	LinkBuilding LinkBuildingConfig
 	EmailScrape  EmailScrapeConfig
 	Mail         MailConfig
+	Schedule     ScheduleConfig
 	Telegram     TelegramConfig
 	TelegramUser TelegramUserConfig
 	LeadsSheets  LeadsSheetsConfig

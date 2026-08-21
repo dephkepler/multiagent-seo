@@ -119,14 +119,40 @@ func (r *ConsultationRepository) CreateClient(ctx context.Context, name, phone, 
 	return c, nil
 }
 
+// SetClientTelegram moves the binding rather than adding one: a chat id is now
+// what a Mini App request is authenticated against, and 000057 made it unique,
+// so it can only ever point at one client.
+//
+// The same human ends up with two client rows whenever they file a second
+// intake under a different phone — clients are keyed by phone — and the chat
+// follows the row they just used, which is the case actually being opened. Two
+// statements in a transaction, not a data-modifying CTE: Postgres does not
+// order the sub-statements of a CTE against the main query, so releasing the
+// old row and taking the id could be attempted in either order and trip the
+// unique index.
 func (r *ConsultationRepository) SetClientTelegram(ctx context.Context, clientID string, chatID int64, telegramName string) error {
-	const q = `UPDATE clients SET telegram_chat_id = @chat_id, telegram_name = @telegram_name WHERE id = @id`
-	tag, err := r.db.Exec(ctx, q, pgx.NamedArgs{"chat_id": chatID, "telegram_name": telegramName, "id": clientID})
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("set telegram info for client %q: %w", clientID, err)
+	}
+	defer tx.Rollback(ctx)
+
+	const release = `UPDATE clients SET telegram_chat_id = NULL WHERE telegram_chat_id = @chat_id AND id <> @id`
+	if _, err := tx.Exec(ctx, release, pgx.NamedArgs{"chat_id": chatID, "id": clientID}); err != nil {
+		return fmt.Errorf("release telegram chat %d: %w", chatID, err)
+	}
+
+	const bind = `UPDATE clients SET telegram_chat_id = @chat_id, telegram_name = @telegram_name WHERE id = @id`
+	tag, err := tx.Exec(ctx, bind, pgx.NamedArgs{"chat_id": chatID, "telegram_name": telegramName, "id": clientID})
 	if err != nil {
 		return fmt.Errorf("set telegram info for client %q: %w", clientID, err)
 	}
 	if tag.RowsAffected() == 0 {
 		return fmt.Errorf("set telegram info: no client with id %q", clientID)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("set telegram info for client %q: commit: %w", clientID, err)
 	}
 	return nil
 }
@@ -481,4 +507,37 @@ func (r *ConsultationRepository) SetStaffLanguage(ctx context.Context, telegramU
 		return fmt.Errorf("set staff language for %d: %w", telegramUserID, err)
 	}
 	return nil
+}
+
+// HeldSlots reads the starts a client may not pick. Bounded by the picker's own
+// window rather than "everything upcoming": the query runs on every launch of
+// the Mini App, and the index from 000058 covers exactly this shape.
+func (r *ConsultationRepository) HeldSlots(ctx context.Context, from, to time.Time) ([]time.Time, error) {
+	const q = `
+		SELECT scheduled_at
+		FROM consultations
+		WHERE status = ANY(@statuses) AND scheduled_at >= @from AND scheduled_at < @to`
+
+	rows, err := r.db.Query(ctx, q, pgx.NamedArgs{
+		"statuses": consultations.StatusesHoldingSlot,
+		"from":     from,
+		"to":       to,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("held slots: %w", err)
+	}
+	defer rows.Close()
+
+	var held []time.Time
+	for rows.Next() {
+		var slot time.Time
+		if err := rows.Scan(&slot); err != nil {
+			return nil, fmt.Errorf("held slots: scan: %w", err)
+		}
+		held = append(held, slot)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("held slots: %w", err)
+	}
+	return held, nil
 }
