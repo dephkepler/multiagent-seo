@@ -75,6 +75,7 @@ export default function ClientsPage() {
   const [tagFilter, setTagFilter] = useState<string>('all')
   const [page, setPage] = useState(1)
   const [sortKey, setSortKey] = useState<SortKey>('activity')
+  const [filtersOpen, setFiltersOpen] = useState(false)
   const [manageTagsOpen, setManageTagsOpen] = useState(false)
 
   useEffect(() => {
@@ -164,6 +165,8 @@ export default function ClientsPage() {
     onError: (e: Error) => toast.error(e.message),
   })
 
+  const activeFilterCount = (segmentFilter !== 'all' ? 1 : 0) + (tagFilter !== 'all' ? 1 : 0)
+
   const items = clients.data?.items ?? []
   const total = clients.data?.total ?? 0
   const counts = clients.data?.segment_counts ?? {}
@@ -185,81 +188,95 @@ export default function ClientsPage() {
   return (
     <div className='space-y-6'>
       <Card>
-        <SectionHeader
-          title='Клиенты'
-          as='h1'
-          action={
-            <Button type='button' variant='secondary' size='sm' onClick={() => setManageTagsOpen((v) => !v)}>
-              ⚙ Управление тегами
-            </Button>
-          }
-        />
+        <SectionHeader title='Клиенты' as='h1' />
         <p className='-mt-2 mb-4 text-xs text-gray-400'>
           Снимок по всей истории, без периода — не путать с фильтром дат на «Заявках»
         </p>
 
-        {manageTagsOpen && (
-          <ManageTagsPanel
-            categories={categories}
-            defsByCategory={defsByCategory}
-            onCreate={(label, category) => createTagDef.mutate({ label, category })}
-            onRenameLabel={(label, newLabel) => updateTagDef.mutate({ label, newLabel })}
-            onMoveCategory={(label, newCategory) => updateTagDef.mutate({ label, newCategory })}
-            onDelete={(label) => deleteTagDef.mutate(label)}
-          />
-        )}
-
-        <div className='mb-3 flex flex-wrap gap-2'>
-          <SegmentPill active={segmentFilter === 'all'} onClick={() => onSegmentFilterChange('all')}>
-            Все ({totalAll})
-          </SegmentPill>
-          {SEGMENT_ORDER.map((s) => (
-            <SegmentPill
-              key={s}
-              active={segmentFilter === s}
-              onClick={() => onSegmentFilterChange(s)}
-              colorClass={SEGMENT_COLOR[s]}
-            >
-              {SEGMENT_LABEL[s]} ({counts[s] || 0})
-            </SegmentPill>
-          ))}
-        </div>
-
-        {defs.length > 0 && (
-          <div className='mb-4 flex flex-wrap items-center gap-x-4 gap-y-1.5 border-t border-gray-100 pt-3'>
-            <TagFilterPill active={tagFilter === 'all'} onClick={() => onTagFilterChange('all')}>
-              Все теги
-            </TagFilterPill>
-            {categories.map((category) => (
-              <div key={category} className='flex flex-wrap items-center gap-1.5'>
-                <span className='text-[11px] whitespace-nowrap text-gray-400'>{category}:</span>
-                {(defsByCategory.get(category) ?? []).map((d) => (
-                  <TagFilterPill
-                    key={d.label}
-                    active={tagFilter === d.label}
-                    onClick={() => onTagFilterChange(d.label)}
-                    colorClass={categoryColorClass(category, categories)}
-                  >
-                    {d.label}
-                  </TagFilterPill>
-                ))}
-              </div>
-            ))}
-          </div>
-        )}
-
-        <div className='mb-4 flex flex-wrap items-center justify-between gap-3'>
+        <div className='mb-3 flex flex-wrap items-center gap-2'>
           <Input
             value={query}
             onChange={(e) => onQueryChange(e.target.value)}
             placeholder='Поиск по имени или телефону…'
             className='w-full sm:max-w-sm'
           />
-          <span className='text-xs text-gray-400'>
-            Сегмент обычно считается сам — выберите вручную в таблице, чтобы закрепить свой (например клиент ушёл к
-            другому адвокату)
-          </span>
+          <Button type='button' variant='secondary' size='sm' onClick={() => setFiltersOpen((v) => !v)}>
+            Фильтры{activeFilterCount > 0 ? ` (${activeFilterCount})` : ''} {filtersOpen ? '▴' : '▾'}
+          </Button>
         </div>
+
+        {filtersOpen && (
+          <div className='mb-4 space-y-3 rounded-md border border-gray-200 bg-gray-50/60 p-3'>
+            <div>
+              <div className='mb-1.5 text-[11px] font-medium text-gray-500'>Сегмент</div>
+              <div className='flex flex-wrap gap-2'>
+                <SegmentPill active={segmentFilter === 'all'} onClick={() => onSegmentFilterChange('all')}>
+                  Все ({totalAll})
+                </SegmentPill>
+                {SEGMENT_ORDER.map((s) => (
+                  <SegmentPill
+                    key={s}
+                    active={segmentFilter === s}
+                    onClick={() => onSegmentFilterChange(s)}
+                    colorClass={SEGMENT_COLOR[s]}
+                  >
+                    {SEGMENT_LABEL[s]} ({counts[s] || 0})
+                  </SegmentPill>
+                ))}
+              </div>
+              <p className='mt-1.5 text-[11px] text-gray-400'>
+                Считается сам — выберите вручную в таблице, чтобы закрепить свой (например клиент ушёл к другому
+                адвокату)
+              </p>
+            </div>
+
+            {defs.length > 0 && (
+              <div className='border-t border-gray-200 pt-2.5'>
+                <div className='mb-1.5 text-[11px] font-medium text-gray-500'>Теги</div>
+                <div className='flex flex-wrap items-center gap-x-4 gap-y-1.5'>
+                  <TagFilterPill active={tagFilter === 'all'} onClick={() => onTagFilterChange('all')}>
+                    Все теги
+                  </TagFilterPill>
+                  {categories.map((category) => (
+                    <div key={category} className='flex flex-wrap items-center gap-1.5'>
+                      <span className='text-[11px] whitespace-nowrap text-gray-400'>{category}:</span>
+                      {(defsByCategory.get(category) ?? []).map((d) => (
+                        <TagFilterPill
+                          key={d.label}
+                          active={tagFilter === d.label}
+                          onClick={() => onTagFilterChange(d.label)}
+                          colorClass={categoryColorClass(category, categories)}
+                        >
+                          {d.label}
+                        </TagFilterPill>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className='border-t border-gray-200 pt-2.5'>
+              <button
+                type='button'
+                onClick={() => setManageTagsOpen((v) => !v)}
+                className='text-[11px] font-medium text-gray-500 hover:text-gray-700 hover:underline'
+              >
+                ⚙ Управление тегами {manageTagsOpen ? '▴' : '▾'}
+              </button>
+              {manageTagsOpen && (
+                <ManageTagsPanel
+                  categories={categories}
+                  defsByCategory={defsByCategory}
+                  onCreate={(label, category) => createTagDef.mutate({ label, category })}
+                  onRenameLabel={(label, newLabel) => updateTagDef.mutate({ label, newLabel })}
+                  onMoveCategory={(label, newCategory) => updateTagDef.mutate({ label, newCategory })}
+                  onDelete={(label) => deleteTagDef.mutate(label)}
+                />
+              )}
+            </div>
+          </div>
+        )}
 
         <div className='overflow-x-auto'>
           <table className='w-full text-sm'>
@@ -456,7 +473,7 @@ function TagsCell({
         <span
           key={t}
           className={cx(
-            'inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[11px] font-medium',
+            'inline-flex items-center gap-0.5 rounded border px-1 py-px text-[10px] font-medium',
             categoryColorClass(labelToCategory.get(t) ?? '', categories)
           )}
         >
@@ -466,7 +483,7 @@ function TagsCell({
             disabled={pending}
             onClick={() => onRemove(t)}
             aria-label={`Убрать тег ${t}`}
-            className='px-1 leading-none opacity-60 hover:text-rose-600 hover:opacity-100 disabled:cursor-wait'
+            className='px-0.5 leading-none opacity-60 hover:text-rose-600 hover:opacity-100 disabled:cursor-wait'
           >
             ×
           </button>
@@ -481,7 +498,7 @@ function TagsCell({
               if (e.target.value) onAdd(e.target.value)
             }}
             aria-label='Добавить тег'
-            className='min-h-[30px] cursor-pointer appearance-none rounded-full border border-gray-200 bg-gray-50 py-1.5 pr-4 pl-2 text-[11px] font-medium text-gray-500 outline-none hover:bg-gray-100 disabled:cursor-wait'
+            className='min-h-[22px] cursor-pointer appearance-none rounded-full border border-gray-200 bg-gray-50 py-px pr-3.5 pl-1.5 text-[10px] font-medium text-gray-500 outline-none hover:bg-gray-100 disabled:cursor-wait'
           >
             <option value=''>+ тег</option>
             {categories.map((category) => {
@@ -498,7 +515,7 @@ function TagsCell({
               )
             })}
           </select>
-          <span className='pointer-events-none absolute top-1/2 right-1 -translate-y-1/2 text-[9px] text-gray-400'>▾</span>
+          <span className='pointer-events-none absolute top-1/2 right-0.5 -translate-y-1/2 text-[8px] text-gray-400'>▾</span>
         </div>
       )}
     </div>
@@ -547,7 +564,7 @@ function ManageTagsPanel({
   }
 
   return (
-    <div className='mb-4 rounded-md border border-gray-200 bg-gray-50/60 p-3'>
+    <div className='mt-2 rounded-md border border-gray-200 bg-white p-3'>
       <div className='mb-3 text-xs font-medium text-gray-500'>
         Словарь тегов, по категориям — переименование или смена категории применяется сразу ко всем клиентам с этим
         тегом

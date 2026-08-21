@@ -682,7 +682,7 @@ function TagsEditor({
         <span
           key={t}
           className={cx(
-            'inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[11px] font-medium',
+            'inline-flex items-center gap-0.5 rounded border px-1 py-px text-[10px] font-medium',
             categoryColorClass(labelToCategory.get(t) ?? '', categories)
           )}
         >
@@ -692,7 +692,7 @@ function TagsEditor({
             disabled={pending}
             onClick={() => onRemove(t)}
             aria-label={`Убрать тег ${t}`}
-            className='leading-none opacity-60 hover:text-rose-600 hover:opacity-100 disabled:cursor-wait'
+            className='px-0.5 leading-none opacity-60 hover:text-rose-600 hover:opacity-100 disabled:cursor-wait'
           >
             ×
           </button>
@@ -707,7 +707,7 @@ function TagsEditor({
               if (e.target.value) onAdd(e.target.value)
             }}
             aria-label='Добавить тег'
-            className='min-h-[30px] cursor-pointer appearance-none rounded-full border border-gray-200 bg-gray-50 py-1.5 pr-4 pl-2 text-[11px] font-medium text-gray-500 outline-none hover:bg-gray-100 disabled:cursor-wait'
+            className='min-h-[22px] cursor-pointer appearance-none rounded-full border border-gray-200 bg-gray-50 py-px pr-3.5 pl-1.5 text-[10px] font-medium text-gray-500 outline-none hover:bg-gray-100 disabled:cursor-wait'
           >
             <option value=''>+ тег</option>
             {categories.map((category) => {
@@ -724,7 +724,7 @@ function TagsEditor({
               )
             })}
           </select>
-          <span className='pointer-events-none absolute top-1/2 right-1 -translate-y-1/2 text-[9px] text-gray-400'>▾</span>
+          <span className='pointer-events-none absolute top-1/2 right-0.5 -translate-y-1/2 text-[8px] text-gray-400'>▾</span>
         </div>
       )}
     </div>
