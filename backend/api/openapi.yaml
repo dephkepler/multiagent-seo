@@ -1650,6 +1650,69 @@ paths:
         "403":
           $ref: "#/components/responses/Forbidden"
 
+  /client/slots:
+    get:
+      operationId: listClientSlots
+      security:
+        - bearerAuth: [ client, guest ]
+      tags: [ Client ]
+      summary: The hours a client may pick, already filtered by the working week, the notice period and what is taken
+      responses:
+        "200":
+          description: Free slots, earliest first
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClientSlotList"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /client/requests:
+    post:
+      operationId: submitClientRequest
+      security:
+        - bearerAuth: [ client, guest ]
+      tags: [ Client ]
+      summary: A client's own request — their details plus optionally the hour they picked; creates the client if the CRM has never seen them
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ClientRequest"
+      responses:
+        "201":
+          description: Recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClientRequestResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /client/me:
+    get:
+      operationId: getClientProfile
+      security:
+        - bearerAuth: [ client ]
+      tags: [ Client ]
+      summary: The caller's own record — their contact details, whether reminders can reach them, and their consultations
+      responses:
+        "200":
+          description: Own record
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClientProfile"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
 
 components:
   securitySchemes:
@@ -1691,6 +1754,111 @@ components:
             $ref: "#/components/schemas/ErrorResponse"
 
   schemas:
+    ClientSlotList:
+      type: object
+      required: [ slots ]
+      properties:
+        slots:
+          type: array
+          items:
+            type: string
+            format: date-time
+          x-oapi-codegen-extra-tags:
+            json: slots
+
+    ClientRequest:
+      type: object
+      required: [ name, phone ]
+      properties:
+        name:
+          type: string
+          x-oapi-codegen-extra-tags:
+            json: name
+        phone:
+          type: string
+          x-oapi-codegen-extra-tags:
+            json: phone
+        email:
+          type: string
+          x-oapi-codegen-extra-tags:
+            json: email,omitempty
+        category:
+          type: string
+          x-oapi-codegen-extra-tags:
+            json: category,omitempty
+        question:
+          type: string
+          x-oapi-codegen-extra-tags:
+            json: question,omitempty
+        slot:
+          type: string
+          format: date-time
+          description: The hour picked. Omitted when the client only wants a call back.
+          x-oapi-codegen-extra-tags:
+            json: slot,omitempty
+
+    ClientRequestResult:
+      type: object
+      required: [ client_id ]
+      properties:
+        client_id:
+          type: string
+          format: uuid
+          x-oapi-codegen-extra-tags:
+            json: client_id
+        consultation:
+          $ref: "#/components/schemas/PortalConsultation"
+
+    PortalConsultation:
+      type: object
+      required: [ id, scheduled_at, status ]
+      properties:
+        id:
+          type: string
+          format: uuid
+          x-oapi-codegen-extra-tags:
+            json: id
+        scheduled_at:
+          type: string
+          format: date-time
+          x-oapi-codegen-extra-tags:
+            json: scheduled_at
+        status:
+          type: string
+          description: requested until the firm confirms it, then scheduled
+          x-oapi-codegen-extra-tags:
+            json: status
+        price:
+          type: number
+          format: double
+          description: Zero until the firm sets it
+          x-oapi-codegen-extra-tags:
+            json: price
+
+    ClientProfile:
+      type: object
+      required: [ name, notifications_on, consultations ]
+      properties:
+        name:
+          type: string
+          x-oapi-codegen-extra-tags:
+            json: name
+        phone:
+          type: string
+          x-oapi-codegen-extra-tags:
+            json: phone,omitempty
+        notifications_on:
+          type: boolean
+          description: True when the chat is bound, which is what reminders are sent to
+          x-oapi-codegen-extra-tags:
+            json: notifications_on
+        consultations:
+          type: array
+          items:
+            $ref: "#/components/schemas/PortalConsultation"
+          x-oapi-codegen-extra-tags:
+            json: consultations
+
     GenerateBatchRequest:
       type: object
       required: [ count, site_id ]
@@ -2690,7 +2858,9 @@ components:
           type: number
         status:
           type: string
-          enum: [ scheduled, completed, cancelled, no_show ]
+          # requested is a client's own booking, waiting for the firm to confirm
+          # it and set a price — see migration 000058.
+          enum: [ requested, scheduled, completed, cancelled, no_show ]
         case_note:
           type: string
 

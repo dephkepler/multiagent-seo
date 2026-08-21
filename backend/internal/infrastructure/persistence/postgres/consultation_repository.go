@@ -25,9 +25,11 @@ func NewConsultationRepository(db *pgxpool.Pool, encryptionKey string) *Consulta
 }
 
 func (r *ConsultationRepository) FindClient(ctx context.Context, clientID string) (consultations.Client, error) {
-	const q = `SELECT id, name, coalesce(phone, ''), coalesce(telegram_name, '') FROM clients WHERE id = @id`
+	const q = `SELECT id, name, coalesce(phone, ''), coalesce(telegram_name, ''), coalesce(telegram_chat_id, 0)
+		FROM clients WHERE id = @id`
 	var c consultations.Client
-	err := r.db.QueryRow(ctx, q, pgx.NamedArgs{"id": clientID}).Scan(&c.ID, &c.Name, &c.Phone, &c.TelegramName)
+	err := r.db.QueryRow(ctx, q, pgx.NamedArgs{"id": clientID}).
+		Scan(&c.ID, &c.Name, &c.Phone, &c.TelegramName, &c.TelegramChatID)
 	if err != nil {
 		return consultations.Client{}, fmt.Errorf("find client %q: %w", clientID, err)
 	}
@@ -540,4 +542,68 @@ func (r *ConsultationRepository) HeldSlots(ctx context.Context, from, to time.Ti
 		return nil, fmt.Errorf("held slots: %w", err)
 	}
 	return held, nil
+}
+
+// HoldSlot books the slot a client picked, as a request rather than a booking:
+// the price and the confirmation stay with the firm.
+//
+// The NOT EXISTS is not decoration. Between the picker drawing a grid and the
+// client tapping a slot there is a whole round trip, and this closes that
+// window down to the width of one statement. It is not a substitute for a
+// unique index — two transactions in READ COMMITTED can still both find the
+// slot empty — but making the index unique would also forbid the firm from
+// ever double-booking an hour deliberately, which is a decision about how they
+// work rather than a bug to patch here.
+func (r *ConsultationRepository) HoldSlot(ctx context.Context, clientID string, at time.Time, createdBy string) (consultations.Consultation, error) {
+	const q = `
+		INSERT INTO consultations (client_id, scheduled_at, price, status, created_by)
+		SELECT @client_id, @at, 0, @requested, @created_by
+		WHERE NOT EXISTS (
+			SELECT 1 FROM consultations
+			WHERE scheduled_at = @at AND status = ANY(@statuses)
+		)
+		RETURNING id, client_id, scheduled_at, price, case_note, created_by, status`
+
+	var c consultations.Consultation
+	err := r.db.QueryRow(ctx, q, pgx.NamedArgs{
+		"client_id":  clientID,
+		"at":         at,
+		"requested":  consultations.StatusRequested,
+		"created_by": createdBy,
+		"statuses":   consultations.StatusesHoldingSlot,
+	}).Scan(&c.ID, &c.ClientID, &c.ScheduledAt, &c.Price, &c.CaseNote, &c.CreatedBy, &c.Status)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return consultations.Consultation{}, consultations.ErrSlotTaken
+	}
+	if err != nil {
+		return consultations.Consultation{}, fmt.Errorf("hold slot for client %q: %w", clientID, err)
+	}
+	return c, nil
+}
+
+// ConsultationsOf lists a client's own consultations, newest appointment first.
+func (r *ConsultationRepository) ConsultationsOf(ctx context.Context, clientID string) ([]consultations.Consultation, error) {
+	const q = `SELECT id, client_id, scheduled_at, price, case_note, created_by, status
+		FROM consultations
+		WHERE client_id = @client_id
+		ORDER BY scheduled_at DESC`
+
+	rows, err := r.db.Query(ctx, q, pgx.NamedArgs{"client_id": clientID})
+	if err != nil {
+		return nil, fmt.Errorf("consultations of client %q: %w", clientID, err)
+	}
+	defer rows.Close()
+
+	var out []consultations.Consultation
+	for rows.Next() {
+		var c consultations.Consultation
+		if err := rows.Scan(&c.ID, &c.ClientID, &c.ScheduledAt, &c.Price, &c.CaseNote, &c.CreatedBy, &c.Status); err != nil {
+			return nil, fmt.Errorf("consultations of client %q: scan: %w", clientID, err)
+		}
+		out = append(out, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("consultations of client %q: %w", clientID, err)
+	}
+	return out, nil
 }

@@ -186,3 +186,31 @@ func TestFreeSlotsRefuseAnUnusableSchedule(t *testing.T) {
 		})
 	}
 }
+
+func TestOffersAcceptsOnlyASlotOnTheGrid(t *testing.T) {
+	location := kyiv(t)
+	now := time.Date(2026, time.August, 24, 7, 0, 0, 0, location)
+	schedule := workingWeek(location)
+	held := []time.Time{time.Date(2026, time.August, 24, 12, 0, 0, 0, location)}
+
+	for name, tc := range map[string]struct {
+		start time.Time
+		want  bool
+	}{
+		"a free slot":         {time.Date(2026, time.August, 24, 11, 0, 0, 0, location), true},
+		"the same in UTC":     {time.Date(2026, time.August, 24, 11, 0, 0, 0, location).UTC(), true},
+		"already held":        {held[0], false},
+		"before opening":      {time.Date(2026, time.August, 24, 9, 0, 0, 0, location), false},
+		"after closing":       {time.Date(2026, time.August, 24, 18, 0, 0, 0, location), false},
+		"off the half hour":   {time.Date(2026, time.August, 24, 11, 30, 0, 0, location), false},
+		"on a Sunday":         {time.Date(2026, time.August, 30, 11, 0, 0, 0, location), false},
+		"inside the leadtime": {time.Date(2026, time.August, 24, 8, 0, 0, 0, location), false},
+		"past the horizon":    {time.Date(2026, time.October, 5, 11, 0, 0, 0, location), false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := schedule.Offers(now, tc.start, held); got != tc.want {
+				t.Errorf("Offers(%s) = %v, want %v", tc.start, got, tc.want)
+			}
+		})
+	}
+}

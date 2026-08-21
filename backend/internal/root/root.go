@@ -85,6 +85,7 @@ func Run(ctx context.Context, cfg config.Config) error {
 		postgres.NewConsultationRepository(pool, cfg.Clients.EncryptionKey),
 	)
 	vaultSvc := appvault.NewService(postgres.NewVaultRepository(pool))
+	clientPortalSvc := buildClientPortal(cfg, slogLog, pool, leadsSvc)
 	advocateViewSvc := appadvocateview.NewService(postgres.NewAdvocateViewRepository(pool))
 
 	financeRepo := postgres.NewFinanceRepository(pool)
@@ -113,6 +114,7 @@ func Run(ctx context.Context, cfg config.Config) error {
 		Vault:          handlers.NewVaultHandler(vaultSvc),
 		Finance:        handlers.NewFinanceHandler(financeSvc),
 		My:             handlers.NewMyHandler(advocateViewSvc),
+		Client:         handlers.NewClientHandler(clientPortalSvc),
 	})
 
 	schedule(ctx, cfg.Finance.GenerateInterval, financeSvc.GenerateDueExpenses)
