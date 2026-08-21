@@ -10,17 +10,9 @@ import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { SectionHeader } from '@/components/ui/section-header'
+import { TagChips, type TagDef } from '@/components/tags/tag-chips'
 import { cx } from '@/lib/cx'
-import {
-  categoryColorClass,
-  SEGMENT_COLOR,
-  SEGMENT_LABEL,
-  SEGMENT_ORDER,
-  type Segment,
-  sortTagsByCategory,
-  TAG_BADGE_VARIANT,
-  TAG_LABEL,
-} from '@/lib/client-tags'
+import { categoryColorClass, SEGMENT_COLOR, SEGMENT_LABEL, SEGMENT_ORDER, type Segment } from '@/lib/client-tags'
 
 interface ClientSegment {
   client_id: string
@@ -43,11 +35,6 @@ interface ClientList {
   segment_counts: Partial<Record<Segment, number>>
 }
 
-interface TagDef {
-  label: string
-  category: string
-  created_at: string
-}
 interface TagDefList {
   items: TagDef[]
 }
@@ -331,7 +318,7 @@ export default function ClientsPage() {
                     </div>
 
                     <div className='mt-2'>
-                      <TagsCell
+                      <TagChips
                         tags={c.tags}
                         manualTags={c.manual_tags}
                         categories={categories}
@@ -339,6 +326,7 @@ export default function ClientsPage() {
                         pending={addTag.isPending || removeTag.isPending}
                         onAdd={(tag) => addTag.mutate({ id: c.client_id, tag })}
                         onRemove={(tag) => removeTag.mutate({ id: c.client_id, tag })}
+                        maxVisible={3}
                       />
                     </div>
 
@@ -429,7 +417,7 @@ export default function ClientsPage() {
                           </div>
                         </td>
                         <td className='py-2 pr-4'>
-                          <TagsCell
+                          <TagChips
                             tags={c.tags}
                             manualTags={c.manual_tags}
                             categories={categories}
@@ -437,6 +425,8 @@ export default function ClientsPage() {
                             pending={addTag.isPending || removeTag.isPending}
                             onAdd={(tag) => addTag.mutate({ id: c.client_id, tag })}
                             onRemove={(tag) => removeTag.mutate({ id: c.client_id, tag })}
+                            maxVisible={3}
+                            className='max-w-[220px]'
                           />
                         </td>
                         <td className='py-2 pr-4 text-gray-500'>{c.case_count || '—'}</td>
@@ -519,138 +509,8 @@ function SortableHeader({
   )
 }
 
-// A client can carry the 4 auto tags plus any number of manual ones — left
-// unbounded, that row grows tall and the chips land in whatever order the
-// API returned them, reading as a loose, unsorted pile. VISIBLE_TAGS caps
-// what's shown before a "+N" toggle takes over, and sortTagsByCategory (see
-// lib/client-tags) clusters same-colored chips together first.
-const VISIBLE_TAGS = 3
-
-// TagsCell renders the auto-computed tags read-only, every manual tag as a
-// chip colored by its category (grouped together, not alphabetical-API
-// order), capped to VISIBLE_TAGS with a "+N" expand toggle, and a compact
-// dropdown (native <select> with one <optgroup> per category — keeps the
-// picker inside the browser's own floating layer, so it can't be clipped by
-// the table's horizontal scroll container the way a hand-built popover
-// could) to add one more. The dropdown only ever offers labels from the
-// curated vocabulary, never free text — see ManageTagsPanel for managing
-// the list itself.
-function TagsCell({
-  tags,
-  manualTags,
-  categories,
-  defsByCategory,
-  onAdd,
-  onRemove,
-  pending,
-}: {
-  tags: string[]
-  manualTags: string[]
-  categories: string[]
-  defsByCategory: Map<string, TagDef[]>
-  onAdd: (tag: string) => void
-  onRemove: (tag: string) => void
-  pending: boolean
-}) {
-  const [expanded, setExpanded] = useState(false)
-  const labelToCategory = new Map<string, string>()
-  for (const [category, defs] of defsByCategory) {
-    for (const d of defs) labelToCategory.set(d.label, category)
-  }
-  const hasRemaining = categories.some((category) =>
-    (defsByCategory.get(category) ?? []).some((d) => !manualTags.includes(d.label))
-  )
-  const sortedManual = sortTagsByCategory(manualTags, categories, labelToCategory)
-
-  type Chip = { kind: 'auto' | 'manual'; value: string }
-  const chips: Chip[] = [
-    ...tags.map((t): Chip => ({ kind: 'auto', value: t })),
-    ...sortedManual.map((t): Chip => ({ kind: 'manual', value: t })),
-  ]
-  const overflow = chips.length - VISIBLE_TAGS
-  const visibleChips = expanded ? chips : chips.slice(0, VISIBLE_TAGS)
-
-  return (
-    <div className='flex max-w-[220px] flex-wrap items-center gap-1'>
-      {visibleChips.map((chip) =>
-        chip.kind === 'auto' ? (
-          <Badge key={`auto-${chip.value}`} variant={TAG_BADGE_VARIANT[chip.value] || 'neutral'}>
-            {TAG_LABEL[chip.value] || chip.value}
-          </Badge>
-        ) : (
-          <span
-            key={`manual-${chip.value}`}
-            className={cx(
-              'inline-flex items-center gap-0.5 rounded border px-1 py-px text-[10px] font-medium',
-              categoryColorClass(labelToCategory.get(chip.value) ?? '', categories)
-            )}
-          >
-            {chip.value}
-            <button
-              type='button'
-              disabled={pending}
-              onClick={() => onRemove(chip.value)}
-              aria-label={`Убрать тег ${chip.value}`}
-              className='px-0.5 leading-none opacity-60 hover:text-rose-600 hover:opacity-100 disabled:cursor-wait'
-            >
-              ×
-            </button>
-          </span>
-        )
-      )}
-      {!expanded && overflow > 0 && (
-        <button
-          type='button'
-          onClick={() => setExpanded(true)}
-          className='text-[10px] font-medium text-gray-400 hover:text-gray-600 hover:underline'
-        >
-          +{overflow}
-        </button>
-      )}
-      {expanded && chips.length > VISIBLE_TAGS && (
-        <button
-          type='button'
-          onClick={() => setExpanded(false)}
-          className='text-[10px] text-gray-400 hover:text-gray-600 hover:underline'
-        >
-          свернуть
-        </button>
-      )}
-      {hasRemaining && (
-        <div className='relative'>
-          <select
-            value=''
-            disabled={pending}
-            onChange={(e) => {
-              if (e.target.value) onAdd(e.target.value)
-            }}
-            aria-label='Добавить тег'
-            title='Добавить тег'
-            className='h-[22px] w-[22px] cursor-pointer appearance-none rounded-full border border-gray-200 bg-gray-50 text-center text-[11px] leading-[20px] font-medium text-gray-400 outline-none hover:bg-gray-100 disabled:cursor-wait'
-          >
-            <option value=''>+</option>
-            {categories.map((category) => {
-              const remaining = (defsByCategory.get(category) ?? []).filter((d) => !manualTags.includes(d.label))
-              if (remaining.length === 0) return null
-              return (
-                <optgroup key={category} label={category}>
-                  {remaining.map((d) => (
-                    <option key={d.label} value={d.label}>
-                      {d.label}
-                    </option>
-                  ))}
-                </optgroup>
-              )
-            })}
-          </select>
-        </div>
-      )}
-    </div>
-  )
-}
-
 // ManageTagsPanel is the vocabulary's own CRUD, grouped by category —
-// separate from TagsCell, which only ever picks from it. Renaming a label
+// separate from TagChips, which only ever picks from it. Renaming a label
 // cascades to every client carrying it (see backend
 // clientsegments.UpdateTagDef); deleting one removes it from every client
 // too.
@@ -723,7 +583,7 @@ function ManageTagsPanel({
                   <span
                     key={d.label}
                     className={cx(
-                      'inline-flex items-center gap-1.5 rounded border px-1.5 py-0.5 text-xs',
+                      'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs',
                       categoryColorClass(category, categories)
                     )}
                   >

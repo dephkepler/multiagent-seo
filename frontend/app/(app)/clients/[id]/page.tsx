@@ -13,17 +13,9 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { SectionHeader } from '@/components/ui/section-header'
 import { StatTile } from '@/components/ui/stat-tile'
+import { TagChips, type TagDef } from '@/components/tags/tag-chips'
 import { cx } from '@/lib/cx'
-import {
-  categoryColorClass,
-  SEGMENT_COLOR,
-  SEGMENT_LABEL,
-  SEGMENT_ORDER,
-  type Segment,
-  sortTagsByCategory,
-  TAG_BADGE_VARIANT,
-  TAG_LABEL,
-} from '@/lib/client-tags'
+import { SEGMENT_COLOR, SEGMENT_LABEL, SEGMENT_ORDER, type Segment } from '@/lib/client-tags'
 
 type Gender = '' | 'male' | 'female'
 type ClientType = 'individual' | 'legal_entity'
@@ -90,12 +82,6 @@ interface ClientSegment {
   overridden: boolean
   tags: string[]
   manual_tags: string[]
-}
-
-interface TagDef {
-  label: string
-  category: string
-  created_at: string
 }
 
 const GENDER_LABEL: Record<Gender, string> = { '': 'Не вказано', male: 'Чоловіча', female: 'Жіноча' }
@@ -367,44 +353,43 @@ export default function ClientDetailPage() {
       <Card>
         <SectionHeader title='Обзор' />
 
-        {/* Identity/classification — editable controls, so they get real
-            width instead of being squeezed into a numeric-tile-sized column
-            (that's what made the tags cell show nothing but a lone "+"). */}
-        <div className='grid grid-cols-1 gap-3 sm:grid-cols-[220px_1fr]'>
-          <Card className='p-3 sm:p-4'>
-            <div className='text-xs text-gray-500'>Сегмент</div>
-            <div className='mt-1 flex items-center gap-1.5'>
-              {segment ? (
-                <>
-                  <select
-                    value={segment.segment}
-                    disabled={setOverride.isPending}
-                    onChange={(e) => setOverride.mutate(e.target.value === '' ? null : (e.target.value as Segment))}
-                    className={cx(
-                      'cursor-pointer rounded px-1.5 py-0.5 text-xs font-medium outline-none disabled:cursor-wait disabled:opacity-60',
-                      SEGMENT_COLOR[segment.segment]
-                    )}
-                  >
-                    {SEGMENT_ORDER.map((s) => (
-                      <option key={s} value={s}>
-                        {SEGMENT_LABEL[s]}
-                      </option>
-                    ))}
-                    {segment.overridden && <option value=''>Авто (по правилам)</option>}
-                  </select>
-                  {setOverride.isPending && <span className='text-[10px] text-gray-400'>сохранение…</span>}
-                </>
-              ) : (
-                <span className='text-sm text-gray-400'>—</span>
-              )}
-            </div>
-          </Card>
-          <Card className='p-3 sm:p-4'>
-            <div className='mb-1 flex items-center gap-1.5 text-xs text-gray-500'>
-              Теги
-              {(addTag.isPending || removeTag.isPending) && <span className='text-[10px] text-gray-400'>сохранение…</span>}
-            </div>
-            <TagsEditor
+        {/* Identity/classification — one compact bar, sized to its content
+            instead of two boxy Cards that looked empty next to each other
+            (a client with no tags yet was just a lone "+" floating in a
+            half-width white box). */}
+        <div className='flex flex-wrap items-center gap-4 rounded-lg border border-gray-100 bg-gray-50/60 px-3 py-2.5'>
+          <div className='flex items-center gap-1.5'>
+            <span className='text-xs text-gray-500'>Сегмент:</span>
+            {segment ? (
+              <>
+                <select
+                  value={segment.segment}
+                  disabled={setOverride.isPending}
+                  onChange={(e) => setOverride.mutate(e.target.value === '' ? null : (e.target.value as Segment))}
+                  className={cx(
+                    'cursor-pointer rounded-full px-2.5 py-0.5 text-xs font-medium outline-none disabled:cursor-wait disabled:opacity-60',
+                    SEGMENT_COLOR[segment.segment]
+                  )}
+                >
+                  {SEGMENT_ORDER.map((s) => (
+                    <option key={s} value={s}>
+                      {SEGMENT_LABEL[s]}
+                    </option>
+                  ))}
+                  {segment.overridden && <option value=''>Авто (по правилам)</option>}
+                </select>
+                {setOverride.isPending && <span className='text-[10px] text-gray-400'>сохранение…</span>}
+              </>
+            ) : (
+              <span className='text-sm text-gray-400'>—</span>
+            )}
+          </div>
+
+          <div className='hidden h-5 w-px bg-gray-200 sm:block' aria-hidden />
+
+          <div className='flex min-w-0 flex-1 items-center gap-1.5'>
+            <span className='shrink-0 text-xs text-gray-500'>Теги:</span>
+            <TagChips
               tags={segment?.tags ?? []}
               manualTags={segment?.manual_tags ?? []}
               categories={categories}
@@ -412,8 +397,10 @@ export default function ClientDetailPage() {
               pending={addTag.isPending || removeTag.isPending}
               onAdd={(tag) => addTag.mutate(tag)}
               onRemove={(tag) => removeTag.mutate(tag)}
+              maxVisible={6}
             />
-          </Card>
+            {(addTag.isPending || removeTag.isPending) && <span className='text-[10px] text-gray-400'>сохранение…</span>}
+          </div>
         </div>
 
         {/* Read-only numeric summary — a separate row so a wrapped qualifier
@@ -666,129 +653,3 @@ export default function ClientDetailPage() {
   )
 }
 
-// Same VISIBLE_TAGS/overflow-toggle reasoning as the /clients list page's
-// TagsCell: an unbounded tag list here would grow this tile taller than the
-// metric tiles next to it in the overview grid.
-const VISIBLE_TAGS = 4
-
-// TagsEditor renders the auto-computed tags read-only, every manual tag as
-// a chip colored by its category (grouped together via sortTagsByCategory,
-// not the API's alphabetical order), capped to VISIBLE_TAGS with a "+N"
-// expand toggle, and a compact dropdown (one <optgroup> per category) to
-// add one more — same curated vocabulary and coloring as the /clients list
-// page (see there for the "Управление тегами" panel that actually manages
-// the list).
-function TagsEditor({
-  tags,
-  manualTags,
-  categories,
-  defsByCategory,
-  onAdd,
-  onRemove,
-  pending,
-}: {
-  tags: string[]
-  manualTags: string[]
-  categories: string[]
-  defsByCategory: Map<string, TagDef[]>
-  onAdd: (tag: string) => void
-  onRemove: (tag: string) => void
-  pending: boolean
-}) {
-  const [expanded, setExpanded] = useState(false)
-  const labelToCategory = new Map<string, string>()
-  for (const [category, defs] of defsByCategory) {
-    for (const d of defs) labelToCategory.set(d.label, category)
-  }
-  const hasRemaining = categories.some((category) =>
-    (defsByCategory.get(category) ?? []).some((d) => !manualTags.includes(d.label))
-  )
-  const sortedManual = sortTagsByCategory(manualTags, categories, labelToCategory)
-
-  type Chip = { kind: 'auto' | 'manual'; value: string }
-  const chips: Chip[] = [
-    ...tags.map((t): Chip => ({ kind: 'auto', value: t })),
-    ...sortedManual.map((t): Chip => ({ kind: 'manual', value: t })),
-  ]
-  const overflow = chips.length - VISIBLE_TAGS
-  const visibleChips = expanded ? chips : chips.slice(0, VISIBLE_TAGS)
-
-  return (
-    <div className='flex flex-wrap items-center gap-1'>
-      {chips.length === 0 && !hasRemaining && <span className='text-sm text-gray-400'>—</span>}
-      {visibleChips.map((chip) =>
-        chip.kind === 'auto' ? (
-          <Badge key={`auto-${chip.value}`} variant={TAG_BADGE_VARIANT[chip.value] || 'neutral'}>
-            {TAG_LABEL[chip.value] || chip.value}
-          </Badge>
-        ) : (
-          <span
-            key={`manual-${chip.value}`}
-            className={cx(
-              'inline-flex items-center gap-0.5 rounded border px-1 py-px text-[10px] font-medium',
-              categoryColorClass(labelToCategory.get(chip.value) ?? '', categories)
-            )}
-          >
-            {chip.value}
-            <button
-              type='button'
-              disabled={pending}
-              onClick={() => onRemove(chip.value)}
-              aria-label={`Убрать тег ${chip.value}`}
-              className='px-0.5 leading-none opacity-60 hover:text-rose-600 hover:opacity-100 disabled:cursor-wait'
-            >
-              ×
-            </button>
-          </span>
-        )
-      )}
-      {!expanded && overflow > 0 && (
-        <button
-          type='button'
-          onClick={() => setExpanded(true)}
-          className='text-[10px] font-medium text-gray-400 hover:text-gray-600 hover:underline'
-        >
-          +{overflow}
-        </button>
-      )}
-      {expanded && chips.length > VISIBLE_TAGS && (
-        <button
-          type='button'
-          onClick={() => setExpanded(false)}
-          className='text-[10px] text-gray-400 hover:text-gray-600 hover:underline'
-        >
-          свернуть
-        </button>
-      )}
-      {hasRemaining && (
-        <div className='relative'>
-          <select
-            value=''
-            disabled={pending}
-            onChange={(e) => {
-              if (e.target.value) onAdd(e.target.value)
-            }}
-            aria-label='Добавить тег'
-            title='Добавить тег'
-            className='h-[22px] w-[22px] cursor-pointer appearance-none rounded-full border border-gray-200 bg-gray-50 text-center text-[11px] leading-[20px] font-medium text-gray-400 outline-none hover:bg-gray-100 disabled:cursor-wait'
-          >
-            <option value=''>+</option>
-            {categories.map((category) => {
-              const remaining = (defsByCategory.get(category) ?? []).filter((d) => !manualTags.includes(d.label))
-              if (remaining.length === 0) return null
-              return (
-                <optgroup key={category} label={category}>
-                  {remaining.map((d) => (
-                    <option key={d.label} value={d.label}>
-                      {d.label}
-                    </option>
-                  ))}
-                </optgroup>
-              )
-            })}
-          </select>
-        </div>
-      )}
-    </div>
-  )
-}
