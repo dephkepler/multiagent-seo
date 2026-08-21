@@ -5,6 +5,7 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tansta
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
 import { Section } from './section'
+import { PeoplePanel } from './people-panel'
 import { SettlementPanel, type SettlementData } from './settlement-panel'
 import { SectionHeader } from '@/components/ui/section-header'
 import { Select } from '@/components/ui/select'
@@ -272,6 +273,9 @@ export default function FinancePage() {
   const current = tileSource ?? EMPTY_MONTH
   const draftItems = drafts.data?.items ?? []
 
+  // the same money the P&L splits by purpose, summed by who received it
+  const peopleTotal = categoryItems.filter((c) => c.is_people_pay).reduce((sum, c) => sum + (current.expense_by_category[c.code] ?? 0), 0)
+
   function startEdit(expense: Expense) {
     setEditing(expense)
     formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
@@ -421,6 +425,26 @@ export default function FinancePage() {
             onPickMonth={(month) => setDrillMonth((prev) => (prev === month ? null : month))}
           />
         )}
+      </Section>
+
+      <Section
+        title='Расходы на людей'
+        summary={
+          <>
+            <span className='text-xs text-gray-500'>{drillMonth ? monthLabel(shownMonth) : 'за период'}</span>
+            <span className='font-semibold text-gray-800'>{money(peopleTotal)}</span>
+            <span className='text-xs text-gray-500'>
+              {percent(peopleTotal / (current.expense_total || 1), current.expense_total === 0)} расходов
+            </span>
+          </>
+        }
+        defaultOpen={false}
+      >
+        <PeoplePanel
+          categories={categoryItems}
+          month={current}
+          monthLabel={drillMonth ? monthLabel(shownMonth) : periodLabel(period, available)}
+        />
       </Section>
 
       <Section

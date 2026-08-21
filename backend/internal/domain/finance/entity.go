@@ -87,11 +87,15 @@ const (
 const CategoryAdvocates = "advocates"
 
 type Category struct {
-	Code      string
-	Label     string
-	Kind      Kind
-	IsActive  bool
-	SortOrder int
+	Code  string
+	Label string
+	Kind  Kind
+	// IsPeoplePay marks money paid to a person for work, cutting across Kind:
+	// copywriting is marketing spend AND a person's fee. Without it the P&L can
+	// say what the money was for but not what the team costs.
+	IsPeoplePay bool
+	IsActive    bool
+	SortOrder   int
 }
 
 type Expense struct {

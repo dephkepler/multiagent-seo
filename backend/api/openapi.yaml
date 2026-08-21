@@ -2700,7 +2700,7 @@ components:
 
     ExpenseCategory:
       type: object
-      required: [ code, label, kind, is_active, sort_order ]
+      required: [ code, label, kind, is_people_pay, is_active, sort_order ]
       properties:
         code:
           type: string
@@ -2708,6 +2708,9 @@ components:
           type: string
         kind:
           $ref: "#/components/schemas/ExpenseKind"
+        is_people_pay:
+          type: boolean
+          description: Money paid to a person for work. Cuts across kind — copywriting is marketing spend and a person's fee at once
         is_active:
           type: boolean
         sort_order:
@@ -2726,6 +2729,8 @@ components:
       type: object
       required: [ code, label, kind ]
       properties:
+        is_people_pay:
+          type: boolean
         code:
           type: string
           maxLength: 40
@@ -2742,6 +2747,8 @@ components:
       type: object
       required: [ label, kind, is_active ]
       properties:
+        is_people_pay:
+          type: boolean
         label:
           type: string
           maxLength: 60

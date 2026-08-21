@@ -326,11 +326,12 @@ func (h *FinanceHandler) ListExpenseCategories(w http.ResponseWriter, r *http.Re
 	items := make([]oapigen.ExpenseCategory, len(list))
 	for i, c := range list {
 		items[i] = oapigen.ExpenseCategory{
-			Code:      c.Code,
-			Label:     c.Label,
-			Kind:      oapigen.ExpenseKind(c.Kind),
-			IsActive:  c.IsActive,
-			SortOrder: c.SortOrder,
+			Code:        c.Code,
+			Label:       c.Label,
+			Kind:        oapigen.ExpenseKind(c.Kind),
+			IsPeoplePay: c.IsPeoplePay,
+			IsActive:    c.IsActive,
+			SortOrder:   c.SortOrder,
 		}
 	}
 	response.WriteJSON(r.Context(), w, http.StatusOK, oapigen.ExpenseCategoryList{Items: items})
@@ -352,6 +353,9 @@ func (h *FinanceHandler) CreateExpenseCategory(w http.ResponseWriter, r *http.Re
 		Label:    body.Label,
 		Kind:     domain.Kind(body.Kind),
 		IsActive: true,
+	}
+	if body.IsPeoplePay != nil {
+		c.IsPeoplePay = *body.IsPeoplePay
 	}
 	if body.SortOrder != nil {
 		c.SortOrder = *body.SortOrder
@@ -379,6 +383,9 @@ func (h *FinanceHandler) UpdateExpenseCategory(w http.ResponseWriter, r *http.Re
 		Label:    body.Label,
 		Kind:     domain.Kind(body.Kind),
 		IsActive: body.IsActive,
+	}
+	if body.IsPeoplePay != nil {
+		c.IsPeoplePay = *body.IsPeoplePay
 	}
 	if body.SortOrder != nil {
 		c.SortOrder = *body.SortOrder

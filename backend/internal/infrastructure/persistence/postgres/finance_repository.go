@@ -30,7 +30,7 @@ func NewFinanceRepository(db *pgxpool.Pool) *FinanceRepository {
 // --- categories ---
 
 func (r *FinanceRepository) ListCategories(ctx context.Context, activeOnly bool) ([]finance.Category, error) {
-	const q = `SELECT code, label, kind, is_active, sort_order FROM expense_categories
+	const q = `SELECT code, label, kind, is_people_pay, is_active, sort_order FROM expense_categories
 		WHERE (NOT @active_only::boolean OR is_active)
 		ORDER BY sort_order, code`
 
@@ -43,7 +43,7 @@ func (r *FinanceRepository) ListCategories(ctx context.Context, activeOnly bool)
 	var out []finance.Category
 	for rows.Next() {
 		var c finance.Category
-		if err := rows.Scan(&c.Code, &c.Label, &c.Kind, &c.IsActive, &c.SortOrder); err != nil {
+		if err := rows.Scan(&c.Code, &c.Label, &c.Kind, &c.IsPeoplePay, &c.IsActive, &c.SortOrder); err != nil {
 			return nil, fmt.Errorf("list categories: scan: %w", err)
 		}
 		out = append(out, c)
@@ -55,15 +55,16 @@ func (r *FinanceRepository) ListCategories(ctx context.Context, activeOnly bool)
 }
 
 func (r *FinanceRepository) CreateCategory(ctx context.Context, c finance.Category) error {
-	const q = `INSERT INTO expense_categories (code, label, kind, is_active, sort_order)
-		VALUES (@code, @label, @kind, @is_active, @sort_order)`
+	const q = `INSERT INTO expense_categories (code, label, kind, is_people_pay, is_active, sort_order)
+		VALUES (@code, @label, @kind, @is_people_pay, @is_active, @sort_order)`
 
 	_, err := r.db.Exec(ctx, q, pgx.NamedArgs{
-		"code":       c.Code,
-		"label":      c.Label,
-		"kind":       string(c.Kind),
-		"is_active":  c.IsActive,
-		"sort_order": c.SortOrder,
+		"code":          c.Code,
+		"label":         c.Label,
+		"kind":          string(c.Kind),
+		"is_people_pay": c.IsPeoplePay,
+		"is_active":     c.IsActive,
+		"sort_order":    c.SortOrder,
 	})
 	if err != nil {
 		var pgErr *pgconn.PgError
@@ -77,15 +78,16 @@ func (r *FinanceRepository) CreateCategory(ctx context.Context, c finance.Catego
 
 func (r *FinanceRepository) UpdateCategory(ctx context.Context, c finance.Category) error {
 	const q = `UPDATE expense_categories
-		SET label = @label, kind = @kind, is_active = @is_active, sort_order = @sort_order
+		SET label = @label, kind = @kind, is_people_pay = @is_people_pay, is_active = @is_active, sort_order = @sort_order
 		WHERE code = @code`
 
 	tag, err := r.db.Exec(ctx, q, pgx.NamedArgs{
-		"code":       c.Code,
-		"label":      c.Label,
-		"kind":       string(c.Kind),
-		"is_active":  c.IsActive,
-		"sort_order": c.SortOrder,
+		"code":          c.Code,
+		"label":         c.Label,
+		"kind":          string(c.Kind),
+		"is_people_pay": c.IsPeoplePay,
+		"is_active":     c.IsActive,
+		"sort_order":    c.SortOrder,
 	})
 	if err != nil {
 		return fmt.Errorf("update category %q: %w", c.Code, err)

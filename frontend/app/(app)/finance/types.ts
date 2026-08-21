@@ -29,6 +29,8 @@ export interface Category {
   code: string
   label: string
   kind: ExpenseKind
+  // money paid to a person for work — cuts across kind, see the people panel
+  is_people_pay: boolean
   is_active: boolean
   sort_order: number
 }
