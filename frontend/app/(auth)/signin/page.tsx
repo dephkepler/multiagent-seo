@@ -5,7 +5,6 @@ import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
 import { setSession } from '@/lib/auth'
-import { useHasSession } from '@/lib/use-role'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input, Label } from '@/components/ui/input'
@@ -14,13 +13,6 @@ export default function SignInPage() {
   const router = useRouter()
   const [email, setEmail] = useState('verify@local.test')
   const [password, setPassword] = useState('')
-  // Defaults to on when this browser already holds a session: the second login
-  // is almost always the other role being opened side by side, and without this
-  // it overwrites the first one and the other tabs get bounced. Still a
-  // checkbox, because the default is a guess.
-  const alreadySignedIn = useHasSession()
-  const [tabOnlyChoice, setTabOnlyChoice] = useState<boolean | null>(null)
-  const tabOnly = tabOnlyChoice ?? alreadySignedIn
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -33,7 +25,7 @@ export default function SignInPage() {
         method: 'POST',
         body: JSON.stringify({ email, password }),
       })
-      setSession(res.token, res.role, tabOnly)
+      setSession(res.token, res.role)
       // An advocate has no business on /generate — that page, and most of the
       // menu, is not theirs.
       router.push(res.role === 'advocate' ? '/my' : '/generate')
@@ -78,19 +70,6 @@ export default function SignInPage() {
               required
             />
           </div>
-          <label className='flex items-start gap-2 text-xs text-gray-600'>
-            <input
-              type='checkbox'
-              checked={tabOnly}
-              onChange={(e) => setTabOnlyChoice(e.target.checked)}
-              className='mt-0.5 size-4 rounded border-gray-300 accent-emerald-500'
-            />
-            <span>
-              Только в этой вкладке — другие вкладки останутся под своим аккаунтом. Так держат админа и адвоката
-              открытыми одновременно; закроешь вкладку — вход придётся повторить.
-              {alreadySignedIn && ' В этом браузере уже есть вход, поэтому галочка стоит по умолчанию.'}
-            </span>
-          </label>
           <Button type='submit' disabled={busy} className='h-11 w-full text-base'>
             {busy ? 'Signing in…' : 'Sign in'}
           </Button>

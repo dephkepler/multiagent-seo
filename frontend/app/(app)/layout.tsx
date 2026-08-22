@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
-import { getRole, getToken } from '@/lib/auth'
+import { getRole, getToken, pinSession } from '@/lib/auth'
 import { Nav } from '@/components/layout/nav'
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
@@ -11,6 +11,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [ready, setReady] = useState(false)
 
   useEffect(() => {
+    // Fix this tab to the account it opened with, before anything reads the
+    // role: otherwise signing in as somebody else in another tab would move
+    // this one too, which is exactly the "it keeps throwing me out" complaint.
+    pinSession()
+
     if (!getToken()) {
       router.replace('/signin')
       return
