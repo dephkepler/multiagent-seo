@@ -76,9 +76,33 @@ services:
       args:
         NEXT_PUBLIC_TG_LINK: ${NEXT_PUBLIC_TG_LINK:-}
     ports:
+      # Loopback only, for checking the container from the host. Never the path
+      # Telegram uses: this serves plain HTTP, and a Mini App will not open on
+      # an http origin.
       - "127.0.0.1:${CLIENTAPP_HOST_PORT:-3002}:3002"
+    networks:
+      # default: reaches app:8080 for the /api proxy.
+      default: {}
+      # ingress: the network of whatever Caddy owns port 80 and 443 on this
+      # host, so it can reach this container by name. Joining its network
+      # instead of publishing a host port is what keeps the change on that side
+      # down to one reverse_proxy line — and a host port would not work anyway,
+      # since the publish above is loopback-only and a container's localhost is
+      # its own.
+      ingress:
+        aliases:
+          - abalis-clientapp
     depends_on:
       - app
+
+networks:
+  default: {}
+  # Created by the neighbouring project, not by us — which is why the clientapp
+  # service sits behind a profile: `up` without it never touches this, and a
+  # host that has no such front door is unaffected.
+  ingress:
+    external: true
+    name: ${INGRESS_NETWORK:-tracker-bot_default}
 
 volumes:
   postgres_data:
