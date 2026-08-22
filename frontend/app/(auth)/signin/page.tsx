@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
 import { setSession } from '@/lib/auth'
+import { useHasSession } from '@/lib/use-role'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input, Label } from '@/components/ui/input'
@@ -13,7 +14,13 @@ export default function SignInPage() {
   const router = useRouter()
   const [email, setEmail] = useState('verify@local.test')
   const [password, setPassword] = useState('')
-  const [tabOnly, setTabOnly] = useState(false)
+  // Defaults to on when this browser already holds a session: the second login
+  // is almost always the other role being opened side by side, and without this
+  // it overwrites the first one and the other tabs get bounced. Still a
+  // checkbox, because the default is a guess.
+  const alreadySignedIn = useHasSession()
+  const [tabOnlyChoice, setTabOnlyChoice] = useState<boolean | null>(null)
+  const tabOnly = tabOnlyChoice ?? alreadySignedIn
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -75,12 +82,13 @@ export default function SignInPage() {
             <input
               type='checkbox'
               checked={tabOnly}
-              onChange={(e) => setTabOnly(e.target.checked)}
+              onChange={(e) => setTabOnlyChoice(e.target.checked)}
               className='mt-0.5 size-4 rounded border-gray-300 accent-emerald-500'
             />
             <span>
-              Только в этой вкладке — другие вкладки останутся под своим аккаунтом. Так можно держать админа и адвоката
+              Только в этой вкладке — другие вкладки останутся под своим аккаунтом. Так держат админа и адвоката
               открытыми одновременно; закроешь вкладку — вход придётся повторить.
+              {alreadySignedIn && ' В этом браузере уже есть вход, поэтому галочка стоит по умолчанию.'}
             </span>
           </label>
           <Button type='submit' disabled={busy} className='h-11 w-full text-base'>
