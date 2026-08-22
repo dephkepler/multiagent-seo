@@ -23,8 +23,8 @@ func (s *Service) Create(ctx context.Context, in vault.CreateEntry) (vault.Entry
 	return s.repo.Create(ctx, in)
 }
 
-func (s *Service) List(ctx context.Context) ([]vault.Entry, error) {
-	return s.repo.List(ctx)
+func (s *Service) List(ctx context.Context, groupID uuid.UUID) ([]vault.Entry, error) {
+	return s.repo.List(ctx, groupID)
 }
 
 func (s *Service) Update(ctx context.Context, id uuid.UUID, in vault.UpdateEntry) (vault.Entry, error) {
@@ -33,4 +33,16 @@ func (s *Service) Update(ctx context.Context, id uuid.UUID, in vault.UpdateEntry
 
 func (s *Service) Delete(ctx context.Context, id uuid.UUID) error {
 	return s.repo.Delete(ctx, id)
+}
+
+func (s *Service) CreateGroup(ctx context.Context, name string) (vault.Group, error) {
+	return s.repo.CreateGroup(ctx, name)
+}
+
+func (s *Service) ListGroups(ctx context.Context) ([]vault.GroupWithCount, error) {
+	return s.repo.ListGroups(ctx)
+}
+
+func (s *Service) DeleteGroup(ctx context.Context, id uuid.UUID) error {
+	return s.repo.DeleteGroup(ctx, id)
 }

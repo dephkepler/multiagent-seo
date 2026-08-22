@@ -875,16 +875,89 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+  /vault-groups:
+    get:
+      operationId: listVaultGroups
+      security:
+        - bearerAuth: [ admin ]
+      tags: [ Vault ]
+      summary: List password vault groups
+      responses:
+        "200":
+          description: All groups
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/VaultGroup"
+    post:
+      operationId: createVaultGroup
+      security:
+        - bearerAuth: [ admin ]
+      tags: [ Vault ]
+      summary: Add a password vault group
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateVaultGroupRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VaultGroup"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /vault-groups/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    delete:
+      operationId: deleteVaultGroup
+      security:
+        - bearerAuth: [ admin ]
+      tags: [ Vault ]
+      summary: Delete a password vault group
+      responses:
+        "204":
+          description: Deleted
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
   /vault-entries:
     get:
       operationId: listVaultEntries
       security:
         - bearerAuth: [ admin ]
       tags: [ Vault ]
-      summary: List saved password/credential entries
+      summary: List saved password/credential entries in a group
+      parameters:
+        - name: groupId
+          in: query
+          # Not "required: true" on purpose: oapi-codegen's generated chi
+          # wrapper binds/validates query params BEFORE the auth middleware
+          # chain runs, so a required-but-missing param would 400 an
+          # unauthenticated request instead of 401ing it like every other
+          # route (see TestNoTokenIsUnauthorizedEverywhere). Enforced as a
+          # plain in-handler check instead, which runs after auth.
+          required: false
+          schema:
+            type: string
+            format: uuid
       responses:
         "200":
-          description: All entries
+          description: All entries in the group
           content:
             application/json:
               schema:
@@ -2973,11 +3046,38 @@ components:
         text:
           type: string
 
-    VaultEntry:
+    VaultGroup:
       type: object
-      required: [ id, title, url, username, password, notes, createdBy, createdAt, updatedAt ]
+      required: [ id, name, entryCount, createdAt ]
       properties:
         id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        entryCount:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+
+    CreateVaultGroupRequest:
+      type: object
+      required: [ name ]
+      properties:
+        name:
+          type: string
+          x-oapi-codegen-extra-tags:
+            validate: "required,min=1,max=200"
+
+    VaultEntry:
+      type: object
+      required: [ id, groupId, title, url, username, password, notes, createdBy, createdAt, updatedAt ]
+      properties:
+        id:
+          type: string
+          format: uuid
+        groupId:
           type: string
           format: uuid
         title:
@@ -3001,8 +3101,11 @@ components:
 
     CreateVaultEntryRequest:
       type: object
-      required: [ title ]
+      required: [ groupId, title ]
       properties:
+        groupId:
+          type: string
+          format: uuid
         title:
           type: string
           x-oapi-codegen-extra-tags:

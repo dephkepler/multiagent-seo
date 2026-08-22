@@ -17,6 +17,7 @@ import (
 // credentials for it.
 type Entry struct {
 	ID        uuid.UUID
+	GroupID   uuid.UUID
 	Title     string
 	URL       string
 	Username  string
@@ -25,4 +26,19 @@ type Entry struct {
 	CreatedBy string
 	CreatedAt time.Time
 	UpdatedAt time.Time
+}
+
+// Group is a named bucket of entries — e.g. "Соцсети" holding all
+// social-media logins, instead of everything in one flat list.
+type Group struct {
+	ID        uuid.UUID
+	Name      string
+	CreatedAt time.Time
+}
+
+// GroupWithCount is what the groups list screen needs — a group plus how
+// many entries it holds, computed by ListGroups (not stored).
+type GroupWithCount struct {
+	Group
+	EntryCount int
 }

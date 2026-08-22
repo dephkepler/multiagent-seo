@@ -127,6 +127,7 @@ var adminOnlyRoutes = []struct {
 	{http.MethodGet, "/finance/expenses", nil},
 	{http.MethodGet, "/finance/settlement?from=2026-01-01&to=2026-01-31", nil},
 	{http.MethodGet, "/vault-entries", nil},
+	{http.MethodGet, "/vault-groups", nil},
 	{http.MethodGet, "/clients", nil},
 	{http.MethodGet, "/users", nil},
 	{http.MethodGet, "/api-tokens", nil},
