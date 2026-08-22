@@ -1,6 +1,7 @@
 package root
 
 import (
+	"fmt"
 	"log/slog"
 	"net/url"
 	"time"
@@ -28,17 +29,19 @@ func buildClientPortal(
 	log *slog.Logger,
 	pool *pgxpool.Pool,
 	leads *appleads.Service,
-) *appclientportal.Service {
+) (*appclientportal.Service, error) {
 	if leads == nil {
 		log.Warn("client portal disabled: lead pipeline unavailable")
-		return nil
+		return nil, nil
 	}
 
+	// Fatal, unlike the case above: an unreadable timezone is a typo in the
+	// config or a runtime missing its zone database, and neither is a mode
+	// anyone chose to run in. It was a warning once, and the result was every
+	// booking request answering 503 while the only sign was one line at startup.
 	location, err := time.LoadLocation(cfg.Schedule.Timezone)
 	if err != nil {
-		log.Warn("client portal disabled: unknown schedule timezone",
-			"timezone", cfg.Schedule.Timezone, "err", err)
-		return nil
+		return nil, fmt.Errorf("schedule timezone %q: %w", cfg.Schedule.Timezone, err)
 	}
 
 	repo := postgres.NewConsultationRepository(pool, cfg.Clients.EncryptionKey)
@@ -56,7 +59,7 @@ func buildClientPortal(
 		Clients:       repo,
 		Leads:         leads,
 		Log:           log,
-	})
+	}), nil
 }
 
 // isLocalURL reports whether u points at the developer's own machine.

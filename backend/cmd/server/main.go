@@ -4,6 +4,12 @@ import (
 	"context"
 	"os/signal"
 	"syscall"
+	// Embeds the timezone database in the binary. The runtime image is bare
+	// alpine with no tzdata, so time.LoadLocation("Europe/Kyiv") failed there —
+	// which silently disabled the client portal and answered 503 to every
+	// booking request while the logs showed one warning at startup. Embedding it
+	// costs ~450 KB and cannot be lost by changing a base image.
+	_ "time/tzdata"
 
 	"github.com/rs/zerolog/log"
 
